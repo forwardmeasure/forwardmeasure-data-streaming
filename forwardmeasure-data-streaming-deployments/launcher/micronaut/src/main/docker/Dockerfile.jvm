@@ -1,0 +1,30 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Mirrors fowf's own real openworkflow-deployments/execution-management/micronaut Dockerfile.jvm
+# exactly - maven-dependency-plugin's copy-dependencies + maven-jar-plugin's manifest Class-Path,
+# not a hand-written -cp flag, same as this repo's own -executor-pekko/-executor-spark images.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG APPLICATION_JAR
+ARG DEPENDENCY_DIR
+ARG APP_UID=10001
+ARG APP_GID=10001
+COPY --chown=${APP_UID}:${APP_GID} ${DEPENDENCY_DIR} /deployments/dependency/
+COPY --chown=${APP_UID}:${APP_GID} ${APPLICATION_JAR} /deployments/application.jar
+USER ${APP_UID}:${APP_GID}
+WORKDIR /deployments
+ENTRYPOINT ["java", "-jar", "/deployments/application.jar"]

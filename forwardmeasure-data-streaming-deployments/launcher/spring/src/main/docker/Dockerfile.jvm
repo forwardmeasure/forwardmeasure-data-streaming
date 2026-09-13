@@ -1,0 +1,17 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE} AS builder
+ARG APPLICATION_JAR
+WORKDIR /builder
+COPY ${APPLICATION_JAR} application.jar
+RUN java -Djarmode=tools -jar application.jar extract --layers --destination extracted
+
+FROM ${BASE_IMAGE}
+ARG APP_UID=10001
+ARG APP_GID=10001
+WORKDIR /application
+COPY --from=builder --chown=${APP_UID}:${APP_GID} /builder/extracted/dependencies/ ./
+COPY --from=builder --chown=${APP_UID}:${APP_GID} /builder/extracted/spring-boot-loader/ ./
+COPY --from=builder --chown=${APP_UID}:${APP_GID} /builder/extracted/snapshot-dependencies/ ./
+COPY --from=builder --chown=${APP_UID}:${APP_GID} /builder/extracted/application/ ./
+USER ${APP_UID}:${APP_GID}
+ENTRYPOINT ["java", "-jar", "application.jar"]

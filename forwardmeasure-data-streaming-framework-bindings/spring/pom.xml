@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-framework-bindings</artifactId><version>${revision}</version><relativePath>../pom.xml</relativePath></parent>
+  <artifactId>forwardmeasure-data-streaming-launcher-spring-bindings</artifactId>
+  <name>ForwardMeasure Data Streaming Launcher Spring Bindings</name>
+  <description>Spring wiring for launcher-jaxrs/launcher-application - @Configuration/@Bean
+    definitions for whatever launcher-application's constructor needs, application.yml. Carries no
+    REST resource classes of its own (shared, in launcher-jaxrs, via Spring's JAX-RS bridge) and
+    never boots its own bootable app - see forwardmeasure-data-streaming-deployments/launcher/spring
+    for the real deployable assembly.</description>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.forwardmeasure.platform</groupId>
+        <artifactId>forwardmeasure-platform-spring-bom</artifactId>
+        <version>${forwardmeasure.platform.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+  <dependencies>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-launcher-jaxrs</artifactId></dependency>
+    <dependency><groupId>org.springframework</groupId><artifactId>spring-context</artifactId></dependency>
+    <dependency>
+      <!-- ResourceConfigCustomizer/Jersey registration - confirmed necessary the same way
+           forwardmeasure-entity-intelligence's own ingestion-service-spring-binding needed it. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jersey</artifactId>
+      <exclusions>
+        <exclusion>
+          <groupId>org.glassfish.hk2.external</groupId>
+          <artifactId>aopalliance-repackaged</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+  </dependencies>
+</project>

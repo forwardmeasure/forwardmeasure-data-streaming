@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-framework-bindings</artifactId><version>${revision}</version><relativePath>../pom.xml</relativePath></parent>
+  <artifactId>forwardmeasure-data-streaming-launcher-quarkus-bindings</artifactId>
+  <name>ForwardMeasure Data Streaming Launcher Quarkus Bindings</name>
+  <description>Quarkus CDI wiring for launcher-jaxrs/launcher-application - producers for whatever
+    launcher-application's constructor needs, application.yml. Carries no REST resource classes of
+    its own (those are shared, in launcher-jaxrs) and never boots its own bootable app - the actual
+    deployable assembly happens one level down, in forwardmeasure-data-streaming-deployments/launcher/
+    quarkus, matching fowf's and fei's own real *-binding vs *-deployments split.</description>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.forwardmeasure.platform</groupId>
+        <artifactId>forwardmeasure-platform-quarkus-bom</artifactId>
+        <version>${forwardmeasure.platform.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+  <dependencies>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-launcher-jaxrs</artifactId></dependency>
+    <dependency><groupId>io.quarkus</groupId><artifactId>quarkus-arc</artifactId></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+  </dependencies>
+</project>

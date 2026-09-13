@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-parent</artifactId><version>${revision}</version></parent>
+  <artifactId>forwardmeasure-data-streaming-executor-spark</artifactId>
+  <name>ForwardMeasure Data Streaming Spark Executor</name>
+  <description>Distributed/correlation executor - generalizes what
+    forwardmeasure-entity-intelligence's CorrelatedSourceIngestionWorker already proves in production
+    (real SparkSession, real JavaRDD/Dataset&lt;Row&gt; operations), driven by this library's
+    generated models/mappers instead of hand-wired Spark code specific to one source. Bulk, partition-
+    column-driven JDBC extraction lives here, not in the JDBC connector - see D4/D5 in the design
+    plan.</description>
+  <properties>
+    <!-- Has real public classes to document (unlike this repo's still-scaffolded modules) - see
+         the parent pom's default. -->
+    <maven.javadoc.skip>false</maven.javadoc.skip>
+    <container-image.name>data-streaming-executor-spark</container-image.name>
+  </properties>
+  <dependencies>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-core</artifactId></dependency>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-mappers</artifactId></dependency>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-transforms</artifactId></dependency>
+    <dependency><groupId>org.apache.spark</groupId><artifactId>spark-core_2.13</artifactId></dependency>
+    <dependency><groupId>org.apache.spark</groupId><artifactId>spark-sql_2.13</artifactId></dependency>
+    <dependency>
+      <!-- SparkIngestionRunner's own NDJSON serialization of merged rows before saveAsTextFile. -->
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+  </dependencies>
+
+  <build>
+    <!-- This module is a plain Java main() entrypoint (SparkIngestionRunner, constructing its own
+         local/embedded SparkSession - not a spark-submit-orchestrated deployment), not a
+         Quarkus/Spring/Micronaut app. Mirrors fei's own real ingestion-worker-spark pom exactly:
+         maven-dependency-plugin copies runtime deps to target/dependency/, maven-jar-plugin points
+         the jar's own manifest Class-Path at them. -->
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>copy-dependencies</id>
+            <phase>prepare-package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/dependency</outputDirectory>
+              <includeScope>runtime</includeScope>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifest>
+              <mainClass>com.forwardmeasure.datastreaming.executor.spark.SparkIngestionRunner</mainClass>
+              <addClasspath>true</addClasspath>
+              <classpathPrefix>dependency/</classpathPrefix>
+            </manifest>
+          </archive>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <id>container-image</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>io.fabric8</groupId>
+            <artifactId>docker-maven-plugin</artifactId>
+            <configuration>
+              <images>
+                <image>
+                  <name>${container-image.registry}/${container-image.group}/${container-image.name}:${container-image.tag}</name>
+                  <build>
+                    <contextDir>${project.basedir}</contextDir>
+                    <dockerFile>src/main/docker/Dockerfile.jvm</dockerFile>
+                    <args>
+                      <APPLICATION_JAR>target/${project.build.finalName}.jar</APPLICATION_JAR>
+                      <DEPENDENCY_DIR>target/dependency</DEPENDENCY_DIR>
+                      <BASE_IMAGE>${container-image.base-jre}</BASE_IMAGE>
+                    </args>
+                  </build>
+                </image>
+              </images>
+            </configuration>
+            <executions>
+              <execution>
+                <id>build-container-image</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>build</goal>
+                </goals>
+              </execution>
+              <execution>
+                <id>push-container-image</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>push</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

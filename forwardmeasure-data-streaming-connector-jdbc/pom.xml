@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-parent</artifactId><version>${revision}</version></parent>
+  <artifactId>forwardmeasure-data-streaming-connector-jdbc</artifactId>
+  <name>ForwardMeasure Data Streaming JDBC Connector</name>
+  <description>JPA/JPQL via forwardmeasure-jpa, behind a Repository, for smaller/bounded/incremental
+    polling or lookup sources run under the Pekko executor - not Camel (zero camel-jdbc/camel-sql
+    precedent anywhere in this org; JPA/JPQL is the universal one, see D5/manifesto Principle 8/9).
+    Not for bulk, partitioned large-table extraction - that stays on Spark's own JDBC reader in the
+    Spark executor, where partition-column-driven parallelism is a genuine strength this connector
+    doesn't try to replace. Per manifesto Principle 7, this module exposes Repository types only -
+    any orchestration/business logic belongs in a downstream application-service layer that depends
+    on this module, never the other way around. Where a JPA @Entity needs converting to/from a
+    generated OpenAPI model class, MapStruct is the right tool here specifically (D3, corrected) - a
+    fixed-type, compile-time boundary, unlike the runtime-interpreted source/target payload mapping
+    the rest of this library builds on NamedTransformRegistry for instead.</description>
+  <properties>
+    <!-- Has real public classes to document (unlike this repo's still-scaffolded modules) - see
+         the parent pom's default. -->
+    <maven.javadoc.skip>false</maven.javadoc.skip>
+  </properties>
+  <dependencies>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
+    <dependency><groupId>com.forwardmeasure.jpa</groupId><artifactId>forwardmeasure-jpa-core</artifactId></dependency>
+    <dependency><groupId>com.forwardmeasure.jpa</groupId><artifactId>forwardmeasure-jpa-tenancy</artifactId></dependency>
+    <dependency><groupId>org.apache.pekko</groupId><artifactId>pekko-stream_${scala.binary.version}</artifactId></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+    <!-- Test-only: JpaPagingSourceTest proves real paging against a real Postgres schema, the same
+         way forwardmeasure-jpa-locking's own real integration test does (WithPostgreSqlContainer +
+         TenantSchemaMigrator + a RESOURCE_LOCAL persistence-unit) - not mocked, per this org's own
+         testing convention for JPA repository code. -->
+    <dependency><groupId>com.forwardmeasure.jpa</groupId><artifactId>forwardmeasure-jpa-liquibase</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-junit-jupiter</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-postgresql</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId><scope>test</scope></dependency>
+    <!-- The actual JPA provider - without it, Persistence.createEntityManagerFactory(...) fails
+         with "No Persistence provider for EntityManager named ..." regardless of a correct
+         persistence.xml. Missing here since this module was scaffolded; forwardmeasure-jpa-core
+         only supplies the jakarta.persistence API, not a provider implementation. Mirrors
+         forwardmeasure-jpa-locking's own real integration test dependency exactly. -->
+    <dependency><groupId>org.hibernate.orm</groupId><artifactId>hibernate-core</artifactId><scope>test</scope></dependency>
+    <!-- Not managed by forwardmeasure-platform's own BOM (unlike hibernate-core above) - only
+         forwardmeasure-jpa's own root pom manages it, which this module doesn't inherit from;
+         version pinned to match that same managed value exactly. -->
+    <dependency><groupId>net.bytebuddy</groupId><artifactId>byte-buddy</artifactId><version>1.18.11</version><scope>test</scope></dependency>
+  </dependencies>
+</project>

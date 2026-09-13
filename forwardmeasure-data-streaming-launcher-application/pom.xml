@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-parent</artifactId><version>${revision}</version></parent>
+  <artifactId>forwardmeasure-data-streaming-launcher-application</artifactId>
+  <name>ForwardMeasure Data Streaming Launcher Application</name>
+  <description>Framework-agnostic orchestration for the async REST launcher, in both its real forms
+    (2026-09-13): DirectIngestionLauncher runs an IngestionSpec as one real K8s Job, bypassing fowf's
+    workflow engine entirely, by delegating to openworkflow-kubernetes-job-lifecycle - the same
+    library fowf's own AsyncApiKubernetesJobOperationExecutor uses. WorkflowIngestionLauncher instead
+    starts a real fowf workflow execution through fowf's own generated ExecutionsApi client SDK
+    (POST /v1/executions) - Kubernetes specifics live entirely in that workflow's own definition,
+    never touched here. Direct mode's own scope boundary (pekko engine only, not yet spark - see
+    DirectIngestionLauncher's own javadoc) is real and documented, not silently gapped.
+
+    Deliberately depends on nothing framework-specific (no JAX-RS, no CDI) - matching
+    DossierApplicationService's own shape (manifesto Principle 7): this is the layer a REST resource
+    calls into, not the layer that knows it's being called over HTTP at all. Neither launcher builds
+    or configures its own KubernetesClient/ExecutionsApi/ApiClient - how a caller authenticates
+    (Kubernetes client config, fowf bearer-token acquisition) is an environment-specific decision
+    that belongs to whichever framework binding constructs these classes, not to this
+    framework-agnostic module.</description>
+  <properties>
+    <!-- Has real public classes to document now (unlike this repo's still-scaffolded modules) -
+         see the parent pom's own default. -->
+    <maven.javadoc.skip>false</maven.javadoc.skip>
+  </properties>
+  <dependencies>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
+    <dependency>
+      <!-- Direct-mode: real K8s Job launch/observe/cancel, shared with fowf's own
+           AsyncApiKubernetesJobOperationExecutor - see that repo's own module of the same name. -->
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-kubernetes-job-lifecycle</artifactId>
+    </dependency>
+    <dependency>
+      <!-- Workflow-mode: fowf's own generated Apache-HttpClient SDK for /v1/executions - a real
+           REST call to an already-running fowf execution-management service, not a hand-rolled
+           HTTP client. -->
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-execution-client-apachehttp</artifactId>
+    </dependency>
+    <dependency>
+      <!-- Execution/ExecutionStart/ExecutionControl/ExecutionState - the request/response models
+           this module's own code references directly, not just transitively through the client. -->
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-execution-models</artifactId>
+    </dependency>
+    <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+    <dependency>
+      <!-- Real, no-mocks proof of direct mode against an actual single-node K3s cluster. -->
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-kubernetes</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Test-only: with no SLF4J provider on the classpath, every logger call in this module's
+           own tests (and fabric8/Pekko's own internal logging) is silently a no-op - real output is
+           needed to see what a long-running real-image K3s test is actually doing while it runs,
+           same reasoning as -executor-pekko's own pom. -->
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-simple</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

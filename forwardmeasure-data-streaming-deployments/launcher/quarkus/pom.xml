@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.forwardmeasure.datastreaming</groupId>
+    <artifactId>forwardmeasure-data-streaming-deployments</artifactId>
+    <version>${revision}</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+  <artifactId>forwardmeasure-data-streaming-launcher-quarkus-service</artifactId>
+  <name>ForwardMeasure Data Streaming :: Deployments :: Launcher :: Quarkus</name>
+  <description>The actual bootable, containerizable Quarkus deployable for the ingestion launcher -
+    assembles forwardmeasure-data-streaming-launcher-quarkus (CDI wiring) with
+    forwardmeasure-data-streaming-launcher-jaxrs (the shared REST resources). Mirrors
+    forwardmeasure-entity-intelligence-deployments' real leaf-deployment shape exactly.</description>
+  <properties>
+    <container-image.name>data-streaming-launcher-quarkus</container-image.name>
+  </properties>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.forwardmeasure.platform</groupId>
+        <artifactId>forwardmeasure-platform-quarkus-bom</artifactId>
+        <version>${forwardmeasure.platform.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-launcher-quarkus-bindings</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <!-- Real REST layer - the binding module deliberately carries none of its own, matching
+           fowf's/fei's own binding-vs-deployments split exactly. -->
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-rest-jackson</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-config-yaml</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>io.quarkus</groupId>
+        <artifactId>quarkus-maven-plugin</artifactId>
+        <extensions>true</extensions>
+        <executions>
+          <execution>
+            <goals>
+              <goal>build</goal>
+              <goal>generate-code</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+  <profiles>
+    <profile>
+      <id>container-image</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>io.fabric8</groupId>
+            <artifactId>docker-maven-plugin</artifactId>
+            <configuration>
+              <images>
+                <image>
+                  <name>${container-image.registry}/${container-image.group}/${container-image.name}:${container-image.tag}</name>
+                  <build>
+                    <contextDir>${project.basedir}</contextDir>
+                    <dockerFile>src/main/docker/Dockerfile.jvm</dockerFile>
+                  </build>
+                </image>
+              </images>
+            </configuration>
+            <executions>
+              <execution>
+                <id>build-container-image</id>
+                <phase>package</phase>
+                <goals><goal>build</goal></goals>
+              </execution>
+              <execution>
+                <id>push-container-image</id>
+                <phase>package</phase>
+                <goals><goal>push</goal></goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-parent</artifactId><version>${revision}</version></parent>
+  <artifactId>forwardmeasure-data-streaming-api</artifactId>
+  <name>ForwardMeasure Data Streaming API</name>
+  <description>IngestionSpec, SourceSpec/SinkSpec/TransformSpec contract types. Framework-agnostic:
+    depends on nothing that ties it to Camel, Spark, or Pekko - those are executor/connector
+    concerns, not the contract. See D1/D8 in the design plan.</description>
+  <properties>
+    <!-- Has real public classes to document (unlike this repo's still-scaffolded modules) - see
+         the parent pom's default. -->
+    <maven.javadoc.skip>false</maven.javadoc.skip>
+  </properties>
+  <dependencies>
+    <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId></dependency>
+    <dependency><groupId>com.fasterxml.jackson.dataformat</groupId><artifactId>jackson-dataformat-yaml</artifactId></dependency>
+    <dependency><groupId>com.fasterxml.jackson.datatype</groupId><artifactId>jackson-datatype-jsr310</artifactId></dependency>
+    <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+  </dependencies>
+</project>

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-parent</artifactId><version>${revision}</version></parent>
+  <artifactId>forwardmeasure-data-streaming-connector-camel</artifactId>
+  <name>ForwardMeasure Data Streaming Camel Connector</name>
+  <description>Generic Camel route-building and camel-reactive-streams bridging, parameterized by
+    whatever endpoint URI an IngestionSpec declares - not a bespoke module per protocol. Deliberately
+    depends on camel-core and camel-reactive-streams only: which protocol (camel-file, camel-kafka,
+    camel-opensearch, or any of Camel's 300+ other components) is actually available at runtime is
+    the CONSUMING application's own classpath decision, exactly how Camel itself is meant to be used
+    - not something this library hardcodes per protocol. See D5/D6 in the design plan (revised after
+    an earlier draft wrongly split file/kafka/opensearch into three separate modules, recreating
+    the per-protocol fragmentation Camel exists to eliminate).</description>
+  <properties>
+    <!-- Has real public classes to document (unlike this repo's still-scaffolded modules) - see
+         the parent pom's default. -->
+    <maven.javadoc.skip>false</maven.javadoc.skip>
+  </properties>
+  <dependencies>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
+    <dependency><groupId>org.apache.camel</groupId><artifactId>camel-core</artifactId></dependency>
+    <dependency><groupId>org.apache.camel</groupId><artifactId>camel-reactive-streams</artifactId></dependency>
+    <!-- Test-only: exercising the generic bridge needs at least one real component. camel-file is
+         the lightest real one (no external service to stand up), used here only to prove the
+         bridge works - it is NOT a runtime dependency of this module. -->
+    <dependency><groupId>org.apache.camel</groupId><artifactId>camel-file</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+  </dependencies>
+</project>

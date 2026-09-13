@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.forwardmeasure.datastreaming</groupId>
+    <artifactId>forwardmeasure-data-streaming-parent</artifactId>
+    <version>${revision}</version>
+  </parent>
+  <artifactId>forwardmeasure-data-streaming-framework-bindings</artifactId>
+  <packaging>pom</packaging>
+  <name>ForwardMeasure Data Streaming :: Framework Bindings</name>
+  <description>Per-framework CDI/DI wiring for the launcher's launcher-application/launcher-jaxrs -
+    mirrors fowf's own openworkflow-framework-bindings/{quarkus,spring,micronaut} structure exactly
+    (bare directory names, artifactId suffixed -bindings). Scoped to the launcher specifically, not a
+    product-wide shared binding the way fowf's is - the two batch-job runners (executor-pekko/
+    executor-spark) deliberately have no presence here, since they're plain main() programs with no
+    framework dependency at all.</description>
+  <modules>
+    <module>quarkus</module>
+    <module>spring</module>
+    <module>micronaut</module>
+  </modules>
+</project>

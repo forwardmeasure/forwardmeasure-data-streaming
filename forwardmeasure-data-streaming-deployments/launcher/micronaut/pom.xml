@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.forwardmeasure.datastreaming</groupId>
+    <artifactId>forwardmeasure-data-streaming-deployments</artifactId>
+    <version>${revision}</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+  <artifactId>forwardmeasure-data-streaming-launcher-micronaut-service</artifactId>
+  <name>ForwardMeasure Data Streaming :: Deployments :: Launcher :: Micronaut</name>
+  <description>The actual bootable, containerizable Micronaut deployable for the ingestion launcher -
+    assembles forwardmeasure-data-streaming-launcher-micronaut-bindings with
+    forwardmeasure-data-streaming-launcher-jaxrs via micronaut-jaxrs-processor. LauncherMicronautApplication
+    (the Micronaut.run(...) entrypoint the jar-plugin manifest below points at) is real now, 2026-09-13.</description>
+  <properties>
+    <container-image.name>data-streaming-launcher-micronaut</container-image.name>
+  </properties>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.forwardmeasure.platform</groupId>
+        <artifactId>forwardmeasure-platform-micronaut-bom</artifactId>
+        <version>${forwardmeasure.platform.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-launcher-micronaut-bindings</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.micronaut</groupId>
+      <artifactId>micronaut-http-server-netty</artifactId>
+    </dependency>
+    <dependency>
+      <!-- The actual runtime JAX-RS route bridge - distinct from micronaut-jaxrs-processor below
+           (compile-time only); confirmed necessary against fei's own real
+           ingestion-service-micronaut-service pom, same gap, same fix. -->
+      <groupId>io.micronaut.jaxrs</groupId>
+      <artifactId>micronaut-jaxrs-server</artifactId>
+    </dependency>
+    <dependency>
+      <!-- Real JSON (de)serialization for the JAX-RS resource bodies - confirmed necessary
+           against fowf's own real openworkflow-execution-management-micronaut-service pom. -->
+      <groupId>io.micronaut.serde</groupId>
+      <artifactId>micronaut-serde-jackson</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.micronaut</groupId>
+      <artifactId>micronaut-inject-java</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <proc>full</proc>
+          <annotationProcessorPaths combine.children="append">
+            <path>
+              <groupId>io.micronaut</groupId>
+              <artifactId>micronaut-inject-java</artifactId>
+            </path>
+            <path>
+              <!-- JAX-RS @Path/@GET annotations do not become an actual Micronaut route without
+                   this - confirmed the hard way elsewhere in this org (fei's ingestion-service
+                   leaf, same gap, same fix). -->
+              <groupId>io.micronaut.jaxrs</groupId>
+              <artifactId>micronaut-jaxrs-processor</artifactId>
+            </path>
+            <path>
+              <groupId>io.micronaut.serde</groupId>
+              <artifactId>micronaut-serde-processor</artifactId>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
+        <executions>
+          <execution>
+            <id>default-testCompile</id>
+            <configuration>
+              <annotationProcessorPaths>
+                <path>
+                  <groupId>io.micronaut</groupId>
+                  <artifactId>micronaut-inject-java</artifactId>
+                </path>
+              </annotationProcessorPaths>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>copy-dependencies</id>
+            <phase>prepare-package</phase>
+            <goals><goal>copy-dependencies</goal></goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/dependency</outputDirectory>
+              <includeScope>runtime</includeScope>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifest>
+              <mainClass>com.forwardmeasure.datastreaming.launcher.micronaut.deployment.LauncherMicronautApplication</mainClass>
+              <addClasspath>true</addClasspath>
+              <classpathPrefix>dependency/</classpathPrefix>
+            </manifest>
+          </archive>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+  <profiles>
+    <profile>
+      <id>container-image</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>io.fabric8</groupId>
+            <artifactId>docker-maven-plugin</artifactId>
+            <configuration>
+              <images>
+                <image>
+                  <name>${container-image.registry}/${container-image.group}/${container-image.name}:${container-image.tag}</name>
+                  <build>
+                    <contextDir>${project.basedir}</contextDir>
+                    <dockerFile>src/main/docker/Dockerfile.jvm</dockerFile>
+                    <args>
+                      <APPLICATION_JAR>target/${project.build.finalName}.jar</APPLICATION_JAR>
+                      <DEPENDENCY_DIR>target/dependency</DEPENDENCY_DIR>
+                      <BASE_IMAGE>${container-image.base-jre}</BASE_IMAGE>
+                    </args>
+                  </build>
+                </image>
+              </images>
+            </configuration>
+            <executions>
+              <execution>
+                <id>build-container-image</id>
+                <phase>package</phase>
+                <goals><goal>build</goal></goals>
+              </execution>
+              <execution>
+                <id>push-container-image</id>
+                <phase>package</phase>
+                <goals><goal>push</goal></goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

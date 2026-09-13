@@ -1,0 +1,304 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.forwardmeasure.platform</groupId>
+    <artifactId>forwardmeasure-platform</artifactId>
+    <version>1.1.0</version>
+    <relativePath>../forwardmeasure-platform/pom.xml</relativePath>
+  </parent>
+
+  <groupId>com.forwardmeasure.datastreaming</groupId>
+  <artifactId>forwardmeasure-data-streaming-parent</artifactId>
+  <version>${revision}</version>
+  <packaging>pom</packaging>
+
+  <name>ForwardMeasure Data Streaming</name>
+  <description>Metadata-driven ingestion: schema-described sources and targets, named transformations,
+    Spark and Pekko Streams execution, backpressure-controlled sinks - built on this org's proven
+    connectors (Camel, forwardmeasure-jpa, forwardmeasure-object-storage) rather than reinventing
+    connectivity. See docs/forwardmeasure-data-streaming-plan.md for the design decisions this module
+    layout implements.</description>
+  <url>https://github.com/forwardmeasure/forwardmeasure-data-streaming</url>
+
+  <scm>
+    <connection>scm:git:https://github.com/forwardmeasure/forwardmeasure-data-streaming.git</connection>
+    <developerConnection>scm:git:git@github.com:forwardmeasure/forwardmeasure-data-streaming.git</developerConnection>
+    <url>https://github.com/forwardmeasure/forwardmeasure-data-streaming</url>
+    <tag>HEAD</tag>
+  </scm>
+
+  <issueManagement>
+    <system>GitHub</system>
+    <url>https://github.com/forwardmeasure/forwardmeasure-data-streaming/issues</url>
+  </issueManagement>
+
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+
+  <properties>
+    <revision>1.0.0</revision>
+    <forwardmeasure-object-storage.version>1.1.0</forwardmeasure-object-storage.version>
+    <forwardmeasure-jpa.version>1.1.0</forwardmeasure-jpa.version>
+    <!-- com.forwardmeasure.jpa is a multi-module library (-core/-tenancy/-quarkus/-spring/-
+         micronaut/...), not a single "forwardmeasure-jpa" artifact - confirmed by reading its real
+         pom.xml before pinning these. This library depends only on -core and -tenancy (framework-
+         agnostic); the consuming application's own framework binding pulls in -quarkus/-spring/
+         -micronaut as appropriate. -->
+
+    <forwardmeasure-testcontainers.version>1.1.0</forwardmeasure-testcontainers.version>
+    <!-- The launcher's two real dependencies on forwardmeasure-openworkflow (fowf): the shared
+         Kubernetes-Job-lifecycle library (direct mode) and fowf's own generated Apache-HttpClient
+         SDK for /v1/executions (workflow mode) - both first-party sibling artifacts, pinned locally
+         per this repo's own established convention, matching fowf's own root pom revision. -->
+    <openworkflow.version>1.1.0</openworkflow.version>
+    <!-- Camel and Spark used to be pinned locally here (data-fabric's own real
+         org.apache.spark.version=4.2.0 was the source of truth for Spark). Both are now managed
+         in forwardmeasure-platform itself instead, the same as Pekko/jandex/mapstruct already
+         were - one org-wide source of truth rather than each consumer repo redeclaring its own,
+         with the drift-risk that already bit Pekko once (see git history). -->
+
+    <!-- Default OFF: maven-javadoc-plugin's attach-javadocs execution fails outright ("No public
+         or protected classes found to document") on a jar-packaged module that's still just a
+         package-info.java placeholder - most of this repo's scaffolded-ahead modules today. Real
+         modules re-enable this explicitly in their own <properties> once they have real public
+         classes to document, rather than every future scaffolded module needing this added
+         individually. -->
+    <maven.javadoc.skip>true</maven.javadoc.skip>
+  </properties>
+
+  <modules>
+    <module>forwardmeasure-data-streaming-bom</module>
+    <module>forwardmeasure-data-streaming-api</module>
+    <module>forwardmeasure-data-streaming-transforms</module>
+    <module>forwardmeasure-data-streaming-mappers</module>
+    <module>forwardmeasure-data-streaming-core</module>
+    <module>forwardmeasure-data-streaming-connector-camel</module>
+    <module>forwardmeasure-data-streaming-connector-jdbc</module>
+    <module>forwardmeasure-data-streaming-connector-object-storage</module>
+    <module>forwardmeasure-data-streaming-executor-pekko</module>
+    <module>forwardmeasure-data-streaming-executor-spark</module>
+    <module>forwardmeasure-data-streaming-launcher-application</module>
+    <module>forwardmeasure-data-streaming-launcher-jaxrs</module>
+    <module>forwardmeasure-data-streaming-framework-bindings</module>
+    <module>forwardmeasure-data-streaming-deployments</module>
+  </modules>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- This org's own libraries this module deliberately reuses rather than reimplements
+           (see the manifesto, Principles 2/3/9, and the plan's D5/D6/D9 decisions). -->
+      <dependency>
+        <groupId>com.forwardmeasure.objectstorage</groupId>
+        <artifactId>forwardmeasure-object-storage-api</artifactId>
+        <version>${forwardmeasure-object-storage.version}</version>
+      </dependency>
+      <dependency>
+        <!-- StorageClientRegistry/StorageConfigGroup - test-only, to build a real StorageClient
+             against a real MinIO container the same way forwardmeasure-object-storage's own
+             S3StorageClientIntegrationTest does. -->
+        <groupId>com.forwardmeasure.objectstorage</groupId>
+        <artifactId>forwardmeasure-object-storage-core</artifactId>
+        <version>${forwardmeasure-object-storage.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.forwardmeasure.objectstorage</groupId>
+        <artifactId>forwardmeasure-object-storage-s3</artifactId>
+        <version>${forwardmeasure-object-storage.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.forwardmeasure.testcontainers</groupId>
+        <artifactId>forwardmeasure-testcontainers-minio</artifactId>
+        <version>${forwardmeasure-testcontainers.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.forwardmeasure.jpa</groupId>
+        <artifactId>forwardmeasure-jpa-core</artifactId>
+        <version>${forwardmeasure-jpa.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.forwardmeasure.jpa</groupId>
+        <artifactId>forwardmeasure-jpa-tenancy</artifactId>
+        <version>${forwardmeasure-jpa.version}</version>
+      </dependency>
+      <dependency>
+        <!-- TenantSchemaMigrator - real Liquibase migration for connector-jdbc's own test schema,
+             not test-scope-only production code (this dependency itself IS test-scope in the
+             consuming module, but the artifact isn't otherwise managed here). -->
+        <groupId>com.forwardmeasure.jpa</groupId>
+        <artifactId>forwardmeasure-jpa-liquibase</artifactId>
+        <version>${forwardmeasure-jpa.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.forwardmeasure.testcontainers</groupId>
+        <artifactId>forwardmeasure-testcontainers-junit-jupiter</artifactId>
+        <version>${forwardmeasure-testcontainers.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.forwardmeasure.testcontainers</groupId>
+        <artifactId>forwardmeasure-testcontainers-postgresql</artifactId>
+        <version>${forwardmeasure-testcontainers.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.forwardmeasure.testcontainers</groupId>
+        <artifactId>forwardmeasure-testcontainers-kubernetes</artifactId>
+        <version>${forwardmeasure-testcontainers.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.forwardmeasure.openworkflow</groupId>
+        <artifactId>openworkflow-kubernetes-job-lifecycle</artifactId>
+        <version>${openworkflow.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.forwardmeasure.openworkflow</groupId>
+        <artifactId>openworkflow-execution-client-apachehttp</artifactId>
+        <version>${openworkflow.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.forwardmeasure.openworkflow</groupId>
+        <artifactId>openworkflow-execution-models</artifactId>
+        <version>${openworkflow.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-api</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-transforms</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-mappers</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-core</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-connector-camel</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-connector-jdbc</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-connector-object-storage</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-executor-pekko</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-executor-spark</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-launcher-application</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-launcher-jaxrs</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-launcher-quarkus-bindings</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-launcher-spring-bindings</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-launcher-micronaut-bindings</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-clean-plugin</artifactId></plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <configuration>
+            <release>${maven.compiler.release}</release>
+            <parameters>true</parameters>
+            <showWarnings>true</showWarnings>
+          </configuration>
+        </plugin>
+        <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-resources-plugin</artifactId></plugin>
+        <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><configuration><useModulePath>false</useModulePath></configuration></plugin>
+        <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-failsafe-plugin</artifactId><configuration><useModulePath>false</useModulePath></configuration></plugin>
+        <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-jar-plugin</artifactId></plugin>
+        <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-install-plugin</artifactId></plugin>
+        <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-deploy-plugin</artifactId></plugin>
+        <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-site-plugin</artifactId></plugin>
+        <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-source-plugin</artifactId></plugin>
+        <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-javadoc-plugin</artifactId><configuration><doclint>all,-missing</doclint></configuration></plugin>
+        <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-enforcer-plugin</artifactId></plugin>
+        <plugin><groupId>org.jacoco</groupId><artifactId>jacoco-maven-plugin</artifactId></plugin>
+        <plugin><groupId>io.smallrye</groupId><artifactId>jandex-maven-plugin</artifactId><version>${jandex.version}</version></plugin>
+        <plugin><groupId>org.codehaus.mojo</groupId><artifactId>flatten-maven-plugin</artifactId></plugin>
+      </plugins>
+    </pluginManagement>
+
+    <plugins>
+      <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId></plugin>
+      <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId></plugin>
+      <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-failsafe-plugin</artifactId></plugin>
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution><id>prepare-agent</id><goals><goal>prepare-agent</goal></goals></execution>
+          <execution><id>report</id><phase>verify</phase><goals><goal>report</goal></goals></execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>io.smallrye</groupId>
+        <artifactId>jandex-maven-plugin</artifactId>
+        <executions>
+          <execution><id>make-index</id><goals><goal>jandex</goal></goals></execution>
+        </executions>
+      </plugin>
+      <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-source-plugin</artifactId><executions><execution><id>attach-sources</id><goals><goal>jar-no-fork</goal></goals></execution></executions></plugin>
+      <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-javadoc-plugin</artifactId><executions><execution><id>attach-javadocs</id><goals><goal>jar</goal></goals></execution></executions></plugin>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>flatten-maven-plugin</artifactId>
+        <configuration><flattenMode>ossrh</flattenMode><updatePomFile>true</updatePomFile></configuration>
+        <executions>
+          <execution><id>flatten</id><phase>process-resources</phase><goals><goal>flatten</goal></goals></execution>
+          <execution><id>flatten-clean</id><phase>clean</phase><goals><goal>clean</goal></goals></execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

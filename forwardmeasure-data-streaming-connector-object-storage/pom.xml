@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-parent</artifactId><version>${revision}</version></parent>
+  <artifactId>forwardmeasure-data-streaming-connector-object-storage</artifactId>
+  <name>ForwardMeasure Data Streaming Object Storage Connector</name>
+  <description>Thin adapter over forwardmeasure-object-storage - the one deliberate exception to
+    "prefer Camel" in this library (no Camel S3/GCS component beats a provider-neutral interface this
+    org already built and controls, and it already has a real external consumer in
+    forwardmeasure-openworkflow's protocol-overflow storage). Not Camel-backed, so it does not go
+    through camel-reactive-streams - see D5/D6 in the design plan.</description>
+  <properties>
+    <!-- Has real public classes to document (unlike this repo's still-scaffolded modules) - see
+         the parent pom's default. -->
+    <maven.javadoc.skip>false</maven.javadoc.skip>
+  </properties>
+  <dependencies>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
+    <dependency><groupId>com.forwardmeasure.objectstorage</groupId><artifactId>forwardmeasure-object-storage-api</artifactId></dependency>
+    <dependency><groupId>org.apache.pekko</groupId><artifactId>pekko-stream_${scala.binary.version}</artifactId></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+    <!-- Test-only: proves the bridge against a real MinIO container + the real S3 adapter, the
+         same way forwardmeasure-object-storage's own S3StorageClientIntegrationTest does. -->
+    <dependency><groupId>com.forwardmeasure.objectstorage</groupId><artifactId>forwardmeasure-object-storage-core</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>com.forwardmeasure.objectstorage</groupId><artifactId>forwardmeasure-object-storage-s3</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-minio</artifactId><scope>test</scope></dependency>
+  </dependencies>
+</project>

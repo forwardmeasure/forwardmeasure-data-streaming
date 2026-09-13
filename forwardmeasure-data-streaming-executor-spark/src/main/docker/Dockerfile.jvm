@@ -1,0 +1,37 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Mirrors fei's own real forwardmeasure-entity-intelligence-ingestion-worker-spark Dockerfile.jvm,
+# plus one real fix that Dockerfile doesn't have (see this repo's own live gap tracker): Spark's
+# SparkContext init unconditionally calls Hadoop's UserGroupInformation.createLoginUser(), which
+# does a real OS-level (JAAS UnixLoginModule) UID->username lookup before anything else runs -
+# confirmed by decompiling hadoop-common's own UserGroupInformation.class, not guessed. APP_UID has
+# no /etc/passwd entry in the base image, so that lookup throws "Invalid UID, could not determine
+# effective user" and the Job fails every time, regardless of workload - not something
+# HADOOP_USER_NAME can bypass, since it's only consulted after the OS login already succeeded.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG APPLICATION_JAR
+ARG DEPENDENCY_DIR
+ARG APP_UID=10001
+ARG APP_GID=10001
+USER root
+RUN echo "forwardmeasure:x:${APP_UID}:${APP_GID}::/home/forwardmeasure:/sbin/nologin" >> /etc/passwd
+COPY --chown=${APP_UID}:${APP_GID} ${DEPENDENCY_DIR} /deployments/dependency/
+COPY --chown=${APP_UID}:${APP_GID} ${APPLICATION_JAR} /deployments/application.jar
+USER ${APP_UID}:${APP_GID}
+WORKDIR /deployments
+ENTRYPOINT ["java", "-jar", "/deployments/application.jar"]

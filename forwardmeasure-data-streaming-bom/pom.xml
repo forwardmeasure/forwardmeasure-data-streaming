@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.forwardmeasure.datastreaming</groupId>
+    <artifactId>forwardmeasure-data-streaming-parent</artifactId>
+    <version>${revision}</version>
+  </parent>
+  <artifactId>forwardmeasure-data-streaming-bom</artifactId>
+  <packaging>pom</packaging>
+  <name>ForwardMeasure Data Streaming BOM</name>
+  <dependencyManagement>
+    <dependencies>
+      <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-transforms</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-core</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-file</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-kafka</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-opensearch</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-jdbc</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-object-storage</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-executor-pekko</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-executor-spark</artifactId><version>${project.version}</version></dependency>
+    </dependencies>
+  </dependencyManagement>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>flatten-maven-plugin</artifactId>
+        <configuration>
+          <flattenMode>bom</flattenMode>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

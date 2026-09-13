@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-parent</artifactId><version>${revision}</version></parent>
+  <artifactId>forwardmeasure-data-streaming-executor-pekko</artifactId>
+  <name>ForwardMeasure Data Streaming Pekko Executor</name>
+  <description>Embedded, bounded-run backpressure executor - consumes/produces the Camel connector's
+    Publishers/Subscribers directly (Source.fromPublisher/Sink.fromSubscriber, no per-connector
+    adapter code needed), the JDBC connector's plain repository-backed Source/Sink, and the object-
+    storage connector. The Camel connector module itself carries no protocol-specific dependency
+    (file/Kafka/OpenSearch/etc.) - this executor's own consumers add whichever camel-* component
+    jars their pipeline actually needs. Chosen over Kafka Streams for this role because every real
+    deployment shape this org actually runs (a plain K8s Job, or the KEDA ScaledJob mode
+    entity-intelligence-ingestion runs under) is a bounded, one-shot batch process, not a
+    continuously-running topology - see D4 in the design plan.</description>
+  <properties>
+    <!-- Has real public classes to document (unlike this repo's still-scaffolded modules) - see
+         the parent pom's default. -->
+    <maven.javadoc.skip>false</maven.javadoc.skip>
+    <container-image.name>data-streaming-executor-pekko</container-image.name>
+  </properties>
+  <dependencies>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-core</artifactId></dependency>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-mappers</artifactId></dependency>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-camel</artifactId></dependency>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-jdbc</artifactId></dependency>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-object-storage</artifactId></dependency>
+    <dependency><groupId>org.apache.pekko</groupId><artifactId>pekko-stream_${scala.binary.version}</artifactId></dependency>
+    <dependency>
+      <!-- run(spec, system)'s own real Camel-backed sink serializes each mapped row to JSON before
+           handing it to CamelBridge#sink - the one body type every Camel producer component
+           reliably accepts, regardless of which one a given SinkSpec.connector resolves to. -->
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <!-- IngestionPipelineRunner's own CSV-to-rows flattening (today's only real source format) -
+         matches fei's own SimpleSourceIngestionWorker pin exactly, not chosen independently. -->
+    <dependency><groupId>org.apache.commons</groupId><artifactId>commons-csv</artifactId><version>1.14.1</version></dependency>
+    <!-- CamelBridge's own test-scope-only camel-file dependency doesn't propagate here. Real
+         (not test-scope) here, unlike the generic -connector-camel module's own deliberate
+         "consumer adds whichever component it needs" stance: this module is now also the actual
+         packaged, deployable runner image (see this pom's own container-image profile), and
+         "file" is the only source/sink connector this project has actually proven so far - the
+         same real choice fei's own ingestion-worker pom already makes, for the same reason. -->
+    <dependency><groupId>org.apache.camel</groupId><artifactId>camel-file</artifactId></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+    <!-- Test-only: with no SLF4J provider on the classpath, every LOGGER.info/debug call in this
+         module (and Camel/Pekko's own internal logging) is silently a no-op - real output is
+         needed to see what a hanging integration test is actually doing. -->
+    <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-simple</artifactId><scope>test</scope></dependency>
+  </dependencies>
+
+  <build>
+    <!-- This module is a plain Java main() entrypoint (IngestionPipelineRunner), not a
+         Quarkus/Spring/Micronaut app - there is no framework packaging plugin to assemble a
+         runnable artifact. Mirrors fei's own real ingestion-worker/ingestion-worker-spark poms
+         exactly: maven-dependency-plugin copies runtime deps to target/dependency/,
+         maven-jar-plugin points the jar's own manifest Class-Path at them, so `java -jar` alone
+         resolves the full classpath - no hand-written -cp flag in the Dockerfile. -->
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>copy-dependencies</id>
+            <phase>prepare-package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/dependency</outputDirectory>
+              <includeScope>runtime</includeScope>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifest>
+              <mainClass>com.forwardmeasure.datastreaming.executor.pekko.IngestionPipelineRunner</mainClass>
+              <addClasspath>true</addClasspath>
+              <classpathPrefix>dependency/</classpathPrefix>
+            </manifest>
+          </archive>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <id>container-image</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>io.fabric8</groupId>
+            <artifactId>docker-maven-plugin</artifactId>
+            <configuration>
+              <images>
+                <image>
+                  <name>${container-image.registry}/${container-image.group}/${container-image.name}:${container-image.tag}</name>
+                  <build>
+                    <contextDir>${project.basedir}</contextDir>
+                    <dockerFile>src/main/docker/Dockerfile.jvm</dockerFile>
+                    <args>
+                      <APPLICATION_JAR>target/${project.build.finalName}.jar</APPLICATION_JAR>
+                      <DEPENDENCY_DIR>target/dependency</DEPENDENCY_DIR>
+                      <BASE_IMAGE>${container-image.base-jre}</BASE_IMAGE>
+                    </args>
+                  </build>
+                </image>
+              </images>
+            </configuration>
+            <executions>
+              <execution>
+                <id>build-container-image</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>build</goal>
+                </goals>
+              </execution>
+              <execution>
+                <id>push-container-image</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>push</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.forwardmeasure.datastreaming</groupId>
+    <artifactId>forwardmeasure-data-streaming-parent</artifactId>
+    <version>${revision}</version>
+  </parent>
+  <artifactId>forwardmeasure-data-streaming-deployments</artifactId>
+  <packaging>pom</packaging>
+  <name>ForwardMeasure Data Streaming :: Deployable Assemblies</name>
+  <description>Deployable, independently-containerizable assemblies - one per framework, for the
+    launcher service. Mirrors forwardmeasure-entity-intelligence-deployments' and
+    forwardmeasure-openworkflow's own *-deployments module exactly: this is where the actual
+    bootable-app dependency assembly and container-image Maven wiring live, separate from the
+    framework-binding library modules those bindings themselves stay in
+    (forwardmeasure-data-streaming-launcher-{quarkus,spring,micronaut}).
+
+    The two batch-job runners (executor-pekko/executor-spark) deliberately have no entry here - they
+    are plain main() programs, not framework-bound services, so they don't need a per-framework
+    deployable split. If that ever changes (see the design plan's D4 note on a possible future
+    continuous/always-on execution mode), their own deployment leaves would belong here too.</description>
+  <modules>
+    <module>launcher/quarkus</module>
+    <module>launcher/spring</module>
+    <module>launcher/micronaut</module>
+  </modules>
+</project>

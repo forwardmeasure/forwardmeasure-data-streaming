@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-parent</artifactId><version>${revision}</version></parent>
+  <artifactId>forwardmeasure-data-streaming-launcher-jaxrs</artifactId>
+  <name>ForwardMeasure Data Streaming Launcher JAX-RS</name>
+  <description>JAX-RS resource classes over launcher-application, built 2026-09-13: IngestionRunResource
+    (POST/GET/cancel /ingestion-runs - direct, single-source Pekko), CorrelationRunResource
+    (POST/GET/cancel /correlation-runs - direct, multi-source Spark), WorkflowRunResource
+    (POST/GET/cancel /workflow-runs - through fowf's own execution-management API) - shared,
+    unmodified, across all three framework bindings (Quarkus's native RESTEasy, Spring via its
+    JAX-RS bridge, Micronaut's own JAX-RS support), the same shared-JAX-RS-resource convention
+    already established elsewhere in this org (e.g.
+    forwardmeasure-entity-intelligence-ingestion-service-jaxrs). jakarta.ws.rs-api only, provided
+    scope - the actual JAX-RS runtime comes from whichever framework binding assembles this.</description>
+  <properties>
+    <!-- Has real public classes to document now (unlike this repo's still-scaffolded modules) -
+         see the parent pom's own default. -->
+    <maven.javadoc.skip>false</maven.javadoc.skip>
+  </properties>
+  <dependencies>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-launcher-application</artifactId></dependency>
+    <dependency><groupId>jakarta.ws.rs</groupId><artifactId>jakarta.ws.rs-api</artifactId><scope>provided</scope></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+    <dependency>
+      <!-- Test-only JAX-RS RuntimeDelegate - jakarta.ws.rs-api alone (provided scope, no impl) can't
+           actually construct a Response at runtime; this org's own established fix for exactly this
+           gap in a plain-resource-class unit test (see fowf's own openworkflow-definition-management
+           -jaxrs pom). Never main-scope: the real runtime still comes from whichever framework
+           binding assembles this module, unchanged. -->
+      <groupId>org.glassfish.jersey.core</groupId>
+      <artifactId>jersey-common</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Real, no-mocks proof of the K8s-backed resources against an actual single-node K3s
+           cluster, same pattern launcher-application's own tests already use. -->
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-kubernetes</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

@@ -1,0 +1,10 @@
+FROM eclipse-temurin:25-jre-ubi10-minimal@sha256:35f47084a4c1e34636fc8842780d5ca1e85b1b74de139723d1a541137932ddf2
+ARG APP_UID=10001
+ARG APP_GID=10001
+COPY --chown=${APP_UID}:${APP_GID} target/quarkus-app/lib/ /deployments/lib/
+COPY --chown=${APP_UID}:${APP_GID} target/quarkus-app/*.jar /deployments/
+COPY --chown=${APP_UID}:${APP_GID} target/quarkus-app/app/ /deployments/app/
+COPY --chown=${APP_UID}:${APP_GID} target/quarkus-app/quarkus/ /deployments/quarkus/
+USER ${APP_UID}:${APP_GID}
+WORKDIR /deployments
+ENTRYPOINT ["java", "-jar", "/deployments/quarkus-run.jar"]

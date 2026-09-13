@@ -1,0 +1,18 @@
+datastreaming:
+  launcher:
+    k8s:
+      namespaces: ""
+      images: ""
+      image-pull-secrets: ""
+    pekko:
+      image: ""
+      command: "java -jar /deployments/application.jar"
+    spark:
+      image: ""
+      command: "java -jar /deployments/application.jar"
+    fowf:
+      base-url: "http://localhost:8080"
+      keycloak:
+        token-url: "http://localhost:8081/realms/forwardmeasure/protocol/openid-connect/token"
+        client-id: ""
+        client-secret: ""

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-framework-bindings</artifactId><version>${revision}</version><relativePath>../pom.xml</relativePath></parent>
+  <artifactId>forwardmeasure-data-streaming-launcher-micronaut-bindings</artifactId>
+  <name>ForwardMeasure Data Streaming Launcher Micronaut Bindings</name>
+  <description>Micronaut wiring for launcher-jaxrs/launcher-application, 2026-09-13 - @Factory bean
+    definitions for whatever launcher-application's constructors need, plus thin @Singleton
+    subclasses of launcher-jaxrs's own resource/exception-mapper classes (a @Factory method alone
+    doesn't give Micronaut's compile-time route/provider discovery what it needs for a plain
+    JAX-RS class - mirrors forwardmeasure-entity-intelligence's own
+    MicronautReferencePopulationResource pattern exactly). Never boots its own bootable app - see
+    forwardmeasure-data-streaming-deployments/launcher/micronaut for the real deployable
+    assembly.</description>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.forwardmeasure.platform</groupId>
+        <artifactId>forwardmeasure-platform-micronaut-bom</artifactId>
+        <version>${forwardmeasure.platform.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+  <dependencies>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-launcher-application</artifactId></dependency>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-launcher-jaxrs</artifactId></dependency>
+    <dependency><groupId>io.micronaut</groupId><artifactId>micronaut-inject</artifactId></dependency>
+    <dependency>
+      <!-- Needed here too (not just in the deployment module) - confirmed against fei's own
+           real ingestion-service-micronaut-binding pom, same shape. -->
+      <groupId>io.micronaut.jaxrs</groupId>
+      <artifactId>micronaut-jaxrs-server</artifactId>
+    </dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+  </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <proc>full</proc>
+          <annotationProcessorPaths combine.children="append">
+            <path>
+              <groupId>io.micronaut</groupId>
+              <artifactId>micronaut-inject-java</artifactId>
+            </path>
+            <path>
+              <groupId>io.micronaut.jaxrs</groupId>
+              <artifactId>micronaut-jaxrs-processor</artifactId>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

@@ -16,131 +16,76 @@
  */
 package com.forwardmeasure.datastreaming.executor.spark;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.forwardmeasure.datastreaming.api.CorrelationSpec;
-import java.io.UncheckedIOException;
+import com.forwardmeasure.datastreaming.api.IngestionSpec;
+import com.forwardmeasure.datastreaming.api.TransformSpec;
+import com.forwardmeasure.datastreaming.core.IngestionPipeline;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.apache.spark.api.java.JavaRDD;
-import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.sql.SparkSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * The standalone runnable entrypoint {@code forwardmeasure-data-streaming-executor-spark} never had
- * (added 2026-09-13, once the launcher work surfaced the gap - see the design plan's own live gap
- * tracker): reads a {@link CorrelationSpec}, drives {@link SparkCorrelationEngine}'s real
- * read/map/correlate/merge logic across however many sources the spec declares, and writes the
- * merged result to a real sink - the same "spec in, real Job out" shape {@code
- * forwardmeasure-data-streaming-executor-pekko}'s own {@code IngestionPipelineRunner} already has
- * for the single-source path, generalized to Spark's own multi-source correlation.
+ * {@link IngestionSpec}'s (single-source, no correlation) Spark entrypoint - renamed 2026-09-13
+ * from {@code SparkSourceIngestionRunner} once its only reason to exist as a class separate from
+ * this one (housing a distinct {@code main()} apart from a class that also carried {@code
+ * CorrelationSpec} handling) went away: this class now owns that {@code main()} directly, and the
+ * {@code CorrelationSpec} path this class used to also carry moved out to its own {@link
+ * SparkCorrelationRunner}. Mirrors {@code forwardmeasure-data-streaming-executor-pekko}'s own
+ * {@code PekkoIngestionRunner}/{@code PekkoCorrelationRunner} split - one {@code
+ * {Engine}{SpecShape}Runner} class per (engine, spec-shape) pair, consistently, rather than one
+ * class holding both spec types' logic plus a second class that exists only to give one of them its
+ * own {@code main()}.
  *
- * <p><b>Deliberate scope for this first cut, not a silent gap</b>: only a {@code file} sink is
- * supported, writing NDJSON via Spark's own native, already-distributed {@code
- * JavaRDD#saveAsTextFile} - not Camel. This is a deliberate divergence from the Pekko runner's own
- * sink (which does use Camel, via a real {@code ProducerTemplate}): the *source* side here already
- * uses Spark's own native readers (see {@link SparkCorrelationEngine}'s own {@code readSource}),
- * not Camel, so writing through Spark's own native, distributed writer for the sink too is the
- * consistent choice - introducing Camel into this module only for one connector's sink would mean a
- * `CamelContext` per partition across a whole cluster for no real benefit over Spark's own writer.
- * Any other {@code SinkSpec.connector} throws {@link UnsupportedOperationException} rather than
- * silently writing nowhere real.
+ * <p>Sink writing (generalized 2026-09-13, see {@link SparkSinks} for the full dispatch and why it
+ * was extracted into its own shared class once it stopped being {@code file}-only) delegates
+ * entirely to {@link SparkSinks#write} - this class's own job is just reading/mapping the one
+ * declared source and handing the result off.
  */
 public final class SparkIngestionRunner {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(SparkIngestionRunner.class);
-  private static final String FILE_CONNECTOR = "file";
 
   private SparkIngestionRunner() {}
 
-  /** Summary of one correlation run - how many sources were read and how many groups resulted. */
-  public record CorrelationResult(long sourceCount, long groupCount) {}
+  /** Summary of one single-source run - how many rows were mapped and written. */
+  public record IngestionResult(long recordsWritten) {}
 
   /**
-   * Runs {@code spec}: reads and maps every declared source, correlates them on {@code
-   * spec.blockingField()}, merges each group by trust weight (see {@link
-   * SparkCorrelationEngine#correlate}), and writes the merged rows to {@code spec.sink()}.
-   *
-   * @throws UnsupportedOperationException if the sink's connector isn't {@code file} (see this
-   *     class's own javadoc for why)
+   * Runs {@code spec}: reads and maps its one declared source (see {@link
+   * SparkCorrelationEngine#readAndMapSingleSource} for why this is genuinely not "correlation with
+   * one source" - no grouping/merging step exists here at all), and writes every mapped row to
+   * {@code spec.sink()} via {@link SparkSinks#write}. The Spark-engine counterpart to {@code
+   * PekkoIngestionRunner}'s own Pekko-engine single-source run - same {@link IngestionSpec} input,
+   * same "every row independent, nothing ever merged" semantics, different execution engine.
    */
-  public static CorrelationResult run(SparkSession spark, CorrelationSpec spec) {
-    String connector = spec.sink().connector();
-    if (!FILE_CONNECTOR.equals(connector)) {
-      throw new UnsupportedOperationException(
-          "SparkIngestionRunner: sink connector '"
-              + connector
-              + "' is not yet supported - only 'file' (Spark's own native distributed writer)"
-              + " today; see this class's own javadoc for why that's a real, deliberate scope"
-              + " boundary, not a silent gap");
-    }
-
-    List<JavaRDD<SparkCorrelationRecord>> mapped =
-        spec.sources().stream()
-            .map(
-                entry ->
-                    SparkCorrelationEngine.readAndMap(
-                        spark,
-                        new SparkSourceConfig(
-                            entry.sourceKey(), entry.source(), entry.mapper(), entry.trustWeight()),
-                        spec.blockingField(),
-                        Map.of()))
-            .toList();
-
-    // Cached deliberately: count() below and the saveAsTextFile() write are two separate actions
-    // on the same lazily-evaluated RDD - without caching, Spark would recompute the entire
-    // read/map/correlate/merge pipeline (across every source) a second time for the write alone.
-    JavaRDD<Map<String, Object>> merged = SparkCorrelationEngine.correlate(mapped).cache();
-    long groupCount = merged.count();
-    serializeToNdjson(merged).saveAsTextFile(spec.sink().uri());
-    return new CorrelationResult(spec.sources().size(), groupCount);
-  }
-
-  private static JavaRDD<String> serializeToNdjson(JavaRDD<Map<String, Object>> merged) {
-    return merged.mapPartitions(
-        (FlatMapFunction<java.util.Iterator<Map<String, Object>>, String>)
-            rows -> {
-              ObjectMapper objectMapper = new ObjectMapper();
-              List<String> serialized = new ArrayList<>();
-              while (rows.hasNext()) {
-                serialized.add(writeValueAsString(rows.next(), objectMapper));
-              }
-              return serialized.iterator();
-            });
-  }
-
-  private static String writeValueAsString(Map<String, Object> row, ObjectMapper objectMapper) {
-    try {
-      return objectMapper.writeValueAsString(row);
-    } catch (JsonProcessingException e) {
-      throw new UncheckedIOException(e);
-    }
+  public static IngestionResult run(SparkSession spark, IngestionSpec spec) {
+    IngestionPipeline.MalformedRecordPolicy malformedRecordPolicy =
+        IngestionPipeline.MalformedRecordPolicy.from(spec.execution().failure());
+    JavaRDD<Map<String, Object>> mapped =
+        SparkCorrelationEngine.readAndMapSingleSource(
+                spark, spec.source(), spec.mapper(), Map.of(), malformedRecordPolicy)
+            .cache();
+    long recordsWritten = mapped.count();
+    List<String> columns =
+        spec.mapper().fields().stream().map(TransformSpec.FieldRule::target).distinct().toList();
+    SparkSinks.write(spark, mapped, spec.sink(), spec.execution(), columns);
+    return new IngestionResult(recordsWritten);
   }
 
   public static void main(String[] args) throws Exception {
-    String specPath = args.length > 0 ? args[0] : requiredEnv("CORRELATION_SPEC_PATH");
-    CorrelationSpec spec = CorrelationSpec.load(Path.of(specPath));
+    String specPath = args.length > 0 ? args[0] : requiredEnv("INGESTION_SPEC_PATH");
+    IngestionSpec spec = IngestionSpec.load(Path.of(specPath));
 
-    // A plain `java -jar` process builds its own embedded SparkSession, never a spark-submit-
-    // orchestrated cluster deployment (see this module's own Dockerfile.jvm) - so `master` must be
-    // set here explicitly; nothing else (no spark-submit, no spark-defaults.conf) will supply one,
-    // and SparkSession.getOrCreate() throws immediately without it.
     SparkSession spark =
-        SparkSession.builder()
-            .appName("forwardmeasure-data-streaming-correlation")
-            .master("local[*]")
-            .getOrCreate();
+        SparkSessionFactory.create(
+            "forwardmeasure-data-streaming-ingestion", sparkExecutorConfigFromEnv());
     int exitCode = 0;
     try {
-      CorrelationResult result = run(spark, spec);
-      LOGGER.info(
-          "SparkIngestionRunner: sourceCount={} groupCount={}",
-          result.sourceCount(),
-          result.groupCount());
+      IngestionResult result = run(spark, spec);
+      LOGGER.info("SparkIngestionRunner: recordsWritten={}", result.recordsWritten());
     } catch (Exception e) {
       LOGGER.error("SparkIngestionRunner: run failed", e);
       exitCode = 1;
@@ -150,6 +95,24 @@ public final class SparkIngestionRunner {
     if (exitCode != 0) {
       System.exit(exitCode);
     }
+  }
+
+  /**
+   * {@code SPARK_MASTER} defaults to {@code local[*]} (single-pod, embedded driver) - a caller
+   * wanting real distributed Spark sets it to {@code k8s://...} and also provides {@code
+   * SPARK_KUBERNETES_CONTAINER_IMAGE}/{@code SPARK_KUBERNETES_NAMESPACE} (required in that mode -
+   * see {@link SparkSessionFactory#sparkConfigProperties}); {@code
+   * SPARK_KUBERNETES_SERVICE_ACCOUNT}/ {@code SPARK_EXECUTOR_POD_TEMPLATE_FILE} are always
+   * optional. Package-visible so {@link SparkCorrelationRunner} can build the identical config
+   * shape from the identical env vars.
+   */
+  static SparkExecutorConfig sparkExecutorConfigFromEnv() {
+    return new SparkExecutorConfig(
+        System.getenv().getOrDefault("SPARK_MASTER", "local[*]"),
+        System.getenv("SPARK_KUBERNETES_CONTAINER_IMAGE"),
+        System.getenv("SPARK_KUBERNETES_NAMESPACE"),
+        System.getenv("SPARK_KUBERNETES_SERVICE_ACCOUNT"),
+        System.getenv("SPARK_EXECUTOR_POD_TEMPLATE_FILE"));
   }
 
   private static String requiredEnv(String name) {

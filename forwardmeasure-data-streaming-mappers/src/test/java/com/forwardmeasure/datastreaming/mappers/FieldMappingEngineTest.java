@@ -95,6 +95,89 @@ class FieldMappingEngineTest {
     assertEquals(List.of("Jane Doe", "J. Doe"), mapped.get("aliases"));
   }
 
+  /**
+   * Real-world shape this closes a gap for (2026-09-14): {@code
+   * entity-intelligence-specifications}' own real WorldCheck mapping's {@code names} field needs
+   * each repeated element to carry its own {@code name_type} tag alongside the resolved value -
+   * impossible to express before {@link FieldRule#metadata()} existed, since a bare accumulated
+   * value has nowhere to put it.
+   */
+  @Test
+  void repeatedRuleWithMetadataWrapsEachElementWithItsOwnTagAlongsideTheValue() {
+    TransformSpec spec =
+        new TransformSpec(
+            "schema://party/2.0",
+            List.of(
+                new FieldRule(
+                    "names",
+                    null,
+                    "{LAST}, {FIRST}",
+                    null,
+                    null,
+                    false,
+                    true,
+                    Map.of("name_type", "PRIMARY")),
+                new FieldRule(
+                    "names", "alias", null, null, null, true, true, Map.of("name_type", "ALIAS"))));
+
+    Map<String, Object> mapped =
+        engine.map(rowOf(Map.of("LAST", "Doe", "FIRST", "Jane", "alias", "J. Doe")), spec);
+
+    assertEquals(
+        List.of(
+            Map.of("value", "Doe, Jane", "name_type", "PRIMARY"),
+            Map.of("value", "J. Doe", "name_type", "ALIAS")),
+        mapped.get("names"));
+  }
+
+  /**
+   * A real compounding case found building the real WorldCheck example (2026-09-14): {@code
+   * ALIASES} resolves via {@code parse_semicolon_list}, itself already a {@code List<String>} from
+   * one rule. Each alias must become its own tagged {@code {value, name_type}} entry - not one
+   * entry whose own {@code value} is the whole list, which would bury every alias inside a single
+   * opaque array instead of matching how a single-valued rule's own entries look.
+   */
+  @Test
+  void repeatedRuleWithMetadataFlattensAListValuedTransformIntoOneTaggedEntryPerElement() {
+    TransformSpec spec =
+        new TransformSpec(
+            "schema://party/2.0",
+            List.of(
+                new FieldRule(
+                    "names",
+                    "aliases",
+                    null,
+                    null,
+                    "parse_semicolon_list",
+                    true,
+                    true,
+                    Map.of("name_type", "ALIAS"))));
+
+    Map<String, Object> mapped =
+        engine.map(rowOf(Map.of("aliases", "Johnny Smith;J. Smith")), spec);
+
+    assertEquals(
+        List.of(
+            Map.of("value", "Johnny Smith", "name_type", "ALIAS"),
+            Map.of("value", "J. Smith", "name_type", "ALIAS")),
+        mapped.get("names"));
+  }
+
+  /**
+   * {@code metadata} absent must leave the original bare-value behavior byte-for-byte unchanged.
+   */
+  @Test
+  void repeatedRuleWithoutMetadataStaysABareValueList() {
+    TransformSpec spec =
+        new TransformSpec(
+            "schema://party/2.0",
+            List.of(new FieldRule("aliases", "alias1", null, null, null, null, true, Map.of())));
+
+    Map<String, Object> mapped = engine.map(rowOf(Map.of("alias1", "Jane Doe")), spec);
+
+    assertEquals(List.of("Jane Doe"), mapped.get("aliases"));
+  }
+
   @Test
   void missingOptionalFieldIsSkippedSilently() {
     TransformSpec spec =

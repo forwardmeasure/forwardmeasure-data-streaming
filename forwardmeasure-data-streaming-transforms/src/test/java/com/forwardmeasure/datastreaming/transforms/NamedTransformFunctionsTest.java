@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.forwardmeasure.datastreaming.transforms.NamedTransformFunctions.ParsedIdentifier;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -122,5 +123,105 @@ class NamedTransformFunctionsTest {
     assertEquals(
         List.of("example.com", "sub.example.org"),
         NamedTransformFunctions.extract_url_domains("example.com; sub.example.org"));
+  }
+
+  @Test
+  void classifyPartyCategory() {
+    assertEquals("person", NamedTransformFunctions.classify_party_category("INDIVIDUAL"));
+    assertEquals("person", NamedTransformFunctions.classify_party_category("political individual"));
+    assertEquals("organization", NamedTransformFunctions.classify_party_category("BANK"));
+    assertEquals(
+        "organization", NamedTransformFunctions.classify_party_category("shell bank or company"));
+    assertEquals("physical_asset", NamedTransformFunctions.classify_party_category("VESSEL"));
+    assertEquals("unknown", NamedTransformFunctions.classify_party_category("SOMETHING ELSE"));
+    assertEquals("unknown", NamedTransformFunctions.classify_party_category(null));
+  }
+
+  @Test
+  void classifyPartyKind() {
+    // A person-indicating discriminator wins outright, regardless of category.
+    assertEquals(
+        "person",
+        NamedTransformFunctions.classify_party_kind(
+            Map.of("value", "ORGANIZATION", "entity_indicator", "M")));
+    assertEquals(
+        "person",
+        NamedTransformFunctions.classify_party_kind(
+            Map.of("value", "VESSEL", "entity_indicator", "I")));
+
+    // "E" is authoritatively non-person; category only refines physical_asset vs organization.
+    assertEquals(
+        "physical_asset",
+        NamedTransformFunctions.classify_party_kind(
+            Map.of("value", "VESSEL", "entity_indicator", "E")));
+    assertEquals(
+        "organization",
+        NamedTransformFunctions.classify_party_kind(
+            Map.of("value", "BANK", "entity_indicator", "E")));
+
+    // No (or unrecognised) discriminator falls back to category alone.
+    assertEquals(
+        "person", NamedTransformFunctions.classify_party_kind(Map.of("value", "INDIVIDUAL")));
+    assertEquals(
+        "organization",
+        NamedTransformFunctions.classify_party_kind(
+            Map.of("value", "ORGANIZATION", "entity_indicator", "X")));
+  }
+
+  @Test
+  void parsePartialDateYmd() {
+    assertEquals("1980-01-15", NamedTransformFunctions.parse_partial_date_ymd("1980/01/15"));
+    // A 0 placeholder in month or day means "unknown" - clamped to 1, not rejected.
+    assertEquals("1980-01-01", NamedTransformFunctions.parse_partial_date_ymd("1980/0/0"));
+    assertNull(NamedTransformFunctions.parse_partial_date_ymd("not/a/date"));
+    assertNull(NamedTransformFunctions.parse_partial_date_ymd("1980/01"));
+    assertNull(NamedTransformFunctions.parse_partial_date_ymd(null));
+    assertNull(NamedTransformFunctions.parse_partial_date_ymd(""));
+  }
+
+  @Test
+  void classifyPartyCategories() {
+    assertEquals(
+        List.of("sanctions", "pep"),
+        NamedTransformFunctions.classify_party_categories("Sanctions Related; PEP"));
+    // Aliases fold to the same canonical value; duplicates are dropped.
+    assertEquals(
+        List.of("sanctions"),
+        NamedTransformFunctions.classify_party_categories("Terror Related; Explicit Sanctions"));
+    assertEquals(
+        List.of("adverse_media"),
+        NamedTransformFunctions.classify_party_categories("Adverse Media - Financial Crime"));
+    // An unrecognised entry is skipped, not fatal to the rest of the list.
+    assertEquals(
+        List.of("enforcement"),
+        NamedTransformFunctions.classify_party_categories("Nonsense Category; Enforcement"));
+    assertEquals(List.of(), NamedTransformFunctions.classify_party_categories(null));
+    assertEquals(List.of(), NamedTransformFunctions.classify_party_categories(""));
+  }
+
+  @Test
+  void parseTildeDelimitedLocations() {
+    List<Map<String, Object>> locations =
+        NamedTransformFunctions.parse_tilde_delimited_locations(
+            "~ Moscow, Moscow Oblast ~ RUSSIA; ~ ~ SYRIA");
+    assertEquals(2, locations.size());
+
+    Map<String, Object> first = locations.get(0);
+    assertEquals("Moscow", first.get("city"));
+    assertEquals("Moscow Oblast", first.get("state_or_province"));
+    assertEquals("RUSSIA", first.get("country_name"));
+    assertEquals("RU", first.get("country_code"));
+    assertEquals("REGISTERED", first.get("location_type"));
+
+    Map<String, Object> second = locations.get(1);
+    assertNull(second.get("city"));
+    assertEquals("SYRIA", second.get("country_name"));
+    assertEquals("SY", second.get("country_code"));
+
+    // No city and an unresolvable/UNKNOWN country is dropped entirely, not emitted as a blank
+    // location - matches the origin's own real-data noise-filtering rule.
+    assertEquals(List.of(), NamedTransformFunctions.parse_tilde_delimited_locations("~ ~ UNKNOWN"));
+    assertEquals(List.of(), NamedTransformFunctions.parse_tilde_delimited_locations(null));
+    assertEquals(List.of(), NamedTransformFunctions.parse_tilde_delimited_locations(""));
   }
 }

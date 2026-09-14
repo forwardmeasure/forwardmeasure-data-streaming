@@ -20,11 +20,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.forwardmeasure.authzen.ActiveOrganization;
+import com.forwardmeasure.authzen.AuthorizationService;
+import com.forwardmeasure.authzen.testkit.StubAuthorizationService;
 import com.forwardmeasure.datastreaming.api.ExecutionSpec;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
+import com.forwardmeasure.jpa.tenancy.TenantId;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
 import com.forwardmeasure.testcontainers.junit.kubernetes.WithKubernetesContainer;
 import com.forwardmeasure.testcontainers.kubernetes.KubernetesTestContainer;
@@ -55,6 +59,13 @@ final class DirectIngestionLauncherTest {
       "docker.io/library/busybox@sha256:"
           + "73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662";
   private static final String MARKER = "launcher-test-marker-9f3c";
+  private static final AuthorizationService AUTHORIZATION = StubAuthorizationService.permitAll();
+  private static final ActiveOrganization ACTOR =
+      new ActiveOrganization(
+          new TenantId(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")),
+          "org-1",
+          "actor-1",
+          Set.of("reviewer"));
 
   @BeforeAll
   static void createNamespace(KubernetesTestContainer kubernetes) {
@@ -74,6 +85,7 @@ final class DirectIngestionLauncherTest {
     DirectIngestionLauncher launcher =
         new DirectIngestionLauncher(
             IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
+            AUTHORIZATION,
             STAND_IN_IMAGE,
             "grep -q " + MARKER);
     DirectLaunchRequest request =
@@ -86,8 +98,48 @@ final class DirectIngestionLauncherTest {
             null);
 
     try (KubernetesClient client = kubernetes.createClient()) {
-      String jobName = launcher.launch(client, request);
+      String jobName = launcher.launch(client, request, ACTOR);
       assertEquals(DirectIngestionLauncher.deterministicJobName(request.correlationId()), jobName);
+
+      KubernetesJobObservation observation =
+          pollUntilTerminal(launcher, client, request.correlationId());
+
+      assertEquals(KubernetesJobObservation.Phase.SUCCEEDED, observation.phase());
+    }
+  }
+
+  @Test
+  @Timeout(180)
+  void launchDispatchesToTheSparkRunnerWhenTheSpecAsksForIt(KubernetesTestContainer kubernetes)
+      throws InterruptedException {
+    // Deliberately distinguishing stand-in commands, not the same one for both engines: the pekko
+    // command looks for a marker that never appears in this spec's own source URI, so if dispatch
+    // ever picked the wrong (pekko) command by mistake, the Job would FAIL, not just "happen to
+    // also succeed" - a real, not incidental, proof that the spark path actually ran.
+    DirectIngestionLauncher launcher =
+        new DirectIngestionLauncher(
+            IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
+            AUTHORIZATION,
+            STAND_IN_IMAGE,
+            "grep -q this-marker-only-exists-in-the-pekko-path-never-in-this-test",
+            STAND_IN_IMAGE,
+            "grep -q " + MARKER,
+            List.of());
+    DirectLaunchRequest request =
+        new DirectLaunchRequest(
+            UUID.randomUUID().toString(),
+            NAMESPACE,
+            new IngestionSpec(
+                new SourceSpec("file", "file:///" + MARKER, null, null),
+                new TransformSpec("party", List.of()),
+                new SinkSpec("opensearch", "test-index", null, null),
+                new ExecutionSpec("spark", null, null, null)),
+            Map.of(),
+            Map.of(),
+            null);
+
+    try (KubernetesClient client = kubernetes.createClient()) {
+      launcher.launch(client, request, ACTOR);
 
       KubernetesJobObservation observation =
           pollUntilTerminal(launcher, client, request.correlationId());
@@ -102,6 +154,7 @@ final class DirectIngestionLauncherTest {
     DirectIngestionLauncher launcher =
         new DirectIngestionLauncher(
             IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
+            AUTHORIZATION,
             STAND_IN_IMAGE,
             "grep -q " + MARKER);
     IngestionSpec sparkSpec =
@@ -115,7 +168,8 @@ final class DirectIngestionLauncherTest {
             UUID.randomUUID().toString(), NAMESPACE, sparkSpec, Map.of(), Map.of(), null);
 
     try (KubernetesClient client = kubernetes.createClient()) {
-      assertThrows(UnsupportedOperationException.class, () -> launcher.launch(client, request));
+      assertThrows(
+          UnsupportedOperationException.class, () -> launcher.launch(client, request, ACTOR));
       assertTrue(
           client.batch().v1().jobs().inNamespace(NAMESPACE).list().getItems().stream()
               .noneMatch(
@@ -135,6 +189,7 @@ final class DirectIngestionLauncherTest {
     DirectIngestionLauncher launcher =
         new DirectIngestionLauncher(
             IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
+            AUTHORIZATION,
             STAND_IN_IMAGE,
             "sh -c 'sleep 300 #'");
     DirectLaunchRequest request =
@@ -147,20 +202,20 @@ final class DirectIngestionLauncherTest {
             null);
 
     try (KubernetesClient client = kubernetes.createClient()) {
-      launcher.launch(client, request);
+      launcher.launch(client, request, ACTOR);
 
       Optional<KubernetesJobObservation> beforeCancel;
       do {
-        beforeCancel = launcher.observe(client, NAMESPACE, request.correlationId());
+        beforeCancel = launcher.observe(client, NAMESPACE, request.correlationId(), ACTOR);
         Thread.sleep(200);
       } while (beforeCancel.isEmpty());
 
-      launcher.cancel(client, NAMESPACE, request.correlationId());
+      launcher.cancel(client, NAMESPACE, request.correlationId(), ACTOR);
 
       long deadline = System.currentTimeMillis() + 60_000;
       Optional<KubernetesJobObservation> afterCancel;
       do {
-        afterCancel = launcher.observe(client, NAMESPACE, request.correlationId());
+        afterCancel = launcher.observe(client, NAMESPACE, request.correlationId(), ACTOR);
         if (afterCancel.isEmpty()) {
           break;
         }
@@ -184,7 +239,7 @@ final class DirectIngestionLauncherTest {
       throws InterruptedException {
     while (true) {
       Optional<KubernetesJobObservation> observation =
-          launcher.observe(client, NAMESPACE, correlationId);
+          launcher.observe(client, NAMESPACE, correlationId, ACTOR);
       if (observation.isPresent() && isTerminal(observation.get().phase())) {
         return observation.get();
       }

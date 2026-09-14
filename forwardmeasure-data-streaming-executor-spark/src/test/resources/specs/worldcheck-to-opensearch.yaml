@@ -1,0 +1,129 @@
+# Real, runnable IngestionSpec: WorldCheck reference-population CSV -> OpenSearch, via the Spark
+# engine - the Spark sibling of executor-pekko's own identical-shaped spec. Rewritten 2026-09-14
+# alongside that one to use the REAL WorldCheck shape already checked in at
+# entity-intelligence-specifications' own schema-worldcheck-reference-population.yaml (tab-
+# delimited, ISO-8859-1, real column names with spaces/slashes) and
+# mapping-worldcheck-reference-population.yaml (real target fields/transforms) - see the Pekko
+# sibling spec's own comment for the full reasoning, including categories/locations (now populated
+# via classify_party_categories/parse_tilde_delimited_locations) and why classifications/
+# linked_parties remain unpopulated (no source mapping for either in the real mapping YAML).
+#
+# THE ACTUAL SOURCE SCHEMA FILE: this directory's own schema-worldcheck-reference-population.yaml
+# is a byte-identical copy of the real one - every column this spec's own `source:` section assumes
+# is documented there field-by-field. `source.schema.ref` below is still just a plain string today,
+# not resolved by anything in FDS (confirmed by grep) - this comment is what actually points a
+# reader at the real schema document until that resolution mechanism gets built for real.
+#
+# {{SOURCE_PATH}}/{{OPENSEARCH_URL}}/{{INDEX_SETTINGS_FILE}} are substituted at test time by
+# SparkWorldCheckToOpenSearchIntegrationTest. Unlike the Pekko sibling's {{SOURCE_URI}} (a full
+# Camel file: endpoint URI with its own charset option), {{SOURCE_PATH}} here is a bare filesystem
+# path - Spark's own DataFrameReader#load(path) takes one directly - and `sep`/`encoding` below are
+# Spark's own native, already-supported CSV reader options (confirmed real, not invented, from
+# Spark's own documented CSV data source options), passed straight through via source.options() the
+# same generic pass-through every other connector option already uses - no new Spark-side code was
+# needed for either, unlike Pekko's own PekkoIngestionRunner#parseCsvRows, which needed a real
+# `delimiter` option added (2026-09-14) since it previously hardcoded comma.
+#
+# sink.options.indexSettingsFile (see OpenSearchIndexInitializer, shared by both engines) points at
+# this module's own copy of the real screening-records-worldcheck-opensearch-indexing-spec.json -
+# byte-identical to executor-pekko's own copy and to the real, checked-in original.
+source:
+  connector: file
+  uri: "{{SOURCE_PATH}}"
+  format:
+    type: csv
+  options:
+    sep: "\t"
+    encoding: "ISO-8859-1"
+  schema:
+    ref: schema://worldcheck/reference-population/1.0
+
+mapper:
+  target: schema://party/1.0
+  fields:
+    - target: uid
+      source: UID
+    - target: names
+      template: "{LAST NAME}, {FIRST NAME}"
+      repeated: true
+      metadata:
+        name_type: PRIMARY
+    - target: names
+      source: ALIASES
+      transform: parse_semicolon_list
+      optional: true
+      repeated: true
+      metadata:
+        name_type: ALIAS
+    - target: entity_kind
+      inputs:
+        value: CATEGORY
+        entity_indicator: "E/I"
+      transform: classify_party_kind
+    - target: date_of_birth
+      source: DOB
+      transform: parse_partial_date_ymd
+      optional: true
+    - target: nationalities
+      source: CITIZENSHIP
+      transform: parse_semicolon_iso2_list
+      optional: true
+    - target: countries
+      source: COUNTRIES
+      transform: parse_semicolon_iso2_list
+      optional: true
+    - target: identifiers
+      source: SSN
+      optional: true
+      repeated: true
+      metadata:
+        scheme: SSN
+    - target: position
+      source: POSITION
+      optional: true
+    - target: pep_roles
+      source: "PEP ROLES"
+      transform: parse_tilde_list
+      optional: true
+    - target: pep_status
+      source: "PEP STATUS"
+      optional: true
+    - target: keywords
+      source: KEYWORDS
+      transform: parse_tilde_list
+      optional: true
+    - target: external_sources
+      source: "EXTERNAL SOURCES"
+      transform: parse_url_list
+      optional: true
+    - target: external_source_domains
+      source: "EXTERNAL SOURCES"
+      transform: extract_url_domains
+      optional: true
+    - target: further_information
+      source: "FURTHER INFORMATION"
+      optional: true
+    - target: categories
+      source: "SPECIAL INTEREST CATEGORIES"
+      transform: classify_party_categories
+      optional: true
+    - target: locations
+      source: LOCATIONS
+      transform: parse_tilde_delimited_locations
+      optional: true
+
+sink:
+  connector: opensearch
+  uri: "{{OPENSEARCH_URL}}"
+  index: worldcheck-screening-records
+  schema:
+    ref: schema://party/1.0
+  options:
+    idField: uid
+    indexSettingsFile: "{{INDEX_SETTINGS_FILE}}"
+
+execution:
+  engine: spark
+  failure:
+    malformedRecord: dead-letter
+    sinkFailure: retry

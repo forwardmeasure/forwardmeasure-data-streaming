@@ -69,7 +69,21 @@ public final class NamedTransformRegistry {
               inputs -> NamedTransformFunctions.parse_url_list(inputs.get("value"))),
           Map.entry(
               "extract_url_domains",
-              inputs -> NamedTransformFunctions.extract_url_domains(inputs.get("value"))));
+              inputs -> NamedTransformFunctions.extract_url_domains(inputs.get("value"))),
+          Map.entry(
+              "classify_party_category",
+              inputs -> NamedTransformFunctions.classify_party_category(inputs.get("value"))),
+          Map.entry("classify_party_kind", NamedTransformFunctions::classify_party_kind),
+          Map.entry(
+              "parse_partial_date_ymd",
+              inputs -> NamedTransformFunctions.parse_partial_date_ymd(inputs.get("value"))),
+          Map.entry(
+              "classify_party_categories",
+              inputs -> NamedTransformFunctions.classify_party_categories(inputs.get("value"))),
+          Map.entry(
+              "parse_tilde_delimited_locations",
+              inputs ->
+                  NamedTransformFunctions.parse_tilde_delimited_locations(inputs.get("value"))));
 
   private NamedTransformRegistry() {}
 

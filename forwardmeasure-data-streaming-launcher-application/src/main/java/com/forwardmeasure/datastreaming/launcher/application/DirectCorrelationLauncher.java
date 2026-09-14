@@ -16,44 +16,58 @@
  */
 package com.forwardmeasure.datastreaming.launcher.application;
 
+import com.forwardmeasure.authzen.ActiveOrganization;
+import com.forwardmeasure.authzen.AuthorizationRequest;
+import com.forwardmeasure.authzen.AuthorizationService;
 import com.forwardmeasure.datastreaming.api.CorrelationSpec;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobLifecycle;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
-import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobSpec;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Direct mode's Spark-correlation counterpart to {@link DirectIngestionLauncher} - runs a {@link
- * CorrelationSpec} as one real Kubernetes Job (the {@code SparkIngestionRunner} entrypoint), with
- * no fowf workflow engine involved, closing the "spark engine unlaunchable" gap {@link
- * DirectIngestionLauncher}'s own javadoc documented: {@code CorrelationSpec} and a real Spark
- * runner entrypoint both exist now, so the launcher can dispatch a correlation run the same way it
- * already dispatches a single-source Pekko one - same reconstruction mechanism (spec → YAML →
- * base64 env var → pod-side shell decode → exec), same {@link KubernetesJobLifecycle} delegation,
- * same {@link IngestionJobPolicy} authorization discipline, deliberately kept as its own class
- * rather than folded into {@link DirectIngestionLauncher} since the two run genuinely different
- * spec types against genuinely different runner images.
+ * Direct mode's correlation counterpart to {@link DirectIngestionLauncher} - runs a {@link
+ * CorrelationSpec} as one real Kubernetes Job, with no fowf workflow engine involved, closing the
+ * "spark engine unlaunchable" gap {@link DirectIngestionLauncher}'s own javadoc documented.
+ *
+ * <p>{@code execution.engine()} may be {@code "spark"} (always supported - {@code
+ * SparkCorrelationRunner}) or {@code "pekko"} (supported when constructed with a {@code
+ * pekkoRunnerImage} - {@code PekkoCorrelationRunner}, added 2026-09-13 for a bounded correlation
+ * run small enough that Spark's own cluster/shuffle machinery is genuine overkill; see {@code
+ * PekkoCorrelationEngine}'s own javadoc for why it produces the identical merge result, just
+ * without a real distributed shuffle). Before 2026-09-13 this class never actually checked {@code
+ * execution.engine()} at all - it silently ran the Spark runner regardless of what the spec's own
+ * engine field said, which a caller passing a typo'd or unimplemented engine value would never have
+ * been told about; that's fixed here too, not just the symmetry.
+ *
+ * <p><b>Refactored 2026-09-13</b> to a thin adapter over {@link EnvConfiguredJobLauncher}, same as
+ * {@link DirectIngestionLauncher} - this class's real, distinct value is picking which configured
+ * runner image/command a spec's engine maps to, and the {@code CorrelationSpec} → base64-env-var →
+ * pod-side shell reconstruction convention, not the K8s API calls underneath (now shared, not
+ * duplicated a third time). Public API and the real, established {@code fds-corr-} Job-name prefix
+ * are unchanged.
  */
 public final class DirectCorrelationLauncher {
 
+  private static final String SPARK_ENGINE = "spark";
+  private static final String PEKKO_ENGINE = "pekko";
   private static final String JOB_NAME_PREFIX = "fds-corr-";
   private static final String SPEC_ENV_VAR = "CORRELATION_SPEC_YAML_BASE64";
   private static final String SPEC_FILE_PATH = "/tmp/correlation-spec.yaml";
-  private static final String CORRELATION_ID_LABEL =
-      "data-streaming.forwardmeasure.com/correlation-id";
 
-  private final IngestionJobPolicy policy;
+  private final EnvConfiguredJobLauncher delegate;
+  private final AuthorizationService authorization;
   private final String sparkRunnerImage;
   private final String sparkRunnerCommand;
+  private final String pekkoRunnerImage;
+  private final String pekkoRunnerCommand;
   private final List<String> imagePullSecretNames;
 
   /**
@@ -62,8 +76,11 @@ public final class DirectCorrelationLauncher {
    *     argument, same convention as {@link DirectIngestionLauncher}'s own constructor.
    */
   public DirectCorrelationLauncher(
-      IngestionJobPolicy policy, String sparkRunnerImage, String sparkRunnerCommand) {
-    this(policy, sparkRunnerImage, sparkRunnerCommand, List.of());
+      IngestionJobPolicy policy,
+      AuthorizationService authorization,
+      String sparkRunnerImage,
+      String sparkRunnerCommand) {
+    this(policy, authorization, sparkRunnerImage, sparkRunnerCommand, List.of());
   }
 
   /**
@@ -72,12 +89,48 @@ public final class DirectCorrelationLauncher {
    */
   public DirectCorrelationLauncher(
       IngestionJobPolicy policy,
+      AuthorizationService authorization,
       String sparkRunnerImage,
       String sparkRunnerCommand,
       List<String> imagePullSecretNames) {
-    this.policy = Objects.requireNonNull(policy, "policy");
+    this(
+        policy,
+        authorization,
+        sparkRunnerImage,
+        sparkRunnerCommand,
+        null,
+        null,
+        imagePullSecretNames);
+  }
+
+  /**
+   * @param pekkoRunnerImage enables {@code execution.engine() == "pekko"} when non-null (added
+   *     2026-09-13, together with {@code pekkoRunnerCommand}) - both {@code null} (the other
+   *     constructors' behavior) means this instance only supports {@code spark}, matching this
+   *     class's own original scope exactly.
+   * @param pekkoRunnerCommand the shell command that runs the reconstructed spec via {@code
+   *     PekkoCorrelationRunner}, same spec-file-as-final-argument convention as {@code
+   *     sparkRunnerCommand}.
+   * @param authorization real, fail-closed caller authorization, added 2026-09-14 (see
+   *     docs/fds-authorization-remediation-guide.md) - checked at the top of {@link #launch}/{@link
+   *     #observe}/{@link #cancel}, before {@link IngestionJobPolicy} ever runs; see {@link
+   *     DirectIngestionLauncher}'s own matching constructor javadoc for why both checks are needed.
+   */
+  public DirectCorrelationLauncher(
+      IngestionJobPolicy policy,
+      AuthorizationService authorization,
+      String sparkRunnerImage,
+      String sparkRunnerCommand,
+      String pekkoRunnerImage,
+      String pekkoRunnerCommand,
+      List<String> imagePullSecretNames) {
+    this.delegate =
+        new EnvConfiguredJobLauncher(Objects.requireNonNull(policy, "policy"), JOB_NAME_PREFIX);
+    this.authorization = Objects.requireNonNull(authorization, "authorization");
     this.sparkRunnerImage = Objects.requireNonNull(sparkRunnerImage, "sparkRunnerImage");
     this.sparkRunnerCommand = Objects.requireNonNull(sparkRunnerCommand, "sparkRunnerCommand");
+    this.pekkoRunnerImage = pekkoRunnerImage;
+    this.pekkoRunnerCommand = pekkoRunnerCommand;
     this.imagePullSecretNames =
         imagePullSecretNames == null ? List.of() : List.copyOf(imagePullSecretNames);
   }
@@ -85,44 +138,81 @@ public final class DirectCorrelationLauncher {
   /**
    * Launches {@code request.correlationSpec()} as one Job. Returns the deterministic Job name
    * ({@link #deterministicJobName}) a caller uses with {@link #observe}/{@link #cancel}.
+   *
+   * @throws UnsupportedOperationException if the spec's engine is {@code pekko} but this instance
+   *     wasn't constructed with a {@code pekkoRunnerImage}, or if it's anything other than {@code
+   *     spark}/{@code pekko} (see this class's own javadoc for the real, current engine scope)
    */
-  public String launch(KubernetesClient client, DirectCorrelationLaunchRequest request) {
-    policy.authorizeNamespace(request.namespace());
-    policy.authorizeImage(sparkRunnerImage);
-
-    String jobName = deterministicJobName(request.correlationId());
-    KubernetesJobSpec jobSpec =
-        new KubernetesJobSpec(
+  public String launch(
+      KubernetesClient client, DirectCorrelationLaunchRequest request, ActiveOrganization actor) {
+    authorization.requireAuthorized(
+        new AuthorizationRequest(
+            actor,
+            DataStreamingAuthorizationResources.correlationRun(request.correlationId()),
+            AuthorizationAction.CORRELATION_RUN_LAUNCH,
+            request.correlationId(),
+            Map.of()));
+    String engine = request.correlationSpec().execution().engine();
+    String image;
+    String command;
+    if (SPARK_ENGINE.equals(engine)) {
+      image = sparkRunnerImage;
+      command = sparkRunnerCommand;
+    } else if (PEKKO_ENGINE.equals(engine) && pekkoRunnerImage != null) {
+      image = pekkoRunnerImage;
+      command = pekkoRunnerCommand;
+    } else {
+      throw new UnsupportedOperationException(
+          "DirectCorrelationLauncher: engine '"
+              + engine
+              + "' is not supported by this instance - 'spark' is always supported; 'pekko' needs"
+              + " this instance constructed with a pekkoRunnerImage (see this class's own"
+              + " javadoc)");
+    }
+    EnvLaunchRequest envRequest =
+        new EnvLaunchRequest(
+            request.correlationId(),
             request.namespace(),
-            jobName,
-            Map.of(CORRELATION_ID_LABEL, labelSafe(request.correlationId())),
-            sparkRunnerImage,
+            image,
             List.of("sh", "-c"),
-            List.of(reconstructSpecAndRunCommand(sparkRunnerCommand)),
+            List.of(reconstructSpecAndRunCommand(command)),
             Map.of(SPEC_ENV_VAR, encodeSpecYaml(request.correlationSpec())),
             request.resourceRequests(),
             request.resourceLimits(),
-            1,
-            1,
-            0,
             request.activeDeadlineSeconds(),
             imagePullSecretNames);
-    KubernetesJobLifecycle.launch(client, jobSpec);
-    return jobName;
+    return delegate.launch(client, envRequest);
   }
 
   public Optional<KubernetesJobObservation> observe(
-      KubernetesClient client, String namespace, String correlationId) {
-    return KubernetesJobLifecycle.observe(client, namespace, deterministicJobName(correlationId));
+      KubernetesClient client, String namespace, String correlationId, ActiveOrganization actor) {
+    authorization.requireAuthorized(
+        new AuthorizationRequest(
+            actor,
+            DataStreamingAuthorizationResources.correlationRun(correlationId),
+            AuthorizationAction.CORRELATION_RUN_READ,
+            correlationId,
+            Map.of()));
+    return delegate.observe(client, namespace, correlationId);
   }
 
-  public void cancel(KubernetesClient client, String namespace, String correlationId) {
-    KubernetesJobLifecycle.cancel(client, namespace, deterministicJobName(correlationId));
+  public void cancel(
+      KubernetesClient client, String namespace, String correlationId, ActiveOrganization actor) {
+    authorization.requireAuthorized(
+        new AuthorizationRequest(
+            actor,
+            DataStreamingAuthorizationResources.correlationRun(correlationId),
+            AuthorizationAction.CORRELATION_RUN_CANCEL,
+            correlationId,
+            Map.of()));
+    delegate.cancel(client, namespace, correlationId);
   }
 
   /**
    * The same correlation id always resolves to the same Job name - see {@link
-   * DirectCorrelationLaunchRequest}.
+   * DirectCorrelationLaunchRequest}. Computed directly, not via {@link EnvConfiguredJobLauncher
+   * #deterministicJobName} (that method's default prefix isn't this class's real {@code fds-corr-}
+   * one) - must stay in lockstep with the prefix passed to this class's own {@code delegate} above.
    */
   public static String deterministicJobName(String correlationId) {
     return KubernetesJobLifecycle.deterministicName(JOB_NAME_PREFIX, correlationId);
@@ -145,10 +235,5 @@ public final class DirectCorrelationLauncher {
     } catch (IOException e) {
       throw new UncheckedIOException("failed to serialize CorrelationSpec to YAML", e);
     }
-  }
-
-  private static String labelSafe(String value) {
-    String sanitized = value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]", "-");
-    return sanitized.length() > 63 ? sanitized.substring(0, 63) : sanitized;
   }
 }

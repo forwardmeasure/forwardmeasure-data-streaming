@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec.FieldRule;
+import com.forwardmeasure.datastreaming.core.IngestionPipeline;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -89,9 +90,11 @@ class SparkCorrelationEngineIntegrationTest {
 
     LOGGER.info("Running correlation: 2 source(s), blocking on 'uid'");
     JavaRDD<SparkCorrelationRecord> mappedA =
-        SparkCorrelationEngine.readAndMap(spark, sourceA, "uid", Map.of());
+        SparkCorrelationEngine.readAndMap(
+            spark, sourceA, "uid", Map.of(), IngestionPipeline.MalformedRecordPolicy.SKIP);
     JavaRDD<SparkCorrelationRecord> mappedB =
-        SparkCorrelationEngine.readAndMap(spark, sourceB, "uid", Map.of());
+        SparkCorrelationEngine.readAndMap(
+            spark, sourceB, "uid", Map.of(), IngestionPipeline.MalformedRecordPolicy.SKIP);
     List<Map<String, Object>> merged =
         SparkCorrelationEngine.correlate(List.of(mappedA, mappedB)).collect();
     LOGGER.info("Correlation finished: groupCount={}", merged.size());
@@ -115,6 +118,29 @@ class SparkCorrelationEngineIntegrationTest {
     assertEquals("US", s3.get("nationality_code"));
     assertEquals("1975-05-20", s3.get("date_of_birth"));
     assertFalse(s3.containsKey("name"), "S3 was never given a name");
+  }
+
+  @Test
+  void readsAJsonFileSourceWithNoNewJavaJustAFormatMetadataChange(@TempDir Path tempDir)
+      throws IOException {
+    // Proves readSource()'s 2026-09-13 rewrite genuinely dispatches off `format.type()`, not a
+    // hardcoded connector->parser mapping: the only difference from every other test in this class
+    // is the FormatSpec("json") below - no new SparkCorrelationEngine code exists for JSON at all,
+    // Spark's own already-present spark-sql core module supplies the "json" DataFrameReader format.
+    Path sourceJson = writeFile(tempDir, "source.jsonl", SOURCE_JSON);
+    SourceSpec source =
+        new SourceSpec("file", sourceJson.toString(), new SourceSpec.FormatSpec("json"), null);
+
+    JavaRDD<Map<String, Object>> mapped =
+        SparkCorrelationEngine.readAndMapSingleSource(
+            spark, source, mappingA(), Map.of(), IngestionPipeline.MalformedRecordPolicy.SKIP);
+    List<Map<String, Object>> rows = mapped.collect();
+
+    assertEquals(2, rows.size());
+    Map<String, Object> s1 = findByUid(rows, "S1");
+    assertEquals("Alice Anderson", s1.get("name"));
+    Map<String, Object> s2 = findByUid(rows, "S2");
+    assertEquals("Bob Baker", s2.get("name"));
   }
 
   private static Map<String, Object> findByUid(List<Map<String, Object>> merged, String uid) {
@@ -160,5 +186,11 @@ class SparkCorrelationEngineIntegrationTest {
       ID,NATIONALITY,DOB_GUESS
       S1,GB,1899-01-01
       S3,US,1975-05-20
+      """;
+
+  private static final String SOURCE_JSON =
+      """
+      {"ID":"S1","FULL_NAME":"Alice Anderson","DOB":"1985-03-12"}
+      {"ID":"S2","FULL_NAME":"Bob Baker","DOB":"1990-07-04"}
       """;
 }

@@ -18,5 +18,12 @@
     <dependency><groupId>com.fasterxml.jackson.datatype</groupId><artifactId>jackson-datatype-jsr310</artifactId></dependency>
     <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId></dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+    <!-- Test-only: OpenSearchIndexInitializerTest proves the real index-creation HTTP mechanics
+         against a real OpenSearch node, not mocked - this org's own testing convention. -->
+    <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-opensearch</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-junit-jupiter</artifactId><scope>test</scope></dependency>
+    <!-- Real artifactId confirmed from the actual cached BOM (2.0.5) - testcontainers 2.x renamed
+         this from the older "junit-jupiter" (1.x) to "testcontainers-junit-jupiter". -->
+    <dependency><groupId>org.testcontainers</groupId><artifactId>testcontainers-junit-jupiter</artifactId><scope>test</scope></dependency>
   </dependencies>
 </project>

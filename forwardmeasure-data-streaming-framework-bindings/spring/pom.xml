@@ -35,6 +35,20 @@
         </exclusion>
       </exclusions>
     </dependency>
+    <dependency>
+      <!-- Verified-JWT extraction (SpringActiveOrganizationProvider) and the real
+           "authenticated by default" SecurityFilterChain, added 2026-09-14 to close a confirmed
+           real gap - see docs/fds-authorization-remediation-guide.md - mirrors
+           forwardmeasure-entity-intelligence's own spring-binding pom exactly. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+    </dependency>
+    <dependency>
+      <!-- AuthzenAuthorizationFactory.create(...) - the real Keycloak AuthZEN PDP client this
+           module's own authorizationService(...) bean wires. -->
+      <groupId>com.forwardmeasure.authzen</groupId>
+      <artifactId>forwardmeasure-authzen-client</artifactId>
+    </dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
   </dependencies>
 </project>

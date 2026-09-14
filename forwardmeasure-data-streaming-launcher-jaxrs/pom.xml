@@ -20,8 +20,25 @@
   </properties>
   <dependencies>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-launcher-application</artifactId></dependency>
+    <dependency>
+      <!-- ActiveOrganizationProvider (identity extracted upstream by whichever framework binding
+           assembles this resource) and AuthorizationDeniedException/AuthorizationUnavailableException/
+           AuthenticationRequiredException, mapped by this module's own new mapper classes - see
+           SecurityExceptionMapper's own javadoc for why those three are deliberately NOT
+           SecurityException (reserved here for IngestionJobPolicy's distinct 403 case). -->
+      <groupId>com.forwardmeasure.authzen</groupId>
+      <artifactId>forwardmeasure-authzen-api</artifactId>
+    </dependency>
     <dependency><groupId>jakarta.ws.rs</groupId><artifactId>jakarta.ws.rs-api</artifactId><scope>provided</scope></dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+    <dependency>
+      <!-- StubAuthorizationService.permitAll() - these resource tests prove real HTTP wiring
+           (status codes, Location, response bodies), not the AuthZEN decision itself, matching
+           forwardmeasure-entity-intelligence's own tests. -->
+      <groupId>com.forwardmeasure.authzen</groupId>
+      <artifactId>forwardmeasure-authzen-testkit</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <!-- Test-only JAX-RS RuntimeDelegate - jakarta.ws.rs-api alone (provided scope, no impl) can't
            actually construct a Response at runtime; this org's own established fix for exactly this

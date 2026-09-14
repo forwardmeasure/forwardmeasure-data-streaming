@@ -18,11 +18,14 @@ package com.forwardmeasure.datastreaming.launcher.application;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import com.forwardmeasure.authzen.ActiveOrganization;
+import com.forwardmeasure.authzen.testkit.StubAuthorizationService;
 import com.forwardmeasure.datastreaming.api.ExecutionSpec;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
+import com.forwardmeasure.jpa.tenancy.TenantId;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
 import com.forwardmeasure.testcontainers.junit.kubernetes.WithKubernetesContainer;
 import com.forwardmeasure.testcontainers.kubernetes.KubernetesTestContainer;
@@ -46,7 +49,7 @@ import org.junit.jupiter.api.Timeout;
  * The real thing, not a stand-in: pulls the actual {@code
  * docker.io/forwardmeasure/data-streaming-executor-pekko} image (private - built and pushed
  * 2026-09-13, see this repo's own live gap tracker) into a real K3s cluster via a real {@code
- * imagePullSecret}, runs its real {@code IngestionPipelineRunner.main()}, and proves a real CSV row
+ * imagePullSecret}, runs its real {@code PekkoIngestionRunner.main()}, and proves a real CSV row
  * flows through a real Camel source, the real transform engine, and the real (async, non-lossy)
  * Camel sink this session fixed - the same class of proof {@code DirectIngestionLauncherTest}
  * already gives for the launch/observe/cancel mechanics using a {@code busybox} stand-in, this time
@@ -76,6 +79,12 @@ final class DirectIngestionLauncherRealImageIntegrationTest {
   private static final String SEED_AND_RUN_COMMAND =
       "sh -c 'printf \"id,name\\nS1,Alice Anderson\\n\" > /tmp/source.csv && "
           + "exec java -jar /deployments/application.jar /tmp/ingestion-spec.yaml'";
+  private static final ActiveOrganization ACTOR =
+      new ActiveOrganization(
+          new TenantId(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")),
+          "org-1",
+          "actor-1",
+          Set.of("reviewer"));
 
   @Test
   @Timeout(300)
@@ -102,6 +111,7 @@ final class DirectIngestionLauncherRealImageIntegrationTest {
       DirectIngestionLauncher launcher =
           new DirectIngestionLauncher(
               IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(PEKKO_IMAGE)),
+              StubAuthorizationService.permitAll(),
               PEKKO_IMAGE,
               SEED_AND_RUN_COMMAND,
               List.of(PULL_SECRET_NAME));
@@ -114,7 +124,7 @@ final class DirectIngestionLauncherRealImageIntegrationTest {
               Map.of(),
               null);
 
-      String jobName = launcher.launch(client, request);
+      String jobName = launcher.launch(client, request, ACTOR);
 
       KubernetesJobObservation observation =
           pollUntilTerminal(launcher, client, request.correlationId());
@@ -194,7 +204,7 @@ final class DirectIngestionLauncherRealImageIntegrationTest {
     KubernetesJobObservation.Phase lastLoggedPhase = null;
     while (true) {
       Optional<KubernetesJobObservation> observation =
-          launcher.observe(client, NAMESPACE, correlationId);
+          launcher.observe(client, NAMESPACE, correlationId, ACTOR);
       if (observation.isPresent() && observation.get().phase() != lastLoggedPhase) {
         lastLoggedPhase = observation.get().phase();
         LOGGER.info("observed {}", observation.get());

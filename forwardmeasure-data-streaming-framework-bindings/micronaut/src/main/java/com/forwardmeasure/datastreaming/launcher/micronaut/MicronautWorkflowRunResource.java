@@ -16,6 +16,7 @@
  */
 package com.forwardmeasure.datastreaming.launcher.micronaut;
 
+import com.forwardmeasure.authzen.ActiveOrganizationProvider;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.WorkflowRunResource;
 import jakarta.inject.Inject;
@@ -30,7 +31,8 @@ import jakarta.inject.Singleton;
 public final class MicronautWorkflowRunResource extends WorkflowRunResource {
 
   @Inject
-  public MicronautWorkflowRunResource(WorkflowIngestionLauncher launcher) {
-    super(launcher);
+  public MicronautWorkflowRunResource(
+      WorkflowIngestionLauncher launcher, ActiveOrganizationProvider organizations) {
+    super(launcher, organizations);
   }
 }

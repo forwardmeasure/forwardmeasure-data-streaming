@@ -46,6 +46,16 @@
       <groupId>com.forwardmeasure.openworkflow</groupId>
       <artifactId>openworkflow-execution-models</artifactId>
     </dependency>
+    <dependency>
+      <!-- AuthorizationService/AuthorizationRequest/ActiveOrganization/Action - real, fail-closed
+           caller authorization for all three launchers, added 2026-09-14 to close a confirmed gap
+           (every endpoint ran with zero authorization - see
+           docs/fds-authorization-remediation-guide.md). Depended on directly rather than ported
+           locally: the whole point of the 2026-09-14 fowf/fei/FDS AuthZEN consolidation was that
+           this transport contract belongs in one shared library, not a third product-local copy. -->
+      <groupId>com.forwardmeasure.authzen</groupId>
+      <artifactId>forwardmeasure-authzen-api</artifactId>
+    </dependency>
     <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId></dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
     <dependency>
@@ -66,6 +76,24 @@
            same reasoning as -executor-pekko's own pom. -->
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-simple</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- StubAuthorizationService.permitAll()/denyAll() - every existing launcher test proves its
+           own real launch/observe/cancel mechanics, not the AuthZEN decision itself (that's proven
+           separately, by this module's own DirectIngestionLauncherKeycloakIntegrationTest), so
+           these tests use a stub the same way forwardmeasure-entity-intelligence's own tests do. -->
+      <groupId>com.forwardmeasure.authzen</groupId>
+      <artifactId>forwardmeasure-authzen-testkit</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- The real Keycloak AuthZEN PDP client - DirectIngestionLauncherKeycloakIntegrationTest's
+           own proof that this launcher's real authorize(...) call reaches a genuine Keycloak 26.7
+           AuthZEN evaluation, not a fake/stubbed one, mirroring
+           forwardmeasure-authzen-client's own AuthzenAuthorizationServiceKeycloakIntegrationTest. -->
+      <groupId>com.forwardmeasure.authzen</groupId>
+      <artifactId>forwardmeasure-authzen-client</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>

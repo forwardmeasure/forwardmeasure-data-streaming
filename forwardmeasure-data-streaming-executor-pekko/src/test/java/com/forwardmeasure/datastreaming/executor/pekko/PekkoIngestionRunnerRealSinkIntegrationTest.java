@@ -40,10 +40,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Real, no-mocks proof that {@link IngestionPipelineRunner#run(IngestionSpec, ActorSystem)} writes
- * to an actual Camel sink endpoint, not a placeholder - and specifically that it does so
- * completely: an earlier version of this same test (backed by {@code CamelBridge}'s own now-removed
- * {@code sink()} helper) caught a real, confirmed bug where the last one or two rows were silently
+ * Real, no-mocks proof that {@link PekkoIngestionRunner#run(IngestionSpec, ActorSystem)} writes to
+ * an actual Camel sink endpoint, not a placeholder - and specifically that it does so completely:
+ * an earlier version of this same test (backed by {@code CamelBridge}'s own now-removed {@code
+ * sink()} helper) caught a real, confirmed bug where the last one or two rows were silently
  * dropped, since that helper's underlying {@code onNext()} dispatch was fire-and-forget relative to
  * the actual Camel send (see {@code CamelBridge}'s own javadoc). Uses {@code camel-file} for both
  * source and sink - the same component already proven on the source side, in producer mode this
@@ -52,7 +52,7 @@ import org.junit.jupiter.api.io.TempDir;
  * concurrently and the sink's own {@code parallelism > 1} means row order in the output file is not
  * guaranteed to match input order.
  */
-class IngestionPipelineRunnerRealSinkIntegrationTest {
+class PekkoIngestionRunnerRealSinkIntegrationTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -88,9 +88,9 @@ class IngestionPipelineRunnerRealSinkIntegrationTest {
                 new ExecutionSpec.FailureSpec("dead-letter", "retry")));
 
     ActorSystem system = ActorSystem.create("ingestion-pipeline-runner-real-sink-test");
-    IngestionPipelineRunner.IngestionResult result;
+    PekkoIngestionRunner.IngestionResult result;
     try {
-      result = new IngestionPipelineRunner().run(spec, system);
+      result = new PekkoIngestionRunner().run(spec, system);
     } finally {
       system.terminate();
     }
@@ -106,7 +106,7 @@ class IngestionPipelineRunnerRealSinkIntegrationTest {
     assertEquals(3, lines.size(), "expected one NDJSON line per mapped row, got: " + lines);
 
     List<JsonNode> rows =
-        lines.stream().map(IngestionPipelineRunnerRealSinkIntegrationTest::readTree).toList();
+        lines.stream().map(PekkoIngestionRunnerRealSinkIntegrationTest::readTree).toList();
     assertRowPresent(rows, "1", "Alice");
     assertRowPresent(rows, "2", "Bob");
     assertRowPresent(rows, "3", "Charlie");

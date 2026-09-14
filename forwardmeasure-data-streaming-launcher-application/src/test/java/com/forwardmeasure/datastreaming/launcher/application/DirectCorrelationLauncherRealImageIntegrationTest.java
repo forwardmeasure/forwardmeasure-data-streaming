@@ -18,11 +18,14 @@ package com.forwardmeasure.datastreaming.launcher.application;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import com.forwardmeasure.authzen.ActiveOrganization;
+import com.forwardmeasure.authzen.testkit.StubAuthorizationService;
 import com.forwardmeasure.datastreaming.api.CorrelationSpec;
 import com.forwardmeasure.datastreaming.api.ExecutionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
+import com.forwardmeasure.jpa.tenancy.TenantId;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
 import com.forwardmeasure.testcontainers.junit.kubernetes.WithKubernetesContainer;
 import com.forwardmeasure.testcontainers.kubernetes.KubernetesTestContainer;
@@ -45,9 +48,18 @@ import org.junit.jupiter.api.Timeout;
 /**
  * The Spark sibling of {@code DirectIngestionLauncherRealImageIntegrationTest}: pulls the actual
  * private {@code docker.io/forwardmeasure/data-streaming-executor-spark} image into a real K3s
- * cluster via a real {@code imagePullSecret} and runs its real {@code SparkIngestionRunner.main()}
- * against one real, seeded CSV row - the same real-image proof, this time for the Spark/{@link
- * CorrelationSpec} path.
+ * cluster via a real {@code imagePullSecret} and runs its real {@code
+ * SparkCorrelationRunner.main()} against one real, seeded CSV row - the same real-image proof, this
+ * time for the Spark/{@link CorrelationSpec} path.
+ *
+ * <p>{@code SPARK_IMAGE} was rebuilt and repushed 2026-09-14 from current source (post {@code
+ * SparkIngestionRunner}/{@code SparkCorrelationRunner} split) - the digest below is the real,
+ * registry-confirmed one, read from the local image's own {@code RepoDigests} after the push
+ * (`docker inspect --format='{{json .RepoDigests}}'`), not assumed from the tag alone. {@code
+ * SEED_AND_RUN_COMMAND} explicitly invokes {@code SparkCorrelationRunner} via {@code -cp} rather
+ * than the image's own {@code ENTRYPOINT java -jar application.jar} default, since that default now
+ * runs {@code SparkIngestionRunner} ({@code IngestionSpec} only) - the two classes were split out
+ * of what used to be one combined class (see both classes' own javadoc).
  *
  * <p>Needs real Docker Hub credentials the test never hardcodes - skipped if {@code
  * DOCKER_HUB_USERNAME}/{@code DOCKER_HUB_TOKEN} aren't set.
@@ -60,11 +72,19 @@ final class DirectCorrelationLauncherRealImageIntegrationTest {
   private static final String NAMESPACE = "real-spark-image-test";
   private static final String SPARK_IMAGE =
       "docker.io/forwardmeasure/data-streaming-executor-spark@sha256:"
-          + "bc04957003c4796c0e08d27b06de524a20d61862f639d48fdecd602290d6f966";
+          + "01e85d81b3c2e6c42d94ff9752570b6775f6ba40dc936fee23d4da5527e0b56c";
   private static final String PULL_SECRET_NAME = "dockerhub-pull-secret";
   private static final String SEED_AND_RUN_COMMAND =
       "sh -c 'printf \"ID,FULL_NAME\\nS1,Alice Anderson\\n\" > /tmp/source.csv && "
-          + "exec java -jar /deployments/application.jar /tmp/correlation-spec.yaml'";
+          + "exec java -cp /deployments/application.jar:/deployments/dependency/* "
+          + "com.forwardmeasure.datastreaming.executor.spark.SparkCorrelationRunner "
+          + "/tmp/correlation-spec.yaml'";
+  private static final ActiveOrganization ACTOR =
+      new ActiveOrganization(
+          new TenantId(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")),
+          "org-1",
+          "actor-1",
+          Set.of("reviewer"));
 
   @Test
   @Timeout(300)
@@ -91,6 +111,7 @@ final class DirectCorrelationLauncherRealImageIntegrationTest {
       DirectCorrelationLauncher launcher =
           new DirectCorrelationLauncher(
               IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(SPARK_IMAGE)),
+              StubAuthorizationService.permitAll(),
               SPARK_IMAGE,
               SEED_AND_RUN_COMMAND,
               List.of(PULL_SECRET_NAME));
@@ -103,7 +124,7 @@ final class DirectCorrelationLauncherRealImageIntegrationTest {
               Map.of(),
               null);
 
-      String jobName = launcher.launch(client, request);
+      String jobName = launcher.launch(client, request, ACTOR);
 
       KubernetesJobObservation observation =
           pollUntilTerminal(launcher, client, request.correlationId());
@@ -185,7 +206,7 @@ final class DirectCorrelationLauncherRealImageIntegrationTest {
     KubernetesJobObservation.Phase lastLoggedPhase = null;
     while (true) {
       Optional<KubernetesJobObservation> observation =
-          launcher.observe(client, NAMESPACE, correlationId);
+          launcher.observe(client, NAMESPACE, correlationId, ACTOR);
       if (observation.isPresent() && observation.get().phase() != lastLoggedPhase) {
         lastLoggedPhase = observation.get().phase();
         LOGGER.info("observed {}", observation.get());

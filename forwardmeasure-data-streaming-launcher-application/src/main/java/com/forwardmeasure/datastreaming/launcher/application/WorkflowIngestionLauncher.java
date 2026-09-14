@@ -16,11 +16,15 @@
  */
 package com.forwardmeasure.datastreaming.launcher.application;
 
+import com.forwardmeasure.authzen.ActiveOrganization;
+import com.forwardmeasure.authzen.AuthorizationRequest;
+import com.forwardmeasure.authzen.AuthorizationService;
 import com.forwardmeasure.openworkflow.execution.api.model.Execution;
 import com.forwardmeasure.openworkflow.execution.api.model.ExecutionControl;
 import com.forwardmeasure.openworkflow.execution.api.model.ExecutionStart;
 import com.forwardmeasure.openworkflow.execution.client.ApiException;
 import com.forwardmeasure.openworkflow.execution.client.api.ExecutionsApi;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -42,22 +46,44 @@ import java.util.UUID;
 public final class WorkflowIngestionLauncher {
 
   private final ExecutionsApi executionsApi;
+  private final AuthorizationService authorization;
 
-  public WorkflowIngestionLauncher(ExecutionsApi executionsApi) {
+  public WorkflowIngestionLauncher(
+      ExecutionsApi executionsApi, AuthorizationService authorization) {
     this.executionsApi = Objects.requireNonNull(executionsApi, "executionsApi");
+    this.authorization = Objects.requireNonNull(authorization, "authorization");
   }
 
   /**
    * Starts the execution. Returns fowf's own {@link Execution} resource (admitted, not completed).
+   * Authorized against {@code request.correlationId()} - fowf hasn't assigned a real execution id
+   * yet at this point (see docs/fds-authorization-remediation-guide.md, added 2026-09-14 to close a
+   * confirmed real caller-authorization gap).
    */
-  public Execution launch(WorkflowLaunchRequest request) throws ApiException {
+  public Execution launch(WorkflowLaunchRequest request, ActiveOrganization actor)
+      throws ApiException {
+    authorization.requireAuthorized(
+        new AuthorizationRequest(
+            actor,
+            DataStreamingAuthorizationResources.workflowRun(request.correlationId()),
+            AuthorizationAction.WORKFLOW_RUN_LAUNCH,
+            request.correlationId(),
+            Map.of()));
     ExecutionStart start =
         new ExecutionStart().revisionId(request.revisionId()).input(request.input());
     return executionsApi.startExecution(request.idempotencyKey(), request.correlationId(), start);
   }
 
   /** One-shot status check - fowf's own current {@link Execution} resource for this id. */
-  public Execution observe(UUID executionId) throws ApiException {
+  public Execution observe(UUID executionId, ActiveOrganization actor) throws ApiException {
+    String executionIdText = executionId.toString();
+    authorization.requireAuthorized(
+        new AuthorizationRequest(
+            actor,
+            DataStreamingAuthorizationResources.workflowRun(executionIdText),
+            AuthorizationAction.WORKFLOW_RUN_READ,
+            executionIdText,
+            Map.of()));
     return executionsApi.getExecution(executionId);
   }
 
@@ -66,8 +92,20 @@ public final class WorkflowIngestionLauncher {
    * (from a prior {@link #launch}/{@link #observe} call) - fowf's own optimistic-concurrency
    * contract, not something this class works around.
    */
-  public Execution cancel(UUID executionId, String ifMatch, String correlationId, String reason)
+  public Execution cancel(
+      UUID executionId,
+      String ifMatch,
+      String correlationId,
+      String reason,
+      ActiveOrganization actor)
       throws ApiException {
+    authorization.requireAuthorized(
+        new AuthorizationRequest(
+            actor,
+            DataStreamingAuthorizationResources.workflowRun(executionId.toString()),
+            AuthorizationAction.WORKFLOW_RUN_CANCEL,
+            correlationId,
+            Map.of()));
     ExecutionControl control = reason == null ? null : new ExecutionControl().reason(reason);
     return executionsApi.cancelExecution(ifMatch, correlationId, executionId, control);
   }

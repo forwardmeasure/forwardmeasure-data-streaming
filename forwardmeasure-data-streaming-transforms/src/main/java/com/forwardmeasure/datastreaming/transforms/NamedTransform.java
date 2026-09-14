@@ -28,11 +28,13 @@ import java.util.Map;
  * <p>A single-input transform's one input is keyed {@code "value"} by convention (see {@code
  * com.forwardmeasure.datastreaming.api.TransformSpec.FieldRule#effectiveInputs()}).
  *
- * <p>Extends {@link Serializable}: a caller's own domain-specific transforms (e.g. WorldCheck's
- * {@code map_worldcheck_entity_kind}) are supplied per-call as {@code supplementalTransforms} (see
- * {@code FieldMappingEngine#map(SourceRow, TransformSpec, Map)}), and on the Spark executor that
- * map crosses a real closure/shuffle boundary (D4) - a method reference or lambda only serializes
- * there if the functional interface it targets is itself declared {@code Serializable}.
+ * <p>Extends {@link Serializable}: a caller's own domain-specific transforms (e.g. WorldCheck's own
+ * location-string parser, {@code parse_worldcheck_locations} - deliberately not in this module's
+ * own {@code NamedTransformRegistry}, see its own javadoc for which ones are and aren't) are
+ * supplied per-call as {@code supplementalTransforms} (see {@code FieldMappingEngine#map(SourceRow,
+ * TransformSpec, Map)}), and on the Spark executor that map crosses a real closure/shuffle boundary
+ * (D4) - a method reference or lambda only serializes there if the functional interface it targets
+ * is itself declared {@code Serializable}.
  */
 @FunctionalInterface
 public interface NamedTransform extends Serializable {

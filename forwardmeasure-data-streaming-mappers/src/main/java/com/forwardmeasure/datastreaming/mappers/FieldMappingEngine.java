@@ -48,12 +48,17 @@ import org.slf4j.LoggerFactory;
  * sharing the same {@code target} contributes one element to a {@code List} at that target, per
  * {@link FieldRule}'s own documented semantics.
  *
- * <p>Domain-specific named transforms (e.g. WorldCheck's own {@code map_worldcheck_entity_kind})
- * deliberately aren't in the shared {@code NamedTransformRegistry} (D3/D7: that registry is the
- * generic, cross-source pool). A caller with domain-specific transforms supplies them via the
- * {@code supplementalTransforms} map on {@link #map(SourceRow, TransformSpec, Map)} - checked
- * first, falling back to the shared registry - rather than this module ever growing source-specific
- * logic of its own.
+ * <p>Truly source-specific named transforms - ones tied to one vendor's own private field-value
+ * spelling, not shared cross-provider vocabulary - deliberately aren't in the shared {@code
+ * NamedTransformRegistry} (D3/D7: that registry is the generic, cross-source pool). A caller with
+ * transforms like that supplies them via the {@code supplementalTransforms} map on {@link
+ * #map(SourceRow, TransformSpec, Map)} - checked first, falling back to the shared registry -
+ * rather than this module ever growing source-specific logic of its own. See {@code
+ * NamedTransformRegistry}'s own javadoc for the growing set of originally-WorldCheck-named
+ * functions it has incorporated as genuinely generic sanctions/watchlist vocabulary instead - most
+ * recently (2026-09-14) {@code classify_party_categories}/{@code parse_tilde_delimited_locations},
+ * once a fully spec-driven pipeline (no custom Java, no supplemental registry to fall back on)
+ * became the preferred way to run this exact pipeline.
  */
 public final class FieldMappingEngine {
 
@@ -86,13 +91,37 @@ public final class FieldMappingEngine {
         @SuppressWarnings("unchecked")
         List<Object> accumulated =
             (List<Object>) result.computeIfAbsent(rule.target(), key -> new ArrayList<>());
-        accumulated.add(value);
+        if (rule.metadata().isEmpty()) {
+          accumulated.add(value);
+        } else if (value instanceof List<?> multiValue) {
+          // A transform like parse_semicolon_list already returns a List (e.g. every alias) from
+          // one rule - each element gets its own tagged entry, not one entry whose own "value" is
+          // the whole list; that would bury every alias inside a single opaque array instead of
+          // giving each one the same real {value, name_type}-shaped object a single-valued rule
+          // gets.
+          for (Object element : multiValue) {
+            accumulated.add(withMetadata(rule, element));
+          }
+        } else {
+          accumulated.add(withMetadata(rule, value));
+        }
       } else {
         result.put(rule.target(), value);
       }
     }
 
     return result;
+  }
+
+  /**
+   * {@code rule.metadata()}'s own entries plus {@code "value"} - see {@link FieldRule}'s own
+   * javadoc for why a repeated field sometimes needs each element to carry a fixed per-rule tag
+   * (e.g. {@code name_type}/{@code scheme}) alongside the resolved value, not just the bare value.
+   */
+  private static Map<String, Object> withMetadata(FieldRule rule, Object value) {
+    Map<String, Object> element = new LinkedHashMap<>(rule.metadata());
+    element.put("value", value);
+    return element;
   }
 
   private Object resolveValue(

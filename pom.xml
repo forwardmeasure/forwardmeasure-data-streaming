@@ -59,6 +59,14 @@
          SDK for /v1/executions (workflow mode) - both first-party sibling artifacts, pinned locally
          per this repo's own established convention, matching fowf's own root pom revision. -->
     <openworkflow.version>1.1.0</openworkflow.version>
+    <!-- Not published to any remote repository as of 2026-09-14 - requires a local `mvn install`
+         from /home/pn/Documents/code/forwardmeasure/forwardmeasure-authzen before this reactor can
+         resolve it. Real caller authentication/authorization was entirely missing from this repo's
+         launcher (see docs/fds-authorization-remediation-guide.md) until this same day, when it was
+         built directly on this shared library rather than as a third product-local copy (fowf and
+         forwardmeasure-entity-intelligence both already had their own; this consolidation is why one
+         now exists at all). -->
+    <forwardmeasure-authzen.version>1.0.0</forwardmeasure-authzen.version>
     <!-- Camel and Spark used to be pinned locally here (data-fabric's own real
          org.apache.spark.version=4.2.0 was the source of truth for Spark). Both are now managed
          in forwardmeasure-platform itself instead, the same as Pekko/jandex/mapstruct already
@@ -147,6 +155,14 @@
         <version>${forwardmeasure-testcontainers.version}</version>
       </dependency>
       <dependency>
+        <!-- Added 2026-09-13 for the opensearch sink connector's own real integration tests - the
+             first real consumer of this artifact in this reactor (confirmed by grep before adding
+             it - nothing else here used it, which is why its version was missing at all). -->
+        <groupId>com.forwardmeasure.testcontainers</groupId>
+        <artifactId>forwardmeasure-testcontainers-opensearch</artifactId>
+        <version>${forwardmeasure-testcontainers.version}</version>
+      </dependency>
+      <dependency>
         <groupId>com.forwardmeasure.testcontainers</groupId>
         <artifactId>forwardmeasure-testcontainers-kubernetes</artifactId>
         <version>${forwardmeasure-testcontainers.version}</version>
@@ -165,6 +181,21 @@
         <groupId>com.forwardmeasure.openworkflow</groupId>
         <artifactId>openworkflow-execution-models</artifactId>
         <version>${openworkflow.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.forwardmeasure.authzen</groupId>
+        <artifactId>forwardmeasure-authzen-api</artifactId>
+        <version>${forwardmeasure-authzen.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.forwardmeasure.authzen</groupId>
+        <artifactId>forwardmeasure-authzen-client</artifactId>
+        <version>${forwardmeasure-authzen.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.forwardmeasure.authzen</groupId>
+        <artifactId>forwardmeasure-authzen-testkit</artifactId>
+        <version>${forwardmeasure-authzen.version}</version>
       </dependency>
 
       <dependency>

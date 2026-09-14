@@ -16,3 +16,22 @@ datastreaming:
         token-url: "http://localhost:8081/realms/forwardmeasure/protocol/openid-connect/token"
         client-id: ""
         client-secret: ""
+    # Real, fail-closed caller authentication/authorization, added 2026-09-14 to close a confirmed
+    # gap (see docs/fds-authorization-remediation-guide.md) - mirrors
+    # forwardmeasure-entity-intelligence's own real SpringAuthorizationBinding wiring.
+    authorization:
+      organization-client-id: ${DATASTREAMING_ORGANIZATION_CLIENT_ID:forwardmeasure-public}
+      issuer: ${DATASTREAMING_KEYCLOAK_ISSUER:http://localhost:8080/realms/datastreaming}
+      client-id: ${DATASTREAMING_AUTHORIZATION_CLIENT_ID:datastreaming}
+      client-secret: ${DATASTREAMING_AUTHORIZATION_CLIENT_SECRET:}
+      request-timeout: 5S
+      decision-ttl: 5S
+      maximum-cache-entries: 10000
+      policy-version: v1
+
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${DATASTREAMING_KEYCLOAK_ISSUER:http://localhost:8080/realms/datastreaming}

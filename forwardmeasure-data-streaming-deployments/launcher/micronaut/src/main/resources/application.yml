@@ -1,3 +1,38 @@
+micronaut:
+  security:
+    enabled: true
+    authentication: bearer
+    token:
+      jwt:
+        signatures:
+          jwks:
+            keycloak:
+              url: ${DATASTREAMING_KEYCLOAK_ISSUER:`http://localhost:8080/realms/datastreaming`}/protocol/openid-connect/certs
+    # SecuredAnnotationRule never fires for a route registered through micronaut-jaxrs-server's
+    # bridge - every JAX-RS-bridged resource in this leaf needs an explicit rule here, mirrors
+    # forwardmeasure-entity-intelligence's own real resolution-service-micronaut application.yml
+    # exactly. Added 2026-09-14 to close a confirmed gap - see
+    # docs/fds-authorization-remediation-guide.md.
+    intercept-url-map:
+      - pattern: /ingestion-runs
+        access:
+          - isAuthenticated()
+      - pattern: /ingestion-runs/**
+        access:
+          - isAuthenticated()
+      - pattern: /correlation-runs
+        access:
+          - isAuthenticated()
+      - pattern: /correlation-runs/**
+        access:
+          - isAuthenticated()
+      - pattern: /workflow-runs
+        access:
+          - isAuthenticated()
+      - pattern: /workflow-runs/**
+        access:
+          - isAuthenticated()
+
 datastreaming:
   launcher:
     k8s:
@@ -16,3 +51,12 @@ datastreaming:
         token-url: "http://localhost:8081/realms/forwardmeasure/protocol/openid-connect/token"
         client-id: ""
         client-secret: ""
+    authorization:
+      organization-client-id: ${DATASTREAMING_ORGANIZATION_CLIENT_ID:forwardmeasure-public}
+      issuer: ${DATASTREAMING_KEYCLOAK_ISSUER:`http://localhost:8080/realms/datastreaming`}
+      client-id: ${DATASTREAMING_AUTHORIZATION_CLIENT_ID:datastreaming}
+      client-secret: ${DATASTREAMING_AUTHORIZATION_CLIENT_SECRET:}
+      request-timeout: 5S
+      decision-ttl: 5S
+      maximum-cache-entries: 10000
+      policy-version: v1

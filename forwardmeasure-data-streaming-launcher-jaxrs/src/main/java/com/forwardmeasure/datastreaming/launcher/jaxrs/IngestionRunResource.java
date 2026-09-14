@@ -16,6 +16,7 @@
  */
 package com.forwardmeasure.datastreaming.launcher.jaxrs;
 
+import com.forwardmeasure.authzen.ActiveOrganizationProvider;
 import com.forwardmeasure.datastreaming.launcher.application.DirectIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.DirectLaunchRequest;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.RunAccepted;
@@ -64,17 +65,22 @@ public class IngestionRunResource {
 
   private final DirectIngestionLauncher launcher;
   private final KubernetesClient client;
+  private final ActiveOrganizationProvider organizations;
 
-  public IngestionRunResource(DirectIngestionLauncher launcher, KubernetesClient client) {
+  public IngestionRunResource(
+      DirectIngestionLauncher launcher,
+      KubernetesClient client,
+      ActiveOrganizationProvider organizations) {
     this.launcher = Objects.requireNonNull(launcher, "launcher");
     this.client = Objects.requireNonNull(client, "client");
+    this.organizations = Objects.requireNonNull(organizations, "organizations");
   }
 
   @POST
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   public Response create(DirectLaunchRequest request) {
-    String jobName = launcher.launch(client, request);
+    String jobName = launcher.launch(client, request, organizations.current());
     return Response.accepted()
         .header(
             "Location",
@@ -90,7 +96,7 @@ public class IngestionRunResource {
       @PathParam("correlationId") String correlationId, @QueryParam("namespace") String namespace) {
     requireNamespace(namespace);
     return launcher
-        .observe(client, namespace, correlationId)
+        .observe(client, namespace, correlationId, organizations.current())
         .map(observation -> Response.ok(observation).build())
         .orElseGet(() -> Response.status(Response.Status.NOT_FOUND).build());
   }
@@ -100,7 +106,7 @@ public class IngestionRunResource {
   public Response cancel(
       @PathParam("correlationId") String correlationId, @QueryParam("namespace") String namespace) {
     requireNamespace(namespace);
-    launcher.cancel(client, namespace, correlationId);
+    launcher.cancel(client, namespace, correlationId, organizations.current());
     return Response.noContent().build();
   }
 

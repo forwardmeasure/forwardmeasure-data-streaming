@@ -20,6 +20,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.forwardmeasure.authzen.ActiveOrganization;
+import com.forwardmeasure.authzen.ActiveOrganizationProvider;
+import com.forwardmeasure.authzen.testkit.StubAuthorizationService;
 import com.forwardmeasure.datastreaming.api.CorrelationSpec;
 import com.forwardmeasure.datastreaming.api.ExecutionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
@@ -29,6 +32,7 @@ import com.forwardmeasure.datastreaming.launcher.application.DirectCorrelationLa
 import com.forwardmeasure.datastreaming.launcher.application.DirectCorrelationLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.IngestionJobPolicy;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.RunAccepted;
+import com.forwardmeasure.jpa.tenancy.TenantId;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
 import com.forwardmeasure.testcontainers.junit.kubernetes.WithKubernetesContainer;
 import com.forwardmeasure.testcontainers.kubernetes.KubernetesTestContainer;
@@ -57,6 +61,13 @@ final class CorrelationRunResourceTest {
       "docker.io/library/busybox@sha256:"
           + "73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662";
   private static final String MARKER = "correlation-run-resource-marker-4e91";
+  private static final ActiveOrganization ACTOR =
+      new ActiveOrganization(
+          new TenantId(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")),
+          "org-1",
+          "actor-1",
+          Set.of("reviewer"));
+  private static final ActiveOrganizationProvider ORGANIZATIONS = () -> ACTOR;
 
   @BeforeAll
   static void createNamespace(KubernetesTestContainer kubernetes) {
@@ -78,9 +89,11 @@ final class CorrelationRunResourceTest {
           new CorrelationRunResource(
               new DirectCorrelationLauncher(
                   IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
+                  StubAuthorizationService.permitAll(),
                   STAND_IN_IMAGE,
                   "grep -q " + MARKER),
-              client);
+              client,
+              ORGANIZATIONS);
       DirectCorrelationLaunchRequest request =
           new DirectCorrelationLaunchRequest(
               UUID.randomUUID().toString(),
@@ -112,9 +125,11 @@ final class CorrelationRunResourceTest {
           new CorrelationRunResource(
               new DirectCorrelationLauncher(
                   IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
+                  StubAuthorizationService.permitAll(),
                   STAND_IN_IMAGE,
                   "grep -q " + MARKER),
-              client);
+              client,
+              ORGANIZATIONS);
 
       Response response = resource.get("no-such-correlation-id", NAMESPACE);
 
@@ -130,9 +145,11 @@ final class CorrelationRunResourceTest {
           new CorrelationRunResource(
               new DirectCorrelationLauncher(
                   IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
+                  StubAuthorizationService.permitAll(),
                   STAND_IN_IMAGE,
                   "grep -q " + MARKER),
-              client);
+              client,
+              ORGANIZATIONS);
 
       assertThrows(BadRequestException.class, () -> resource.get("some-id", null));
       assertThrows(BadRequestException.class, () -> resource.cancel("some-id", " "));

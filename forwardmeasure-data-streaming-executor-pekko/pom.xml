@@ -34,7 +34,7 @@
       <groupId>com.fasterxml.jackson.core</groupId>
       <artifactId>jackson-databind</artifactId>
     </dependency>
-    <!-- IngestionPipelineRunner's own CSV-to-rows flattening (today's only real source format) -
+    <!-- PekkoIngestionRunner's own CSV-to-rows flattening (today's only real source format) -
          matches fei's own SimpleSourceIngestionWorker pin exactly, not chosen independently. -->
     <dependency><groupId>org.apache.commons</groupId><artifactId>commons-csv</artifactId><version>1.14.1</version></dependency>
     <!-- CamelBridge's own test-scope-only camel-file dependency doesn't propagate here. Real
@@ -44,21 +44,101 @@
          "file" is the only source/sink connector this project has actually proven so far - the
          same real choice fei's own ingestion-worker pom already makes, for the same reason. -->
     <dependency><groupId>org.apache.camel</groupId><artifactId>camel-file</artifactId></dependency>
+    <!-- jdbc/sql source+sink (2026-09-13): SqlDataSources builds a plain DataSource from spec
+         options and binds it into CamelBridge's own registry; camel-sql's own producer/consumer do
+         the rest (named-parameter binding, result-set-as-List<Map> rows) - no bespoke per-connector
+         Java beyond that one small, reusable bean-registration helper. Pulls in spring-jdbc
+         transitively, which is where DriverManagerDataSource itself comes from. -->
+    <dependency><groupId>org.apache.camel</groupId><artifactId>camel-sql</artifactId></dependency>
+    <!-- kafka source+sink (2026-09-13): both directions already work through this module's own
+         existing generic Camel dispatch (CamelBridge#source for any consumer-capable URI,
+         asyncSendBody for any producer URI) with zero new code - this dependency alone is the
+         entire change, exactly the "add a Camel component, not a Java branch" principle the
+         connector architecture plan calls for. -->
+    <dependency><groupId>org.apache.camel</groupId><artifactId>camel-kafka</artifactId></dependency>
+    <!-- opensearch sink (2026-09-13): no dedicated camel-opensearch component exists (camel's own
+         elasticsearch component is coupled to a specific Elasticsearch Java client, not proven
+         compatible with OpenSearch's own fork) - camel-http against OpenSearch's own plain REST API
+         instead, the same one every real OpenSearch client ultimately calls. -->
+    <dependency><groupId>org.apache.camel</groupId><artifactId>camel-http</artifactId></dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+    <!-- Test-only: SqlSourceAndSinkIntegrationTest proves the jdbc/sql path against a real
+         Postgres, not mocked, matching this org's own testing convention for anything JDBC-backed
+         (forwardmeasure-data-streaming-connector-jdbc's own JpaPagingSourceTest does the same). -->
+    <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-junit-jupiter</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-postgresql</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId><scope>test</scope></dependency>
+    <!-- Test-only: proves the kafka sink/source against a real broker, not mocked. Real artifactId
+         confirmed from the actual cached jar - testcontainers 2.x renamed this from the older
+         "kafka" (1.x) to "testcontainers-kafka". No org-specific @WithKafkaContainer extension
+         exists yet (unlike postgresql/opensearch) - raw Testcontainers JUnit 5 support instead. -->
+    <dependency><groupId>org.testcontainers</groupId><artifactId>testcontainers-kafka</artifactId><scope>test</scope></dependency>
+    <!-- Real artifactId confirmed from the actual cached BOM (2.0.5) - testcontainers 2.x renamed
+         this from the older "junit-jupiter" (1.x) to "testcontainers-junit-jupiter", the exact same
+         renaming pattern as testcontainers-kafka above; missed the first time this was added, only
+         verified for -kafka, not this one. -->
+    <dependency><groupId>org.testcontainers</groupId><artifactId>testcontainers-junit-jupiter</artifactId><scope>test</scope></dependency>
+    <!-- Test-only: proves the opensearch sink against a real, unsecured OpenSearch node. -->
+    <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-opensearch</artifactId><scope>test</scope></dependency>
     <!-- Test-only: with no SLF4J provider on the classpath, every LOGGER.info/debug call in this
          module (and Camel/Pekko's own internal logging) is silently a no-op - real output is
          needed to see what a hanging integration test is actually doing. -->
     <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-simple</artifactId><scope>test</scope></dependency>
+    <!-- Test-only: PekkoGrpcRowSourceIntegrationTest proves the gRPC source mechanism (see
+         GrpcRowSource's own javadoc for why it's grpc-java's own blocking-stub Iterator, not
+         camel-grpc) against a real in-process gRPC server + a real generated stub from a toy
+         test-scope-only .proto (src/test/proto) - not a real external service, since none exists
+         yet; the point is proving the adapter, the same way this org's other real gRPC modules
+         (e.g. decision-engine-api-language-bindings' own grpc module) already generate stubs via
+         protobuf-maven-plugin, mirrored below. -->
+    <dependency><groupId>io.grpc</groupId><artifactId>grpc-protobuf</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>io.grpc</groupId><artifactId>grpc-stub</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>io.grpc</groupId><artifactId>grpc-inprocess</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>org.apache.tomcat</groupId><artifactId>annotations-api</artifactId><version>6.0.53</version><scope>test</scope></dependency>
   </dependencies>
 
   <build>
-    <!-- This module is a plain Java main() entrypoint (IngestionPipelineRunner), not a
+    <!-- Needed only for the protobuf-maven-plugin execution below - resolves the
+         ${os.detected.classifier} property the platform-specific protoc/protoc-gen-grpc-java
+         artifacts need. Mirrors decision-engine-api-language-bindings' own grpc module exactly. -->
+    <extensions>
+      <extension>
+        <groupId>kr.motd.maven</groupId>
+        <artifactId>os-maven-plugin</artifactId>
+        <version>1.7.1</version>
+      </extension>
+    </extensions>
+    <!-- This module is a plain Java main() entrypoint (PekkoIngestionRunner), not a
          Quarkus/Spring/Micronaut app - there is no framework packaging plugin to assemble a
          runnable artifact. Mirrors fei's own real ingestion-worker/ingestion-worker-spark poms
          exactly: maven-dependency-plugin copies runtime deps to target/dependency/,
          maven-jar-plugin points the jar's own manifest Class-Path at them, so `java -jar` alone
          resolves the full classpath - no hand-written -cp flag in the Dockerfile. -->
     <plugins>
+      <plugin>
+        <!-- Test-scope only (test-compile/test-compile-custom, not compile/compile-custom) -
+             PekkoGrpcRowSourceIntegrationTest's own toy .proto (src/test/proto) proving the gRPC source
+             mechanism, not a real production service definition. Mirrors
+             decision-engine-api-language-bindings' own grpc module's real, working configuration. -->
+        <groupId>org.xolstice.maven.plugins</groupId>
+        <artifactId>protobuf-maven-plugin</artifactId>
+        <version>0.6.1</version>
+        <executions>
+          <execution>
+            <id>generate-test-grpc-java</id>
+            <phase>generate-test-sources</phase>
+            <goals>
+              <goal>test-compile</goal>
+              <goal>test-compile-custom</goal>
+            </goals>
+            <configuration>
+              <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
+              <pluginId>grpc-java</pluginId>
+              <pluginArtifact>io.grpc:protoc-gen-grpc-java:${grpc.version}:exe:${os.detected.classifier}</pluginArtifact>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-dependency-plugin</artifactId>
@@ -82,7 +162,7 @@
         <configuration>
           <archive>
             <manifest>
-              <mainClass>com.forwardmeasure.datastreaming.executor.pekko.IngestionPipelineRunner</mainClass>
+              <mainClass>com.forwardmeasure.datastreaming.executor.pekko.PekkoIngestionRunner</mainClass>
               <addClasspath>true</addClasspath>
               <classpathPrefix>dependency/</classpathPrefix>
             </manifest>

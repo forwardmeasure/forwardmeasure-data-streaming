@@ -20,6 +20,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.io.Serializable;
 import java.time.Duration;
+import java.util.Map;
 
 /**
  * Where and how to write mapped records: which connector ({@code opensearch}, {@code kafka}, {@code
@@ -29,8 +30,12 @@ import java.time.Duration;
  * producer endpoint from (added 2026-09-13 - mirrors {@link SourceSpec#uri()} exactly; before this
  * field existed, nothing could actually build a real Camel sink from a {@code SinkSpec} at all, for
  * any connector - {@code index}/{@code schema}/{@code batching} alone were never enough), the
- * target identifier (index/topic/table/path), the schema it conforms to, and batching behavior. See
- * D5 for which connector module each {@code connector} value resolves to at runtime.
+ * target identifier (index/topic/table/path - a single one; a {@code kafka} sink that fans a record
+ * out to *several* topics expresses that as an {@code options} entry, e.g. {@code additionalTopics:
+ * "topic-a,topic-b"}, not by overloading this field), the schema it conforms to, batching behavior,
+ * and a connector-specific {@code options} bag (same "generic metadata over a bespoke Java field
+ * per connector" rationale as {@link SourceSpec#options()} - see that field's own javadoc). See D5
+ * for which connector module each {@code connector} value resolves to at runtime.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record SinkSpec(
@@ -38,13 +43,28 @@ public record SinkSpec(
     @JsonProperty("uri") String uri,
     @JsonProperty("index") String index,
     @JsonProperty("schema") SourceSpec.SchemaRef schema,
-    @JsonProperty("batching") BatchingSpec batching)
+    @JsonProperty("batching") BatchingSpec batching,
+    @JsonProperty("options") Map<String, String> options)
     implements Serializable {
 
-  /** Pre-{@code uri} shape, kept working unchanged for existing callers that never needed one. */
+  public SinkSpec {
+    options = options == null ? Map.of() : Map.copyOf(options);
+  }
+
+  /** Pre-{@code options} shape, kept working unchanged for every caller that never needed one. */
+  public SinkSpec(
+      String connector,
+      String uri,
+      String index,
+      SourceSpec.SchemaRef schema,
+      BatchingSpec batching) {
+    this(connector, uri, index, schema, batching, Map.of());
+  }
+
+  /** Pre-{@code uri}/{@code options} shape, kept working unchanged for existing callers. */
   public SinkSpec(
       String connector, String index, SourceSpec.SchemaRef schema, BatchingSpec batching) {
-    this(connector, null, index, schema, batching);
+    this(connector, null, index, schema, batching, Map.of());
   }
 
   @JsonIgnoreProperties(ignoreUnknown = true)

@@ -16,6 +16,9 @@
  */
 package com.forwardmeasure.datastreaming.launcher.micronaut;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.forwardmeasure.authzen.AuthorizationService;
+import com.forwardmeasure.authzen.client.AuthzenAuthorizationFactory;
 import com.forwardmeasure.datastreaming.launcher.application.DirectCorrelationLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.DirectIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.IngestionJobPolicy;
@@ -29,6 +32,7 @@ import io.micronaut.context.annotation.Factory;
 import io.micronaut.context.annotation.Value;
 import jakarta.inject.Singleton;
 import java.net.URI;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
@@ -65,6 +69,46 @@ public class LauncherMicronautBinding {
     return new ExecutionsApi(apiClient);
   }
 
+  /**
+   * This module's own Jackson dependency is a different namespace than {@code
+   * com.fasterxml.jackson.databind} and doesn't provide that classic-namespace {@code ObjectMapper}
+   * bean by default - the same real gap forwardmeasure-entity-intelligence's own {@code
+   * MicronautAuthorizationServiceProducer} already works around the same way.
+   */
+  @Singleton
+  ObjectMapper objectMapper() {
+    return new ObjectMapper();
+  }
+
+  /**
+   * The one shared, product-wide real {@link AuthorizationService} - real, fail-closed caller
+   * authorization against a real Keycloak AuthZEN PDP, added 2026-09-14 to close a confirmed real
+   * gap (see docs/fds-authorization-remediation-guide.md). Micronaut's own {@code
+   * micronaut.security.enabled}/{@code intercept-url-map} config (see each deployment leaf's own
+   * application.yml) is this framework's real "authenticated by default" enforcement - no
+   * SecurityFilterChain-equivalent bean needed here, unlike Spring.
+   */
+  @Singleton
+  AuthorizationService authorizationService(
+      ObjectMapper mapper,
+      @Value("${datastreaming.launcher.authorization.issuer}") URI issuer,
+      @Value("${datastreaming.launcher.authorization.client-id}") String clientId,
+      @Value("${datastreaming.launcher.authorization.client-secret}") String clientSecret,
+      @Value("${datastreaming.launcher.authorization.request-timeout}") Duration requestTimeout,
+      @Value("${datastreaming.launcher.authorization.decision-ttl}") Duration decisionTtl,
+      @Value("${datastreaming.launcher.authorization.maximum-cache-entries}") int cacheEntries,
+      @Value("${datastreaming.launcher.authorization.policy-version}") String policyVersion) {
+    return AuthzenAuthorizationFactory.create(
+        mapper,
+        issuer,
+        clientId,
+        clientSecret,
+        requestTimeout,
+        decisionTtl,
+        cacheEntries,
+        policyVersion);
+  }
+
   @Singleton
   IngestionJobPolicy ingestionJobPolicy(
       @Value("${datastreaming.launcher.k8s.namespaces}") String namespaces,
@@ -75,24 +119,29 @@ public class LauncherMicronautBinding {
   @Singleton
   DirectIngestionLauncher directIngestionLauncher(
       IngestionJobPolicy policy,
+      AuthorizationService authorization,
       @Value("${datastreaming.launcher.pekko.image}") String image,
       @Value("${datastreaming.launcher.pekko.command}") String command,
       @Value("${datastreaming.launcher.k8s.image-pull-secrets}") String pullSecrets) {
-    return new DirectIngestionLauncher(policy, image, command, commaSeparatedList(pullSecrets));
+    return new DirectIngestionLauncher(
+        policy, authorization, image, command, commaSeparatedList(pullSecrets));
   }
 
   @Singleton
   DirectCorrelationLauncher directCorrelationLauncher(
       IngestionJobPolicy policy,
+      AuthorizationService authorization,
       @Value("${datastreaming.launcher.spark.image}") String image,
       @Value("${datastreaming.launcher.spark.command}") String command,
       @Value("${datastreaming.launcher.k8s.image-pull-secrets}") String pullSecrets) {
-    return new DirectCorrelationLauncher(policy, image, command, commaSeparatedList(pullSecrets));
+    return new DirectCorrelationLauncher(
+        policy, authorization, image, command, commaSeparatedList(pullSecrets));
   }
 
   @Singleton
-  WorkflowIngestionLauncher workflowIngestionLauncher(ExecutionsApi executionsApi) {
-    return new WorkflowIngestionLauncher(executionsApi);
+  WorkflowIngestionLauncher workflowIngestionLauncher(
+      ExecutionsApi executionsApi, AuthorizationService authorization) {
+    return new WorkflowIngestionLauncher(executionsApi, authorization);
   }
 
   static Set<String> commaSeparated(String value) {

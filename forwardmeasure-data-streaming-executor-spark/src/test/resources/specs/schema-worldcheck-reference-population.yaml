@@ -1,0 +1,256 @@
+source:
+  name: worldcheck_reference_population
+  description: >
+    WorldCheck Premium CSV file. Tab-delimited, ISO-8859-1, with header row.
+    Each row represents one sanctioned individual or organisation from the
+    WorldCheck reference population database.
+  format: csv
+  delimiter: "\t"
+  has_header: true
+  encoding: ISO-8859-1
+
+identity:
+  unique_key:
+    source_fields:
+      - UID
+    document_field: uid
+    document_id_field: _id
+    description: >
+      WorldCheck UID is the provider-stable domain key. It maps to the
+      canonical ScreeningRecord uid and is also used as the OpenSearch
+      document id for idempotent replace/merge operations.
+
+properties:
+
+  # -----------------------------------------------------------------------
+  # Primary identifier
+  # -----------------------------------------------------------------------
+
+  UID:
+    type: string
+    nullable: false
+    description: WorldCheck unique numeric identifier for this record.
+
+  # -----------------------------------------------------------------------
+  # Names
+  # -----------------------------------------------------------------------
+
+  LAST NAME:
+    type: string
+    nullable: true
+    description: Last name (individuals) or full organisation name.
+
+  FIRST NAME:
+    type: string
+    nullable: true
+    description: First name (individuals only).
+
+  ALIASES:
+    type: string
+    nullable: true
+    description: Semicolon-separated list of aliases.
+
+  LOW QUALITY ALIASES:
+    type: string
+    nullable: true
+    description: Semicolon-separated low-quality or phonetic aliases.
+
+  ALTERNATIVE SPELLING:
+    type: string
+    nullable: true
+    description: Semicolon-separated alternative spellings.
+
+  # -----------------------------------------------------------------------
+  # Classification
+  # -----------------------------------------------------------------------
+
+  CATEGORY:
+    type: string
+    nullable: false
+    description: >
+      World-Check category. Values include INDIVIDUAL, POLITICAL INDIVIDUAL,
+      LEGAL, CORPORATE, BANK, WEBSITE, VESSEL, AIRCRAFT, and other provider
+      categories. Used with E/I to derive EntityKind.
+
+  TITLE:
+    type: string
+    nullable: true
+
+  SUB-CATEGORY:
+    type: string
+    nullable: true
+
+  POSITION:
+    type: string
+    nullable: true
+    description: Position or role held by individual.
+
+  # -----------------------------------------------------------------------
+  # Individual identity
+  # -----------------------------------------------------------------------
+
+  AGE:
+    type: string
+    nullable: true
+
+  DOB:
+    type: string
+    nullable: true
+    description: Primary date of birth in YYYY/MM/DD format with partial zero components.
+
+  DOBS:
+    type: string
+    nullable: true
+    description: Additional dates of birth, semicolon-separated.
+
+  PLACE OF BIRTH:
+    type: string
+    nullable: true
+
+  DECEASED:
+    type: string
+    nullable: true
+    description: Y or blank.
+
+  # -----------------------------------------------------------------------
+  # Identifiers
+  # -----------------------------------------------------------------------
+
+  PASSPORTS:
+    type: string
+    nullable: true
+    description: Passport numbers as identifier pairs — parsed via parse_identifier_pairs.
+
+  SSN:
+    type: string
+    nullable: true
+    description: Social security or national ID numbers.
+
+  IDENTIFICATION NUMBERS:
+    type: string
+    nullable: true
+    description: >
+      Semicolon-separated identifier pairs in {SCHEME}value format.
+      Example: {AU-DFAT}291
+      Parsed via parse_identifier_pairs transform.
+
+  # -----------------------------------------------------------------------
+  # Geography
+  # -----------------------------------------------------------------------
+
+  LOCATIONS:
+    type: string
+    nullable: true
+    description: >
+      Semicolon-separated location entries in format:
+      ~ City, Region ~ COUNTRY
+      Parsed via parse_worldcheck_locations transform.
+
+  COUNTRIES:
+    type: string
+    nullable: true
+    description: Semicolon-separated country names.
+
+  CITIZENSHIP:
+    type: string
+    nullable: true
+    description: Semicolon-separated country names.
+
+  # -----------------------------------------------------------------------
+  # Relationships
+  # -----------------------------------------------------------------------
+
+  COMPANIES:
+    type: string
+    nullable: true
+    description: Semicolon-separated linked company IDs.
+
+  "E/I":
+    type: string
+    nullable: true
+    enum:
+      - E
+      - M
+      - F
+      - U
+      - I
+    description: >
+      World-Check overloaded entity/gender discriminator. E denotes a
+      non-person entity; M and F denote male and female individuals; U denotes
+      an individual whose sex is unknown or unspecified. I is accepted for
+      compatibility with older extracts that used a generic individual
+      indicator. CATEGORY refines an E record into organization versus
+      vessel/aircraft, but must not override the person/non-person meaning.
+
+  LINKED TO:
+    type: string
+    nullable: true
+    description: Semicolon-separated linked record IDs.
+
+  # -----------------------------------------------------------------------
+  # Narrative
+  # -----------------------------------------------------------------------
+
+  FURTHER INFORMATION:
+    type: string
+    nullable: true
+    description: Full narrative text about the record including biography, sanctions history, reports.
+
+  KEYWORDS:
+    type: string
+    nullable: true
+    description: Tilde-separated keywords.
+
+  EXTERNAL SOURCES:
+    type: string
+    nullable: true
+    description: Space-separated external source URLs.
+
+  # -----------------------------------------------------------------------
+  # Metadata
+  # -----------------------------------------------------------------------
+
+  UPDATE CATEGORY:
+    type: string
+    nullable: true
+
+  ENTERED:
+    type: string
+    nullable: true
+    description: Date first entered in YYYY/MM/DD format.
+
+  UPDATED:
+    type: string
+    nullable: true
+    description: Date last updated in YYYY/MM/DD format.
+
+  EDITOR:
+    type: string
+    nullable: true
+
+  AGE DATE (AS OF DATE):
+    type: string
+    nullable: true
+
+  # -----------------------------------------------------------------------
+  # PEP and screening flags
+  # -----------------------------------------------------------------------
+
+  PEP ROLES:
+    type: string
+    nullable: true
+    description: Tilde-separated PEP role descriptions.
+
+  PEP STATUS:
+    type: string
+    nullable: true
+    description: Current PEP status.
+
+  SPECIAL INTEREST CATEGORIES:
+    type: string
+    nullable: true
+    description: >
+      Semicolon-separated special interest categories.
+      Mapped to ScreeningCategory via map_worldcheck_categories transform.
+      Known values: Sanctions Related, PEP, Adverse Media, Enforcement,
+      Terror Related, Bribery and Corruption, Money Laundering, etc.

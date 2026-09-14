@@ -17,12 +17,18 @@
 package com.forwardmeasure.datastreaming.launcher.application;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.forwardmeasure.authzen.ActiveOrganization;
+import com.forwardmeasure.authzen.AuthorizationService;
+import com.forwardmeasure.authzen.testkit.StubAuthorizationService;
 import com.forwardmeasure.datastreaming.api.CorrelationSpec;
 import com.forwardmeasure.datastreaming.api.ExecutionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
+import com.forwardmeasure.jpa.tenancy.TenantId;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
 import com.forwardmeasure.testcontainers.junit.kubernetes.WithKubernetesContainer;
 import com.forwardmeasure.testcontainers.kubernetes.KubernetesTestContainer;
@@ -52,6 +58,13 @@ final class DirectCorrelationLauncherTest {
       "docker.io/library/busybox@sha256:"
           + "73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662";
   private static final String MARKER = "correlation-launcher-marker-71ab";
+  private static final AuthorizationService AUTHORIZATION = StubAuthorizationService.permitAll();
+  private static final ActiveOrganization ACTOR =
+      new ActiveOrganization(
+          new TenantId(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")),
+          "org-1",
+          "actor-1",
+          Set.of("reviewer"));
 
   @BeforeAll
   static void createNamespace(KubernetesTestContainer kubernetes) {
@@ -71,6 +84,7 @@ final class DirectCorrelationLauncherTest {
     DirectCorrelationLauncher launcher =
         new DirectCorrelationLauncher(
             IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
+            AUTHORIZATION,
             STAND_IN_IMAGE,
             "grep -q " + MARKER);
     DirectCorrelationLaunchRequest request =
@@ -83,7 +97,7 @@ final class DirectCorrelationLauncherTest {
             null);
 
     try (KubernetesClient client = kubernetes.createClient()) {
-      String jobName = launcher.launch(client, request);
+      String jobName = launcher.launch(client, request, ACTOR);
       assertEquals(
           DirectCorrelationLauncher.deterministicJobName(request.correlationId()), jobName);
 
@@ -91,6 +105,96 @@ final class DirectCorrelationLauncherTest {
           pollUntilTerminal(launcher, client, request.correlationId());
 
       assertEquals(KubernetesJobObservation.Phase.SUCCEEDED, observation.phase());
+    }
+  }
+
+  @Test
+  @Timeout(180)
+  void launchDispatchesToThePekkoRunnerWhenTheSpecAsksForIt(KubernetesTestContainer kubernetes)
+      throws InterruptedException {
+    // Deliberately distinguishing stand-in commands, same technique as
+    // DirectIngestionLauncherTest's own equivalent test - if dispatch ever picked the wrong
+    // (spark) command by mistake, the Job would FAIL, not just "happen to also succeed".
+    DirectCorrelationLauncher launcher =
+        new DirectCorrelationLauncher(
+            IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
+            AUTHORIZATION,
+            STAND_IN_IMAGE,
+            "grep -q this-marker-only-exists-in-the-spark-path-never-in-this-test",
+            STAND_IN_IMAGE,
+            "grep -q " + MARKER,
+            List.of());
+    DirectCorrelationLaunchRequest request =
+        new DirectCorrelationLaunchRequest(
+            UUID.randomUUID().toString(),
+            NAMESPACE,
+            new CorrelationSpec(
+                List.of(
+                    new CorrelationSpec.SourceEntry(
+                        "core",
+                        new SourceSpec("file", "file:///" + MARKER, null, null),
+                        new TransformSpec("party", List.of()),
+                        1.0)),
+                "uid",
+                new SinkSpec("file", "/tmp/out", null, null, null),
+                new ExecutionSpec("pekko", new ExecutionSpec.ConcurrencySpec(1, 1), null, null)),
+            Map.of(),
+            Map.of(),
+            null);
+
+    try (KubernetesClient client = kubernetes.createClient()) {
+      launcher.launch(client, request, ACTOR);
+
+      KubernetesJobObservation observation =
+          pollUntilTerminal(launcher, client, request.correlationId());
+
+      assertEquals(KubernetesJobObservation.Phase.SUCCEEDED, observation.phase());
+    }
+  }
+
+  @Test
+  @Timeout(60)
+  void launchRejectsPekkoEngineWhenNotConfiguredWithoutTouchingTheCluster(
+      KubernetesTestContainer kubernetes) {
+    // Before 2026-09-13's fix, this launcher never checked execution.engine() at all - it would
+    // have silently run this "pekko" spec through the spark stand-in command instead of rejecting
+    // it. This test only became possible to write once that real, quiet bug was fixed.
+    DirectCorrelationLauncher launcher =
+        new DirectCorrelationLauncher(
+            IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
+            AUTHORIZATION,
+            STAND_IN_IMAGE,
+            "grep -q " + MARKER);
+    DirectCorrelationLaunchRequest request =
+        new DirectCorrelationLaunchRequest(
+            UUID.randomUUID().toString(),
+            NAMESPACE,
+            new CorrelationSpec(
+                List.of(
+                    new CorrelationSpec.SourceEntry(
+                        "core",
+                        new SourceSpec("file", "file:///" + MARKER, null, null),
+                        new TransformSpec("party", List.of()),
+                        1.0)),
+                "uid",
+                new SinkSpec("file", "/tmp/out", null, null, null),
+                new ExecutionSpec("pekko", new ExecutionSpec.ConcurrencySpec(1, 1), null, null)),
+            Map.of(),
+            Map.of(),
+            null);
+
+    try (KubernetesClient client = kubernetes.createClient()) {
+      assertThrows(
+          UnsupportedOperationException.class, () -> launcher.launch(client, request, ACTOR));
+      assertTrue(
+          client.batch().v1().jobs().inNamespace(NAMESPACE).list().getItems().stream()
+              .noneMatch(
+                  job ->
+                      job.getMetadata()
+                          .getName()
+                          .equals(
+                              DirectCorrelationLauncher.deterministicJobName(
+                                  request.correlationId()))));
     }
   }
 
@@ -112,7 +216,7 @@ final class DirectCorrelationLauncherTest {
       throws InterruptedException {
     while (true) {
       Optional<KubernetesJobObservation> observation =
-          launcher.observe(client, NAMESPACE, correlationId);
+          launcher.observe(client, NAMESPACE, correlationId, ACTOR);
       if (observation.isPresent() && isTerminal(observation.get().phase())) {
         return observation.get();
       }

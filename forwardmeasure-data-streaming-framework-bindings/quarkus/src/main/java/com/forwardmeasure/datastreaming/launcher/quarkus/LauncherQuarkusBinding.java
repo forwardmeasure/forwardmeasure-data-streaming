@@ -16,6 +16,10 @@
  */
 package com.forwardmeasure.datastreaming.launcher.quarkus;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.forwardmeasure.authzen.ActiveOrganizationProvider;
+import com.forwardmeasure.authzen.AuthorizationService;
+import com.forwardmeasure.authzen.client.AuthzenAuthorizationFactory;
 import com.forwardmeasure.datastreaming.launcher.application.DirectCorrelationLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.DirectIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.IngestionJobPolicy;
@@ -28,9 +32,11 @@ import com.forwardmeasure.openworkflow.execution.client.ApiClient;
 import com.forwardmeasure.openworkflow.execution.client.api.ExecutionsApi;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
+import io.quarkus.arc.profile.UnlessBuildProfile;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
 import java.net.URI;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
@@ -71,6 +77,43 @@ public class LauncherQuarkusBinding {
     return new ExecutionsApi(apiClient);
   }
 
+  /**
+   * The one shared, product-wide real {@link AuthorizationService} - real, fail-closed caller
+   * authorization against a real Keycloak AuthZEN PDP, added 2026-09-14 to close a confirmed real
+   * gap (see docs/fds-authorization-remediation-guide.md). Excluded from the {@code test} build
+   * profile, matching forwardmeasure-entity-intelligence's own {@code
+   * QuarkusAuthorizationServiceProducer} exactly - real tests get {@code
+   * StubAuthorizationService.permitAll()} instead (see each deployment leaf's own test-scoped
+   * producer).
+   */
+  @Produces
+  @ApplicationScoped
+  @UnlessBuildProfile("test")
+  AuthorizationService authorizationService(
+      ObjectMapper mapper,
+      @ConfigProperty(name = "datastreaming.launcher.authorization.issuer") URI issuer,
+      @ConfigProperty(name = "datastreaming.launcher.authorization.client-id") String clientId,
+      @ConfigProperty(name = "datastreaming.launcher.authorization.client-secret")
+          String clientSecret,
+      @ConfigProperty(name = "datastreaming.launcher.authorization.request-timeout")
+          Duration requestTimeout,
+      @ConfigProperty(name = "datastreaming.launcher.authorization.decision-ttl")
+          Duration decisionTtl,
+      @ConfigProperty(name = "datastreaming.launcher.authorization.maximum-cache-entries")
+          int cacheEntries,
+      @ConfigProperty(name = "datastreaming.launcher.authorization.policy-version")
+          String policyVersion) {
+    return AuthzenAuthorizationFactory.create(
+        mapper,
+        issuer,
+        clientId,
+        clientSecret,
+        requestTimeout,
+        decisionTtl,
+        cacheEntries,
+        policyVersion);
+  }
+
   @Produces
   @ApplicationScoped
   IngestionJobPolicy ingestionJobPolicy(
@@ -83,46 +126,56 @@ public class LauncherQuarkusBinding {
   @ApplicationScoped
   DirectIngestionLauncher directIngestionLauncher(
       IngestionJobPolicy policy,
+      AuthorizationService authorization,
       @ConfigProperty(name = "datastreaming.launcher.pekko.image") String image,
       @ConfigProperty(name = "datastreaming.launcher.pekko.command") String command,
       @ConfigProperty(name = "datastreaming.launcher.k8s.image-pull-secrets") String pullSecrets) {
-    return new DirectIngestionLauncher(policy, image, command, commaSeparatedList(pullSecrets));
+    return new DirectIngestionLauncher(
+        policy, authorization, image, command, commaSeparatedList(pullSecrets));
   }
 
   @Produces
   @ApplicationScoped
   DirectCorrelationLauncher directCorrelationLauncher(
       IngestionJobPolicy policy,
+      AuthorizationService authorization,
       @ConfigProperty(name = "datastreaming.launcher.spark.image") String image,
       @ConfigProperty(name = "datastreaming.launcher.spark.command") String command,
       @ConfigProperty(name = "datastreaming.launcher.k8s.image-pull-secrets") String pullSecrets) {
-    return new DirectCorrelationLauncher(policy, image, command, commaSeparatedList(pullSecrets));
+    return new DirectCorrelationLauncher(
+        policy, authorization, image, command, commaSeparatedList(pullSecrets));
   }
 
   @Produces
   @ApplicationScoped
-  WorkflowIngestionLauncher workflowIngestionLauncher(ExecutionsApi executionsApi) {
-    return new WorkflowIngestionLauncher(executionsApi);
+  WorkflowIngestionLauncher workflowIngestionLauncher(
+      ExecutionsApi executionsApi, AuthorizationService authorization) {
+    return new WorkflowIngestionLauncher(executionsApi, authorization);
   }
 
   @Produces
   @ApplicationScoped
   IngestionRunResource ingestionRunResource(
-      DirectIngestionLauncher launcher, KubernetesClient client) {
-    return new IngestionRunResource(launcher, client);
+      DirectIngestionLauncher launcher,
+      KubernetesClient client,
+      ActiveOrganizationProvider organizations) {
+    return new IngestionRunResource(launcher, client, organizations);
   }
 
   @Produces
   @ApplicationScoped
   CorrelationRunResource correlationRunResource(
-      DirectCorrelationLauncher launcher, KubernetesClient client) {
-    return new CorrelationRunResource(launcher, client);
+      DirectCorrelationLauncher launcher,
+      KubernetesClient client,
+      ActiveOrganizationProvider organizations) {
+    return new CorrelationRunResource(launcher, client, organizations);
   }
 
   @Produces
   @ApplicationScoped
-  WorkflowRunResource workflowRunResource(WorkflowIngestionLauncher launcher) {
-    return new WorkflowRunResource(launcher);
+  WorkflowRunResource workflowRunResource(
+      WorkflowIngestionLauncher launcher, ActiveOrganizationProvider organizations) {
+    return new WorkflowRunResource(launcher, organizations);
   }
 
   private static Set<String> commaSeparated(String value) {

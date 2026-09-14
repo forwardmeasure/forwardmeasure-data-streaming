@@ -23,6 +23,20 @@
   <dependencies>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-launcher-jaxrs</artifactId></dependency>
     <dependency><groupId>io.quarkus</groupId><artifactId>quarkus-arc</artifactId></dependency>
+    <dependency>
+      <!-- Verified-JWT extraction (QuarkusActiveOrganizationProvider) and the real AuthorizationService
+           producer, added 2026-09-14 to close a confirmed real gap - see
+           docs/fds-authorization-remediation-guide.md - mirrors
+           forwardmeasure-entity-intelligence's own quarkus-binding pom exactly. -->
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-oidc</artifactId>
+    </dependency>
+    <dependency>
+      <!-- AuthzenAuthorizationFactory.create(...) - the real Keycloak AuthZEN PDP client this
+           module's own authorizationService(...) producer wires. -->
+      <groupId>com.forwardmeasure.authzen</groupId>
+      <artifactId>forwardmeasure-authzen-client</artifactId>
+    </dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
   </dependencies>
 </project>

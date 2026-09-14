@@ -16,6 +16,7 @@
  */
 package com.forwardmeasure.datastreaming.launcher.jaxrs;
 
+import com.forwardmeasure.authzen.ActiveOrganizationProvider;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowLaunchRequest;
 import com.forwardmeasure.openworkflow.execution.api.model.Execution;
@@ -52,16 +53,19 @@ import java.util.UUID;
 public class WorkflowRunResource {
 
   private final WorkflowIngestionLauncher launcher;
+  private final ActiveOrganizationProvider organizations;
 
-  public WorkflowRunResource(WorkflowIngestionLauncher launcher) {
+  public WorkflowRunResource(
+      WorkflowIngestionLauncher launcher, ActiveOrganizationProvider organizations) {
     this.launcher = Objects.requireNonNull(launcher, "launcher");
+    this.organizations = Objects.requireNonNull(organizations, "organizations");
   }
 
   @POST
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   public Response create(WorkflowLaunchRequest request) throws ApiException {
-    Execution execution = launcher.launch(request);
+    Execution execution = launcher.launch(request, organizations.current());
     return Response.accepted()
         .header("Location", "/workflow-runs/" + execution.getId())
         .entity(execution)
@@ -72,7 +76,7 @@ public class WorkflowRunResource {
   @Path("/{executionId}")
   @Produces(MediaType.APPLICATION_JSON)
   public Response get(@PathParam("executionId") UUID executionId) throws ApiException {
-    return Response.ok(launcher.observe(executionId)).build();
+    return Response.ok(launcher.observe(executionId, organizations.current())).build();
   }
 
   @POST
@@ -90,6 +94,8 @@ public class WorkflowRunResource {
     if (correlationId == null || correlationId.isBlank()) {
       throw new BadRequestException("the 'correlationId' query parameter is required");
     }
-    return Response.ok(launcher.cancel(executionId, ifMatch, correlationId, reason)).build();
+    return Response.ok(
+            launcher.cancel(executionId, ifMatch, correlationId, reason, organizations.current()))
+        .build();
   }
 }

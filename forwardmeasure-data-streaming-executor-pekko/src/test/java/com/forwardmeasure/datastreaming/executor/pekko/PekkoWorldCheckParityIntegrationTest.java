@@ -25,7 +25,6 @@ import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.mappers.FieldMappingEngine;
 import com.forwardmeasure.datastreaming.mappers.SourceRow;
-import com.forwardmeasure.datastreaming.transforms.NamedTransform;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -46,7 +45,7 @@ import org.junit.jupiter.api.io.TempDir;
  * input, not a fabricated toy CSV - the same synthetic-row generator and the same real mapping
  * definition ({@code mapping/worldcheck-simple-ingestion.yaml}) {@code
  * SimpleSourceIngestionWorkerIntegrationTest} uses in fei today, run through {@link
- * IngestionPipelineRunner} instead of {@code SimpleSourceIngestionWorker}.
+ * PekkoIngestionRunner} instead of {@code SimpleSourceIngestionWorker}.
  *
  * <p>This doesn't invoke fei's {@code GenericRecordMapper} in-process (that would mean this repo
  * depending on fei, backwards from the intended direction). Instead it asserts against fei's own
@@ -54,8 +53,17 @@ import org.junit.jupiter.api.io.TempDir;
  * independently-verified oracle, not values invented for this test - plus a full-population
  * consistency check fei's own spot-check didn't do, since diffing "the new path's output" against
  * "the old path's proven-correct output" is exactly what this step calls for.
+ *
+ * <p>No supplemental transforms anymore (2026-09-13): {@code map_worldcheck_entity_kind}/{@code
+ * parse_worldcheck_date} - fei's own original names, test-local stand-ins here until now - were
+ * renamed and incorporated into the real {@code NamedTransformRegistry} as {@code
+ * classify_party_kind}/{@code parse_partial_date_ymd} once their real functional capability was
+ * recognized as common sanctions-provider vocabulary, not one vendor's private invention (see
+ * {@code NamedTransformFunctions}' own javadoc). {@code engine.map(row, spec.mapper())}'s plain
+ * 2-arg form now resolves both from the real registry directly - the fei-side oracle values this
+ * test asserts against are unchanged, since the port is verbatim, only renamed.
  */
-class WorldCheckParityIntegrationTest {
+class PekkoWorldCheckParityIntegrationTest {
 
   private static final int ROW_COUNT = 10_000;
 
@@ -81,16 +89,8 @@ class WorldCheckParityIntegrationTest {
                 new ExecutionSpec.FlowControlSpec(5000),
                 new ExecutionSpec.FailureSpec("dead-letter", "retry")));
 
-    Map<String, NamedTransform> worldCheckTransforms =
-        Map.of(
-            "map_worldcheck_entity_kind",
-            WorldCheckTestTransforms::map_worldcheck_entity_kind,
-            "parse_worldcheck_date",
-            inputs -> WorldCheckTestTransforms.parse_worldcheck_date(inputs.get("value")));
-
     FieldMappingEngine engine = new FieldMappingEngine();
-    Function<SourceRow, Map<String, Object>> transform =
-        row -> engine.map(row, spec.mapper(), worldCheckTransforms);
+    Function<SourceRow, Map<String, Object>> transform = row -> engine.map(row, spec.mapper());
 
     Sink<Map<String, Object>, CompletionStage<Map<String, Map<String, Object>>>> collectingSink =
         Sink.fold(
@@ -103,7 +103,7 @@ class WorldCheckParityIntegrationTest {
     ActorSystem system = ActorSystem.create("worldcheck-parity-test");
     Map<String, Map<String, Object>> byUid;
     try {
-      byUid = new IngestionPipelineRunner().run(spec, system, transform, collectingSink);
+      byUid = new PekkoIngestionRunner().run(spec, system, transform, collectingSink);
     } finally {
       system.terminate();
     }
@@ -146,11 +146,11 @@ class WorldCheckParityIntegrationTest {
                 null,
                 null,
                 Map.of("value", "CATEGORY", "entity_indicator", "ENTITY_INDICATOR"),
-                "map_worldcheck_entity_kind",
+                "classify_party_kind",
                 null,
                 null),
             new TransformSpec.FieldRule(
-                "date_of_birth", "DATE_OF_BIRTH", null, null, "parse_worldcheck_date", true, null),
+                "date_of_birth", "DATE_OF_BIRTH", null, null, "parse_partial_date_ymd", true, null),
             new TransformSpec.FieldRule(
                 "nationality_code",
                 "CITIZENSHIP",

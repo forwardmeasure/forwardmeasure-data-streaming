@@ -39,12 +39,12 @@ import org.reactivestreams.Publisher;
  * that closes this bridge as soon as the last {@code onNext()} call *returns* (the only signal a
  * plain {@link org.reactivestreams.Subscriber} gives) can stop the {@link CamelContext} while the
  * last few sends are still in flight, silently discarding them. Removed rather than kept as a trap
- * for the next caller (it had no other real caller once {@code IngestionPipelineRunner} stopped
- * using it) - a real sink needs {@link #camelContext()}{@code .createProducerTemplate()}'s own
- * {@code asyncSendBody}, whose returned {@code CompletableFuture} is a genuine per-item completion
- * signal, wired into something like Pekko's {@code Sink.foreachAsync} so the whole sink's own
- * materialized completion only resolves once every item's producer call has actually finished - see
- * {@code IngestionPipelineRunner}'s own sink-building code for the real, proven pattern.
+ * for the next caller (it had no other real caller once {@code PekkoIngestionRunner} stopped using
+ * it) - a real sink needs {@link #camelContext()}{@code .createProducerTemplate()}'s own {@code
+ * asyncSendBody}, whose returned {@code CompletableFuture} is a genuine per-item completion signal,
+ * wired into something like Pekko's {@code Sink.foreachAsync} so the whole sink's own materialized
+ * completion only resolves once every item's producer call has actually finished - see {@code
+ * PekkoIngestionRunner}'s own sink-building code for the real, proven pattern.
  *
  * <p>Owns one {@link CamelContext}'s lifecycle - construct one {@link CamelBridge} per bounded
  * ingestion run (matching D4's bounded-batch-process shape), {@link #close()} it when the run ends.

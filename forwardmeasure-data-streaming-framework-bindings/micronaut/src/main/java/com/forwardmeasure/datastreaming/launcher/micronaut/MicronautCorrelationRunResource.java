@@ -16,6 +16,7 @@
  */
 package com.forwardmeasure.datastreaming.launcher.micronaut;
 
+import com.forwardmeasure.authzen.ActiveOrganizationProvider;
 import com.forwardmeasure.datastreaming.launcher.application.DirectCorrelationLauncher;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.CorrelationRunResource;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -32,7 +33,9 @@ public final class MicronautCorrelationRunResource extends CorrelationRunResourc
 
   @Inject
   public MicronautCorrelationRunResource(
-      DirectCorrelationLauncher launcher, KubernetesClient client) {
-    super(launcher, client);
+      DirectCorrelationLauncher launcher,
+      KubernetesClient client,
+      ActiveOrganizationProvider organizations) {
+    super(launcher, client, organizations);
   }
 }

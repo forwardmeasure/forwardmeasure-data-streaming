@@ -17,36 +17,41 @@
 package com.forwardmeasure.datastreaming.executor.spark;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.forwardmeasure.datastreaming.api.CorrelationSpec;
 import com.forwardmeasure.datastreaming.api.ExecutionSpec;
+import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
+import com.forwardmeasure.datastreaming.core.IngestionPipeline;
+import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
+import org.apache.spark.api.java.JavaRDD;
+import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.util.CollectionAccumulator;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Real, no-mocks proof that {@link SparkIngestionRunner} - the standalone entrypoint this module
- * never had before - actually drives {@link SparkCorrelationEngine} end to end from a {@link
- * CorrelationSpec} and writes the merged result somewhere real: the exact same two-source,
- * three-subject scenario {@code CorrelatedSourceIngestionWorkerIntegrationTest} (fei) and {@code
- * SparkCorrelationEngineIntegrationTest} (this module) already prove, this time driven purely by a
- * loadable spec document rather than hand-constructed Java objects, with the merged output read
- * back from a real file {@code saveAsTextFile} wrote.
+ * Real, no-mocks proof that {@link SparkIngestionRunner} - {@code IngestionSpec}'s (single-source,
+ * no correlation) Spark entrypoint, renamed 2026-09-13 from {@code SparkSourceIngestionRunner} once
+ * this class stopped also carrying {@code CorrelationSpec} handling (moved to {@link
+ * SparkCorrelationRunner}, proven by {@code SparkCorrelationRunnerIntegrationTest}) - drives {@link
+ * SparkCorrelationEngine#readAndMapSingleSource} end to end from a loadable spec document and
+ * writes the mapped result to a real file {@code saveAsTextFile} wrote.
  */
 class SparkIngestionRunnerIntegrationTest {
 
@@ -70,66 +75,108 @@ class SparkIngestionRunnerIntegrationTest {
   }
 
   @Test
-  void runCorrelatesTwoSourcesAndWritesTheMergedResult(@TempDir Path tempDir) throws Exception {
-    Path sourceACsv = writeFile(tempDir, "source-a.csv", SOURCE_A_CSV);
-    Path sourceBCsv = writeFile(tempDir, "source-b.csv", SOURCE_B_CSV);
-    Path outputDir = tempDir.resolve("output");
+  void runProcessesASingleSourceIngestionSpecWithoutMergingRowsThatShareAFieldValue(
+      @TempDir Path tempDir) throws Exception {
+    Path sourceCsv = writeFile(tempDir, "source.csv", SINGLE_SOURCE_CSV);
+    Path outputDir = tempDir.resolve("output-single");
 
-    CorrelationSpec spec =
-        new CorrelationSpec(
-            List.of(
-                new CorrelationSpec.SourceEntry(
-                    "core",
-                    new SourceSpec("file", sourceACsv.toString(), null, null),
-                    mappingA(),
-                    1.0),
-                new CorrelationSpec.SourceEntry(
-                    "enrichment",
-                    new SourceSpec("file", sourceBCsv.toString(), null, null),
-                    mappingB(),
-                    0.4)),
-            "uid",
+    IngestionSpec spec =
+        new IngestionSpec(
+            new SourceSpec("file", sourceCsv.toString(), null, null),
+            new TransformSpec(
+                "party",
+                List.of(
+                    new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
+                    new TransformSpec.FieldRule("name", "FULL_NAME", null, null, null, null, null),
+                    new TransformSpec.FieldRule(
+                        "category", "CATEGORY", null, null, null, null, null))),
             new SinkSpec("file", outputDir.toString(), "n/a", null, null),
             new ExecutionSpec("spark", null, null, null));
 
-    SparkIngestionRunner.CorrelationResult result = SparkIngestionRunner.run(spark, spec);
+    SparkIngestionRunner.IngestionResult result = SparkIngestionRunner.run(spark, spec);
 
-    assertEquals(2, result.sourceCount());
-    assertEquals(3, result.groupCount(), "expected 3 correlated groups: S1 (merged), S2, S3");
+    assertEquals(3, result.recordsWritten());
 
     List<JsonNode> rows = readNdjson(outputDir);
-    assertEquals(3, rows.size());
+    // S1 and S2 deliberately share CATEGORY="person" - proving this path never groups/merges rows
+    // that happen to share a field value the way SparkCorrelationEngine#correlate's own groupBy
+    // would (that groupBy is for matching the same entity *across different sources*, not a safe
+    // no-op for a single source - see SparkCorrelationEngine#readAndMapSingleSource's own javadoc).
+    assertEquals(
+        3,
+        rows.size(),
+        "S1 and S2 share category='person' - a correlation-style groupBy would wrongly merge them"
+            + " into one record; this single-source path must not");
 
     JsonNode s1 = findByUid(rows, "S1");
     assertEquals("Alice Anderson", s1.path("name").asText());
-    assertEquals("1985-03-12", s1.path("date_of_birth").asText(), "higher-trust source A must win");
-    assertEquals("GB", s1.path("nationality_code").asText(), "must be filled from lower-trust B");
-
+    assertEquals("person", s1.path("category").asText());
     JsonNode s2 = findByUid(rows, "S2");
     assertEquals("Bob Baker", s2.path("name").asText());
-    assertTrue(s2.path("nationality_code").isMissingNode(), "S2 was never given a nationality");
-
+    assertEquals("person", s2.path("category").asText());
     JsonNode s3 = findByUid(rows, "S3");
-    assertEquals("US", s3.path("nationality_code").asText());
-    assertTrue(s3.path("name").isMissingNode(), "S3 was never given a name");
+    assertEquals("Carol Carter", s3.path("name").asText());
+    assertEquals("org", s3.path("category").asText());
   }
 
+  /**
+   * The Spark sibling of {@code PekkoIngestionRunnerIntegrationTest}'s own {@code
+   * processesMultiThousandRowCsvWithRealConcurrency} - added 2026-09-14 once a direct side-by-side
+   * comparison surfaced that this class had no equivalent proof at all. Not a literal port: {@code
+   * ExecutionSpec.concurrency} is never read anywhere in the Spark path (confirmed by grep) -
+   * Spark's own parallelism comes from RDD partitioning, not that spec field - so this proves the
+   * thing that's actually real on this engine: a real multi-thousand-row CSV, explicitly
+   * repartitioned, is genuinely processed by more than one executor thread under {@code local[2]},
+   * not silently serialized onto one.
+   */
   @Test
-  void runRejectsANonFileSinkWithoutTouchingSpark(@TempDir Path tempDir) throws Exception {
-    Path sourceACsv = writeFile(tempDir, "source-a.csv", SOURCE_A_CSV);
-    CorrelationSpec spec =
-        new CorrelationSpec(
-            List.of(
-                new CorrelationSpec.SourceEntry(
-                    "core",
-                    new SourceSpec("file", sourceACsv.toString(), null, null),
-                    mappingA(),
-                    1.0)),
-            "uid",
-            new SinkSpec("opensearch", "opensearch://localhost:9200", "party", null, null),
-            new ExecutionSpec("spark", null, null, null));
+  void processesMultiThousandRowCsvWithRealConcurrency(@TempDir Path tempDir) throws Exception {
+    int rowCount = 5_000;
+    Path sourceCsv = tempDir.resolve("input.csv");
+    writeCsv(sourceCsv, rowCount);
 
-    assertThrows(UnsupportedOperationException.class, () -> SparkIngestionRunner.run(spark, spec));
+    SourceSpec source = new SourceSpec("file", sourceCsv.toString(), null, null);
+    TransformSpec mapper =
+        new TransformSpec(
+            "schema://test/target/1.0",
+            List.of(
+                new TransformSpec.FieldRule("id", "id", null, null, null, null, null),
+                new TransformSpec.FieldRule("name", "name", null, null, null, null, null)));
+
+    JavaRDD<Map<String, Object>> mapped =
+        SparkCorrelationEngine.readAndMapSingleSource(
+                spark, source, mapper, Map.of(), IngestionPipeline.MalformedRecordPolicy.SKIP)
+            .repartition(4);
+
+    CollectionAccumulator<String> threadNames =
+        spark.sparkContext().collectionAccumulator("threadNames");
+    long processed =
+        mapped
+            .mapPartitions(
+                (FlatMapFunction<Iterator<Map<String, Object>>, Map<String, Object>>)
+                    rows -> {
+                      threadNames.add(Thread.currentThread().getName());
+                      return rows;
+                    })
+            .count();
+
+    assertEquals(rowCount, processed);
+    long distinctThreads = threadNames.value().stream().distinct().count();
+    assertTrue(
+        distinctThreads > 1,
+        "expected multiple executor threads to process partitions under local[2], saw only: "
+            + threadNames.value());
+  }
+
+  private static void writeCsv(Path file, int rowCount) throws IOException {
+    try (BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+      writer.write("id,name");
+      writer.newLine();
+      for (int i = 1; i <= rowCount; i++) {
+        writer.write(i + ",Row " + i);
+        writer.newLine();
+      }
+    }
   }
 
   private static JsonNode findByUid(List<JsonNode> rows, String uid) {
@@ -155,43 +202,17 @@ class SparkIngestionRunnerIntegrationTest {
     }
   }
 
-  private static TransformSpec mappingA() {
-    return new TransformSpec(
-        "party",
-        List.of(
-            new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
-            new TransformSpec.FieldRule("name", "FULL_NAME", null, null, null, null, null),
-            new TransformSpec.FieldRule("date_of_birth", "DOB", null, null, null, true, null)));
-  }
-
-  private static TransformSpec mappingB() {
-    return new TransformSpec(
-        "party",
-        List.of(
-            new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
-            new TransformSpec.FieldRule(
-                "nationality_code", "NATIONALITY", null, null, null, true, null),
-            new TransformSpec.FieldRule(
-                "date_of_birth", "DOB_GUESS", null, null, null, true, null)));
-  }
-
   private static Path writeFile(Path dir, String name, String content) throws IOException {
     Path file = dir.resolve(name);
     Files.writeString(file, content, StandardCharsets.UTF_8);
     return file;
   }
 
-  private static final String SOURCE_A_CSV =
+  private static final String SINGLE_SOURCE_CSV =
       """
-      ID,FULL_NAME,DOB
-      S1,Alice Anderson,1985-03-12
-      S2,Bob Baker,1990-07-04
-      """;
-
-  private static final String SOURCE_B_CSV =
-      """
-      ID,NATIONALITY,DOB_GUESS
-      S1,GB,1899-01-01
-      S3,US,1975-05-20
+      ID,FULL_NAME,CATEGORY
+      S1,Alice Anderson,person
+      S2,Bob Baker,person
+      S3,Carol Carter,org
       """;
 }

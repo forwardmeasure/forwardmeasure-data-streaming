@@ -23,12 +23,37 @@
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-transforms</artifactId></dependency>
     <dependency><groupId>org.apache.spark</groupId><artifactId>spark-core_2.13</artifactId></dependency>
     <dependency><groupId>org.apache.spark</groupId><artifactId>spark-sql_2.13</artifactId></dependency>
+    <!-- kafka source+sink (2026-09-13): SparkCorrelationEngine#readSource's generic
+         .format(connector) dispatch and SparkSinks' own kafka writer both need Spark's own native
+         kafka data source artifact on the classpath - not a Java dependency of either class, a
+         Maven one. -->
+    <dependency><groupId>org.apache.spark</groupId><artifactId>spark-sql-kafka-0-10_2.13</artifactId></dependency>
+    <!-- jdbc source+sink (2026-09-13, fixing a real pre-existing gap): readSource()'s own jdbc
+         branch has always set driver=org.postgresql.Driver, but this module never actually
+         depended on the postgresql driver jar itself - any real jdbc source/sink use would have
+         failed at runtime with no driver found, untested until now (see this module's own
+         SparkSqlConnectorIntegrationTest, renamed 2026-09-14 from SparkJdbcSinkIntegrationTest once
+         it gained real jdbc source-read coverage alongside its existing sink coverage). -->
+    <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId></dependency>
     <dependency>
-      <!-- SparkIngestionRunner's own NDJSON serialization of merged rows before saveAsTextFile. -->
+      <!-- SparkSinks' own NDJSON serialization of merged rows before saveAsTextFile/kafka writes. -->
       <groupId>com.fasterxml.jackson.core</groupId>
       <artifactId>jackson-databind</artifactId>
     </dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+    <!-- Test-only: SparkSqlConnectorIntegrationTest/SparkOpenSearchConnectorIntegrationTest/
+         SparkKafkaConnectorIntegrationTest prove each new connector against a real service, not
+         mocked - matching this org's own testing convention (and, since 2026-09-14, executor-
+         pekko's own {Connector}ConnectorIntegrationTest naming exactly, prefixed with Spark). -->
+    <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-junit-jupiter</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-postgresql</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-opensearch</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>org.testcontainers</groupId><artifactId>testcontainers-kafka</artifactId><scope>test</scope></dependency>
+    <!-- Real artifactId confirmed from the actual cached BOM (2.0.5) - testcontainers 2.x renamed
+         this from the older "junit-jupiter" (1.x) to "testcontainers-junit-jupiter", the exact same
+         renaming pattern as testcontainers-kafka above; missed the first time this was added, only
+         verified for -kafka, not this one. -->
+    <dependency><groupId>org.testcontainers</groupId><artifactId>testcontainers-junit-jupiter</artifactId><scope>test</scope></dependency>
   </dependencies>
 
   <build>

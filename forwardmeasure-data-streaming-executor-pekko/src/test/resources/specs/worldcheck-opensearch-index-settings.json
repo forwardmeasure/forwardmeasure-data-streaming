@@ -1,0 +1,336 @@
+{
+    "settings": {
+        "number_of_shards": 3,
+        "number_of_replicas": 1,
+        "analysis": {
+            "analyzer": {
+                "name_analyzer": {
+                    "type": "custom",
+                    "tokenizer": "standard",
+                    "filter": [
+                        "lowercase",
+                        "asciifolding",
+                        "name_ngram"
+                    ]
+                },
+                "name_search_analyzer": {
+                    "type": "custom",
+                    "tokenizer": "standard",
+                    "filter": [
+                        "lowercase",
+                        "asciifolding"
+                    ]
+                },
+                "name_phonetic_analyzer": {
+                    "type": "custom",
+                    "tokenizer": "standard",
+                    "filter": [
+                        "lowercase",
+                        "asciifolding",
+                        "name_double_metaphone"
+                    ]
+                },
+                "keyword_lowercase": {
+                    "type": "custom",
+                    "tokenizer": "keyword",
+                    "filter": [
+                        "lowercase",
+                        "asciifolding"
+                    ]
+                }
+            },
+            "filter": {
+                "name_ngram": {
+                    "type": "edge_ngram",
+                    "min_gram": 3,
+                    "max_gram": 20
+                },
+                "name_double_metaphone": {
+                    "type": "phonetic",
+                    "encoder": "double_metaphone",
+                    "replace": false
+                }
+            },
+            "normalizer": {
+                "lowercase": {
+                    "type": "custom",
+                    "filter": [
+                        "lowercase",
+                        "asciifolding"
+                    ]
+                }
+            }
+        },
+        "index": {
+            "max_ngram_diff": 17
+        }
+    },
+    "mappings": {
+        "dynamic": "strict",
+        "properties": {
+            "uid": {
+                "type": "keyword",
+                "doc_values": true
+            },
+            "reference_population_id": {
+                "type": "keyword"
+            },
+            "source_record_id": {
+                "type": "keyword"
+            },
+            "entity_kind": {
+                "type": "keyword"
+            },
+            "classifications": {
+                "type": "nested",
+                "properties": {
+                    "scheme": { "type": "keyword" },
+                    "code": { "type": "keyword" },
+                    "label": { "type": "keyword" },
+                    "source": { "type": "keyword" },
+                    "confidence": { "type": "double" },
+                    "valid_from": { "type": "date" },
+                    "valid_to": { "type": "date" }
+                }
+            },
+            "categories": {
+                "type": "keyword"
+            },
+            "names": {
+                "type": "nested",
+                "properties": {
+                    "value": {
+                        "type": "text",
+                        "analyzer": "name_analyzer",
+                        "search_analyzer": "name_search_analyzer",
+                        "fields": {
+                            "standard": {
+                                "type": "text",
+                                "analyzer": "name_search_analyzer"
+                            },
+                            "keyword": {
+                                "type": "keyword",
+                                "normalizer": "lowercase",
+                                "ignore_above": 512
+                            },
+                            "phonetic": {
+                                "type": "text",
+                                "analyzer": "name_phonetic_analyzer",
+                                "search_analyzer": "name_phonetic_analyzer"
+                            }
+                        }
+                    },
+                    "name_type": {
+                        "type": "keyword"
+                    },
+                    "script": {
+                        "type": "keyword"
+                    }
+                }
+            },
+            "date_of_birth": {
+                "type": "date",
+                "format": "yyyy-MM-dd||yyyy/MM/dd||strict_date_optional_time"
+            },
+            "dates_of_birth": {
+                "type": "date",
+                "format": "yyyy-MM-dd||yyyy/MM/dd||strict_date_optional_time"
+            },
+            "place_of_birth": {
+                "type": "text",
+                "analyzer": "standard",
+                "fields": {
+                    "keyword": {
+                        "type": "keyword",
+                        "normalizer": "lowercase",
+                        "ignore_above": 512
+                    }
+                }
+            },
+            "deceased": {
+                "type": "boolean"
+            },
+            "nationalities": {
+                "type": "keyword"
+            },
+            "countries": {
+                "type": "keyword"
+            },
+            "locations": {
+                "type": "nested",
+                "properties": {
+                    "country_code": {
+                        "type": "keyword"
+                    },
+                    "country_name": {
+                        "type": "text",
+                        "analyzer": "standard",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword",
+                                "normalizer": "lowercase",
+                                "ignore_above": 256
+                            }
+                        }
+                    },
+                    "city": {
+                        "type": "text",
+                        "analyzer": "standard",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword",
+                                "normalizer": "lowercase",
+                                "ignore_above": 512
+                            }
+                        }
+                    },
+                    "state_or_province": {
+                        "type": "keyword",
+                        "normalizer": "lowercase",
+                        "ignore_above": 512
+                    },
+                    "address": {
+                        "type": "text",
+                        "analyzer": "standard"
+                    },
+                    "location_type": {
+                        "type": "keyword"
+                    }
+                }
+            },
+            "identifiers": {
+                "type": "nested",
+                "properties": {
+                    "scheme": {
+                        "type": "keyword"
+                    },
+                    "value": {
+                        "type": "keyword"
+                    },
+                    "value_norm": {
+                        "type": "keyword"
+                    },
+                    "issuing_country": {
+                        "type": "keyword"
+                    },
+                    "issuing_authority": {
+                        "type": "keyword",
+                        "normalizer": "lowercase",
+                        "ignore_above": 512
+                    },
+                    "issue_date": {
+                        "type": "date",
+                        "format": "yyyy-MM-dd||strict_date_optional_time"
+                    },
+                    "expiry_date": {
+                        "type": "date",
+                        "format": "yyyy-MM-dd||strict_date_optional_time"
+                    }
+                }
+            },
+            "linked_parties": {
+                "type": "nested",
+                "properties": {
+                    "linked_record_id": {
+                        "type": "keyword"
+                    },
+                    "name": {
+                        "type": "text",
+                        "analyzer": "name_analyzer",
+                        "search_analyzer": "name_search_analyzer",
+                        "fields": {
+                            "standard": {
+                                "type": "text",
+                                "analyzer": "name_search_analyzer"
+                            },
+                            "keyword": {
+                                "type": "keyword",
+                                "normalizer": "lowercase",
+                                "ignore_above": 512
+                            },
+                            "phonetic": {
+                                "type": "text",
+                                "analyzer": "name_phonetic_analyzer",
+                                "search_analyzer": "name_phonetic_analyzer"
+                            }
+                        }
+                    },
+                    "relationship_type": {
+                        "type": "keyword"
+                    },
+                    "direction": {
+                        "type": "keyword"
+                    }
+                }
+            },
+            "position": {
+                "type": "text",
+                "analyzer": "standard",
+                "fields": {
+                    "keyword": {
+                        "type": "keyword",
+                        "normalizer": "lowercase",
+                        "ignore_above": 1024
+                    }
+                }
+            },
+            "pep_roles": {
+                "type": "text",
+                "analyzer": "standard",
+                "fields": {
+                    "keyword": {
+                        "type": "keyword",
+                        "normalizer": "lowercase",
+                        "ignore_above": 1024
+                    }
+                }
+            },
+            "pep_status": {
+                "type": "keyword"
+            },
+            "keywords": {
+                "type": "keyword",
+                "normalizer": "lowercase"
+            },
+            "special_interest_categories": {
+                "type": "keyword",
+                "normalizer": "lowercase"
+            },
+            "further_information": {
+                "type": "text",
+                "analyzer": "standard",
+                "index_options": "offsets"
+            },
+            "external_sources": {
+                "type": "keyword",
+                "index": false,
+                "doc_values": false
+            },
+            "external_source_domains": {
+                "type": "keyword",
+                "normalizer": "lowercase",
+                "ignore_above": 256
+            },
+            "source_entered_at": {
+                "type": "date",
+                "format": "yyyy-MM-dd||strict_date_optional_time"
+            },
+            "source_updated_at": {
+                "type": "date",
+                "format": "yyyy-MM-dd||strict_date_optional_time"
+            },
+            "platform_indexed_at": {
+                "type": "date",
+                "format": "strict_date_optional_time"
+            },
+            "platform_updated_at": {
+                "type": "date",
+                "format": "strict_date_optional_time"
+            },
+            "raw_payload": {
+                "type": "object",
+                "enabled": false
+            }
+        }
+    }
+}

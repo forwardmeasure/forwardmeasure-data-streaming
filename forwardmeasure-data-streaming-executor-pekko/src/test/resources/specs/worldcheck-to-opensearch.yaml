@@ -1,0 +1,153 @@
+# Real, runnable IngestionSpec: WorldCheck reference-population CSV -> OpenSearch, via the Pekko
+# engine. Rewritten 2026-09-14 to use the REAL WorldCheck shape this org already has checked in at
+# entity-intelligence-specifications' own schema-worldcheck-reference-population.yaml (tab-
+# delimited, real column names with spaces/slashes - "LAST NAME", "E/I", not the fictional
+# comma-delimited "LAST_NAME"/"ENTITY_INDICATOR" shape this file used before) and
+# mapping-worldcheck-reference-population.yaml (real target fields/transforms), rather than an
+# invented, simplified toy - the earlier version was not actually representative of what fei's own
+# SimpleSourceIngestionWorker ingests in production, despite claiming to be.
+#
+# THE ACTUAL SOURCE SCHEMA FILE: this directory's own schema-worldcheck-reference-population.yaml
+# is a byte-identical copy of the real one above - every column this spec's own `source:` section
+# assumes (name, delimited-text type, nullability) is documented there field-by-field. `source.schema
+# .ref` below (schema://worldcheck/reference-population/1.0) is still just a plain string today -
+# confirmed by grep, nothing in FDS resolves a schema:// URI to any file at all, this one included
+# - so this comment, not the spec's own `ref` field, is what actually points a reader at the real
+# schema document until that resolution mechanism gets built for real.
+#
+# {{SOURCE_URI}}/{{OPENSEARCH_URL}} are substituted at test time by
+# PekkoWorldCheckToOpenSearchIntegrationTest, same as before. delimiter (added 2026-09-14, see
+# PekkoIngestionRunner#parseCsvRows's own javadoc) is a real source.options entry - the real file is
+# tab-delimited, and this connector previously had no way to express that at all. The real file's
+# own ISO-8859-1 encoding is handled by Camel's own standard file: endpoint charset option, applied
+# directly in {{SOURCE_URI}} itself (see the test) - not a new FDS mechanism.
+#
+# sink.options.indexSettingsFile (added 2026-09-14, see OpenSearchIndexInitializer) points at this
+# module's own copy of entity-intelligence-specifications' real
+# screening-records-worldcheck-opensearch-indexing-spec.json - byte-identical, not paraphrased -
+# so the real custom analyzers (ngram/phonetic name matching) and nested names/identifiers objects
+# actually apply, not OpenSearch's own dynamic-mapping guess. That real mapping's own
+# `"dynamic": "strict"` means every target field below must be one it actually declares.
+#
+# categories/locations (added 2026-09-14): NamedTransformRegistry now carries
+# classify_party_categories/parse_tilde_delimited_locations (renamed+incorporated from fei's own
+# map_worldcheck_categories/parse_worldcheck_locations, user-directed, once the fully spec-driven
+# path - no custom Java at all - became the preferred way to run this pipeline rather than just a
+# proof of feasibility). parse_tilde_delimited_locations' own output keys are snake_case
+# (country_code/country_name/state_or_province/location_type), not the origin's camelCase - see
+# that function's own javadoc for why: this path has no typed-model coercion step to fix up casing
+# before writing to a `"dynamic": "strict"` index, unlike fei's own worker.
+#
+# classifications/linked_parties remain unpopulated - the real mapping-worldcheck-reference-
+# population.yaml has no source mapping for either, so the real system doesn't populate them from
+# this source either; that's not a gap, it's this spec matching real behavior.
+#
+# names/identifiers use TransformSpec.FieldRule's own new `metadata` field (added 2026-09-14,
+# FieldMappingEngineTest has the unit proof) - real WorldCheck names/identifiers are `nested`-typed
+# in the real index mapping, which OpenSearch rejects a bare scalar/list-of-scalars against; each
+# repeated element needs to be a real {value, name_type}/{value, scheme} object, which `metadata`
+# is what makes expressible at all.
+source:
+  connector: file
+  uri: "{{SOURCE_URI}}"
+  format:
+    type: csv
+  options:
+    delimiter: "\t"
+  schema:
+    ref: schema://worldcheck/reference-population/1.0
+
+mapper:
+  target: schema://party/1.0
+  fields:
+    - target: uid
+      source: UID
+    - target: names
+      template: "{LAST NAME}, {FIRST NAME}"
+      repeated: true
+      metadata:
+        name_type: PRIMARY
+    - target: names
+      source: ALIASES
+      transform: parse_semicolon_list
+      optional: true
+      repeated: true
+      metadata:
+        name_type: ALIAS
+    - target: entity_kind
+      inputs:
+        value: CATEGORY
+        entity_indicator: "E/I"
+      transform: classify_party_kind
+    - target: date_of_birth
+      source: DOB
+      transform: parse_partial_date_ymd
+      optional: true
+    - target: nationalities
+      source: CITIZENSHIP
+      transform: parse_semicolon_iso2_list
+      optional: true
+    - target: countries
+      source: COUNTRIES
+      transform: parse_semicolon_iso2_list
+      optional: true
+    - target: identifiers
+      source: SSN
+      optional: true
+      repeated: true
+      metadata:
+        scheme: SSN
+    - target: position
+      source: POSITION
+      optional: true
+    - target: pep_roles
+      source: "PEP ROLES"
+      transform: parse_tilde_list
+      optional: true
+    - target: pep_status
+      source: "PEP STATUS"
+      optional: true
+    - target: keywords
+      source: KEYWORDS
+      transform: parse_tilde_list
+      optional: true
+    - target: external_sources
+      source: "EXTERNAL SOURCES"
+      transform: parse_url_list
+      optional: true
+    - target: external_source_domains
+      source: "EXTERNAL SOURCES"
+      transform: extract_url_domains
+      optional: true
+    - target: further_information
+      source: "FURTHER INFORMATION"
+      optional: true
+    - target: categories
+      source: "SPECIAL INTEREST CATEGORIES"
+      transform: classify_party_categories
+      optional: true
+    - target: locations
+      source: LOCATIONS
+      transform: parse_tilde_delimited_locations
+      optional: true
+
+sink:
+  connector: opensearch
+  uri: "{{OPENSEARCH_URL}}"
+  index: worldcheck-screening-records
+  schema:
+    ref: schema://party/1.0
+  options:
+    idField: uid
+    indexSettingsFile: "{{INDEX_SETTINGS_FILE}}"
+
+execution:
+  engine: pekko
+  concurrency:
+    preferred: 16
+    maximum: 32
+  flowControl:
+    maxInFlightRecords: 5000
+  failure:
+    malformedRecord: dead-letter
+    sinkFailure: retry

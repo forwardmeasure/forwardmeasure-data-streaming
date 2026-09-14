@@ -44,14 +44,14 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Step 4's own definition of done, verified end to end: a real multi-thousand-row CSV file flows
- * through {@link IngestionPipelineRunner} - Camel file source, real row splitting, the real {@link
+ * through {@link PekkoIngestionRunner} - Camel file source, real row splitting, the real {@link
  * FieldMappingEngine} - with real concurrency, not "completes correctly but still sequential."
  * Concurrency is proven by recording which threads actually executed the transform step (a fast
  * per-row transform plus a tiny artificial delay, injected only by this test's own wrapper, widens
  * the window enough to make cross-thread scheduling observable) rather than by a wall-clock scaling
  * assertion, which would be more sensitive to the machine running the test.
  */
-class IngestionPipelineRunnerIntegrationTest {
+class PekkoIngestionRunnerIntegrationTest {
 
   private static final int ROW_COUNT = 5_000;
 
@@ -98,8 +98,7 @@ class IngestionPipelineRunnerIntegrationTest {
     ActorSystem system = ActorSystem.create("ingestion-pipeline-runner-test");
     long processed;
     try {
-      processed =
-          new IngestionPipelineRunner().run(spec, system, instrumentedTransform, countingSink);
+      processed = new PekkoIngestionRunner().run(spec, system, instrumentedTransform, countingSink);
     } finally {
       system.terminate();
     }

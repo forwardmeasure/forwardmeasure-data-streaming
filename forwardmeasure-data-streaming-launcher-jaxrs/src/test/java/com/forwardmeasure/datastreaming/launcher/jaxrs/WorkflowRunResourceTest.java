@@ -21,8 +21,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.forwardmeasure.authzen.ActiveOrganization;
+import com.forwardmeasure.authzen.testkit.StubAuthorizationService;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowLaunchRequest;
+import com.forwardmeasure.jpa.tenancy.TenantId;
 import com.forwardmeasure.openworkflow.execution.api.model.Execution;
 import com.forwardmeasure.openworkflow.execution.client.ApiClient;
 import com.forwardmeasure.openworkflow.execution.client.api.ExecutionsApi;
@@ -35,6 +38,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
@@ -49,6 +53,13 @@ import org.junit.jupiter.api.Test;
  * header/query validation) on top of the already-proven launcher.
  */
 final class WorkflowRunResourceTest {
+
+  private static final ActiveOrganization ACTOR =
+      new ActiveOrganization(
+          new TenantId(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")),
+          "org-1",
+          "actor-1",
+          Set.of("reviewer"));
 
   private HttpServer server;
   private WorkflowRunResource resource;
@@ -65,7 +76,11 @@ final class WorkflowRunResourceTest {
     ApiClient apiClient = new ApiClient();
     apiClient.setBasePath("http://127.0.0.1:" + server.getAddress().getPort());
     apiClient.setBearerToken("test-token");
-    resource = new WorkflowRunResource(new WorkflowIngestionLauncher(new ExecutionsApi(apiClient)));
+    resource =
+        new WorkflowRunResource(
+            new WorkflowIngestionLauncher(
+                new ExecutionsApi(apiClient), StubAuthorizationService.permitAll()),
+            () -> ACTOR);
   }
 
   @AfterEach

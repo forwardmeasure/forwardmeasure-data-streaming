@@ -54,12 +54,20 @@ public record TransformSpec(
    *       placeholders (e.g. {@code "{LAST NAME}, {FIRST NAME}"}), resolved before any transform
    *       runs.
    *   <li>{@code inputs} - the general multi-input case for a named transform that reads more than
-   *       one source column (e.g. {@code map_worldcheck_entity_kind}'s {@code value}/{@code
+   *       one source column (e.g. {@code classify_party_kind}'s {@code value}/{@code
    *       entity_indicator} pair).
    * </ul>
    *
    * <p>When {@code repeated} is true, every rule sharing the same {@code target} contributes one
-   * element to an array at that target; otherwise a rule sets its target directly.
+   * element to an array at that target; otherwise a rule sets its target directly. When {@code
+   * repeated} is true AND {@code metadata} is non-empty (added 2026-09-14, a real gap found trying
+   * to port {@code entity-intelligence-specifications}' own real WorldCheck mapping - its {@code
+   * names}/{@code identifiers} fields need each repeated element to carry its own fixed per-rule
+   * tag, e.g. {@code name_type: PRIMARY} or {@code scheme: SSN}, alongside the resolved value; a
+   * bare accumulated value had no way to express that), each contributed list element is a {@code
+   * Map<String,Object>} - {@code metadata}'s own entries plus {@code "value"} set to the rule's
+   * resolved value - instead of the bare resolved value. {@code metadata} absent/empty preserves
+   * the original bare-value behavior exactly, so no existing spec's output shape changes.
    */
   @JsonIgnoreProperties(ignoreUnknown = true)
   public record FieldRule(
@@ -69,8 +77,25 @@ public record TransformSpec(
       @JsonProperty("inputs") Map<String, String> inputs,
       @JsonProperty("transform") String transform,
       @JsonProperty("optional") Boolean optional,
-      @JsonProperty("repeated") Boolean repeated)
+      @JsonProperty("repeated") Boolean repeated,
+      @JsonProperty("metadata") Map<String, String> metadata)
       implements Serializable {
+
+    public FieldRule {
+      metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
+    }
+
+    /** Pre-{@code metadata} shape, kept working unchanged for every existing caller. */
+    public FieldRule(
+        String target,
+        String source,
+        String template,
+        Map<String, String> inputs,
+        String transform,
+        Boolean optional,
+        Boolean repeated) {
+      this(target, source, template, inputs, transform, optional, repeated, Map.of());
+    }
 
     public boolean isOptional() {
       return Boolean.TRUE.equals(optional);

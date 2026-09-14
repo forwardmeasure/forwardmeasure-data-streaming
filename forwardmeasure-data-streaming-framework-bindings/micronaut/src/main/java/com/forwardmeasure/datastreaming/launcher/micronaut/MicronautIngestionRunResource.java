@@ -16,6 +16,7 @@
  */
 package com.forwardmeasure.datastreaming.launcher.micronaut;
 
+import com.forwardmeasure.authzen.ActiveOrganizationProvider;
 import com.forwardmeasure.datastreaming.launcher.application.DirectIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.IngestionRunResource;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -32,7 +33,10 @@ import jakarta.inject.Singleton;
 public final class MicronautIngestionRunResource extends IngestionRunResource {
 
   @Inject
-  public MicronautIngestionRunResource(DirectIngestionLauncher launcher, KubernetesClient client) {
-    super(launcher, client);
+  public MicronautIngestionRunResource(
+      DirectIngestionLauncher launcher,
+      KubernetesClient client,
+      ActiveOrganizationProvider organizations) {
+    super(launcher, client, organizations);
   }
 }

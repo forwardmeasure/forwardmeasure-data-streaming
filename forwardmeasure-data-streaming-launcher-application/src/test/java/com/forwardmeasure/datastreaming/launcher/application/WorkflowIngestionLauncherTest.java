@@ -20,6 +20,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.forwardmeasure.authzen.ActiveOrganization;
+import com.forwardmeasure.authzen.testkit.StubAuthorizationService;
+import com.forwardmeasure.jpa.tenancy.TenantId;
 import com.forwardmeasure.openworkflow.execution.api.model.Execution;
 import com.forwardmeasure.openworkflow.execution.api.model.ExecutionState;
 import com.forwardmeasure.openworkflow.execution.client.ApiClient;
@@ -31,6 +34,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
@@ -50,6 +54,13 @@ import org.junit.jupiter.api.Test;
  */
 final class WorkflowIngestionLauncherTest {
 
+  private static final ActiveOrganization ACTOR =
+      new ActiveOrganization(
+          new TenantId(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")),
+          "org-1",
+          "actor-1",
+          Set.of("reviewer"));
+
   private HttpServer server;
   private WorkflowIngestionLauncher launcher;
   private final AtomicReference<String> lastMethod = new AtomicReference<>();
@@ -68,7 +79,9 @@ final class WorkflowIngestionLauncherTest {
     ApiClient apiClient = new ApiClient();
     apiClient.setBasePath("http://127.0.0.1:" + server.getAddress().getPort());
     apiClient.setBearerToken("test-token");
-    launcher = new WorkflowIngestionLauncher(new ExecutionsApi(apiClient));
+    launcher =
+        new WorkflowIngestionLauncher(
+            new ExecutionsApi(apiClient), StubAuthorizationService.permitAll());
   }
 
   @AfterEach
@@ -83,7 +96,7 @@ final class WorkflowIngestionLauncherTest {
         new WorkflowLaunchRequest(
             revisionId, Map.of("sourceUri", "file:///test.csv"), "idem-1", "corr-1");
 
-    Execution execution = launcher.launch(request);
+    Execution execution = launcher.launch(request, ACTOR);
 
     assertEquals("POST", lastMethod.get());
     assertTrue(
@@ -104,7 +117,7 @@ final class WorkflowIngestionLauncherTest {
   void observeSendsAGetAndParsesTheResponse() throws Exception {
     UUID executionId = UUID.randomUUID();
 
-    Execution execution = launcher.observe(executionId);
+    Execution execution = launcher.observe(executionId, ACTOR);
 
     assertEquals("GET", lastMethod.get());
     assertTrue(lastPath.get().contains(executionId.toString()));
@@ -115,7 +128,8 @@ final class WorkflowIngestionLauncherTest {
   void cancelSendsAPostToTheCancelSubResource() throws Exception {
     UUID executionId = UUID.randomUUID();
 
-    Execution execution = launcher.cancel(executionId, "\"1\"", "corr-2", "no longer needed");
+    Execution execution =
+        launcher.cancel(executionId, "\"1\"", "corr-2", "no longer needed", ACTOR);
 
     assertEquals("POST", lastMethod.get());
     assertTrue(

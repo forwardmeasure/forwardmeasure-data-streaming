@@ -29,14 +29,8 @@ import com.forwardmeasure.authzen.AuthorizationService;
 import com.forwardmeasure.authzen.KeycloakOrganizationClaims;
 import com.forwardmeasure.authzen.client.AuthzenAuthorizationFactory;
 import com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture;
-import com.forwardmeasure.datastreaming.api.ExecutionSpec;
-import com.forwardmeasure.datastreaming.api.IngestionSpec;
-import com.forwardmeasure.datastreaming.api.SinkSpec;
-import com.forwardmeasure.datastreaming.api.SourceSpec;
-import com.forwardmeasure.datastreaming.api.TransformSpec;
 import java.time.Duration;
 import java.util.Base64;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -58,7 +52,7 @@ import org.junit.jupiter.api.Test;
  * StubAuthorizationService} - running that same mechanic again against a second, real Keycloak
  * container would be redundant, not more rigorous. What's new and worth proving here is
  * specifically that this launcher's own {@code authorize(...)} call, wired to a real PDP, both
- * denies before ever touching Kubernetes (the {@code launch} deny case below passes a {@code null}
+ * denies before ever touching Kubernetes (the {@code cancel} deny case below passes a {@code null}
  * {@link io.fabric8.kubernetes.client.KubernetesClient} - if authorization ran second instead of
  * first, this test would NullPointerException instead of denying) and genuinely grants for a real,
  * provisioned role.
@@ -76,9 +70,23 @@ class DirectIngestionLauncherKeycloakIntegrationTest {
   @BeforeAll
   static void startKeycloakAndProvisionRealAuthorization() {
     fixture = AuthzenKeycloakFixture.start();
+    // The real Keycloak resource this grants must be keyed by the SAME resource id
+    // DataStreamingAuthorizationResources.ingestionRun(...) actually sends at evaluation time - a
+    // fixed collection id ("ingestion-runs"), not the varying correlationId (that only ever lands
+    // in resource.properties.correlation_id, which Keycloak's own resource-name matching never
+    // consults). Confirmed against production: DirectIngestionLauncher.launch/observe/cancel all
+    // build this same resource via ingestionRun(correlationId), so a real deployment authorizes
+    // per-role-on-the-collection, not per-run - matching OpenWorkflowAuthorizationResources'
+    // identical (type, fixed-collection-id, properties) shape and its own real, working
+    // KeycloakOrganizationFixture#grantHumanTaskAuthorization precedent (also collection-scoped, no
+    // per-instance id parameter at all). Deriving the id from the real factory here, rather than
+    // repeating "ingestion-runs" as a second literal, is deliberate: keeps this grant from ever
+    // silently drifting out of sync with the factory again the way it did before this fix.
+    String ingestionRunsResourceId =
+        DataStreamingAuthorizationResources.ingestionRun(GRANTED_RESOURCE_ID).id();
     fixture.grantResourceAuthorization(
         "datastreaming-ingestion-run",
-        GRANTED_RESOURCE_ID,
+        ingestionRunsResourceId,
         "ingestion-run-launch-permission",
         GRANTED_ROLE,
         Set.of(AuthorizationAction.INGESTION_RUN_LAUNCH.scope()));
@@ -109,22 +117,24 @@ class DirectIngestionLauncherKeycloakIntegrationTest {
   }
 
   @Test
-  void deniesAnUnprovisionedLaunchBeforeEverTouchingKubernetes() {
+  void deniesAnUngrantedCancelBeforeEverTouchingKubernetes() {
     DirectIngestionLauncher launcher =
         new DirectIngestionLauncher(
             IngestionJobPolicy.rejecting(), authorization, "unused-image", "unused-command");
-    // No grantResourceAuthorization call exists for this correlationId - a real, unprovisioned
-    // resource, denied by the real PDP exactly as fail-closed requires.
-    DirectLaunchRequest request =
-        new DirectLaunchRequest(
-            "keycloak-integration-denied-run",
-            "keycloak-integration-test",
-            ingestionSpec(),
-            Map.of(),
-            Map.of(),
-            null);
-
-    assertThrows(AuthorizationDeniedException.class, () -> launcher.launch(null, request, actor));
+    // GRANTED_ROLE only ever received the INGESTION_RUN_LAUNCH scope (see @BeforeAll) - never
+    // INGESTION_RUN_CANCEL - so this is a real, never-granted permission, denied by the real PDP
+    // exactly as fail-closed requires. Deliberately not "a different correlationId than the
+    // granted run": once authorization is correctly collection-scoped (see @BeforeAll's own
+    // comment), every correlationId resolves to the identical Keycloak resource, so varying it
+    // alone can never produce a real denial - this exercises the one dimension that genuinely
+    // does. Cancel (like launch/observe) still authorizes before ever touching the passed-in
+    // KubernetesClient - the null client below would NullPointerException instead of denying if
+    // that ordering ever regressed.
+    assertThrows(
+        AuthorizationDeniedException.class,
+        () ->
+            launcher.cancel(
+                null, "keycloak-integration-test", "keycloak-integration-denied-run", actor));
   }
 
   @Test
@@ -138,14 +148,6 @@ class DirectIngestionLauncherKeycloakIntegrationTest {
                 "keycloak-integration-permit",
                 Map.of()));
     assertTrue(decision.permitted(), "a role holding the granted scope must be permitted");
-  }
-
-  private static IngestionSpec ingestionSpec() {
-    return new IngestionSpec(
-        new SourceSpec("file", "file:///tmp/does-not-matter.csv", null, null),
-        new TransformSpec("party", List.of()),
-        new SinkSpec("opensearch", "test-index", null, null),
-        new ExecutionSpec("pekko", new ExecutionSpec.ConcurrencySpec(1, 1), null, null));
   }
 
   private static Map<String, Object> decodeClaims(String jwt) {

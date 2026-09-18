@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.forwardmeasure.datastreaming</groupId>
+    <artifactId>forwardmeasure-data-streaming-parent</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>forwardmeasure-data-streaming-executor-kafka-streams</artifactId>
+  <name>ForwardMeasure Data Streaming Kafka Streams Executor</name>
+  <description>First real implementation of StreamingStageRunnerProvider: a continuous,
+    topic-to-topic Kafka Streams stage (source topic is the ISB in, sink topic is the ISB out),
+    reusing this repo's own FieldMappingEngine for the TransformSpec mapping step - the same
+    field-resolution/named-transform logic the bounded Pekko/Spark executors already use, not a
+    reimplementation. Deliberately not built on fowf's openworkflow-durable-processing command/
+    aggregate kernel - see KafkaStreamsStageRunnerProvider's own javadoc for why that library's
+    real shape doesn't fit a stateless map/filter stage. See this repo's own continuous-streaming
+    gap-bridging plan for why Kafka Streams is the first provider and Pekko is a planned second
+    one.
+  </description>
+
+  <properties>
+    <maven.javadoc.skip>false</maven.javadoc.skip>
+  </properties>
+  
+  <dependencies>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-executor-streaming-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-mappers</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.kafka</groupId>
+      <artifactId>kafka-streams</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-simple</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Real Kafka broker for the end-to-end spike test - plain org.testcontainers.junit.jupiter
+         @Testcontainers/@Container, the exact same pattern forwardmeasure-data-streaming-executor-
+         pekko's/-spark's own real PekkoKafkaConnectorIntegrationTest/SparkKafkaConnectorIntegration
+         Test already use successfully. No org-specific forwardmeasure-testcontainers-kafka wrapper
+         module exists or is needed for this - unlike Postgres/OpenSearch/Kubernetes/Keycloak (which
+         need bespoke setup: security, custom images, network wiring), a plain KafkaContainer's
+         default setup is trivial and testcontainers' own annotations already manage its lifecycle. -->
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-kafka</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-parent</artifactId><version>${revision}</version></parent>
+  <artifactId>forwardmeasure-data-streaming-executor-streaming-api</artifactId>
+  <name>ForwardMeasure Data Streaming Continuous Stage SPI</name>
+  <description>Engine-agnostic boundary for running one StreamingStageSpec continuously - mirrors
+    fowf's own ExecutionEngineProvider seam shape (identity + a start/observe boundary), adapted for
+    a stage that runs forever once started rather than a command that reaches a terminal state. See
+    this repo's own continuous-streaming gap-bridging plan (docs/ or the session's plan file). Kept
+    as its own module, separate from any one implementation, so a future Pekko provider can
+    implement this SPI without depending on the Kafka Streams provider module.</description>
+  <properties>
+    <maven.javadoc.skip>false</maven.javadoc.skip>
+  </properties>
+  <dependencies>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+  </dependencies>
+</project>

@@ -93,6 +93,8 @@
     <module>forwardmeasure-data-streaming-connector-object-storage</module>
     <module>forwardmeasure-data-streaming-executor-pekko</module>
     <module>forwardmeasure-data-streaming-executor-spark</module>
+    <module>forwardmeasure-data-streaming-executor-streaming-api</module>
+    <module>forwardmeasure-data-streaming-executor-kafka-streams</module>
     <module>forwardmeasure-data-streaming-launcher-application</module>
     <module>forwardmeasure-data-streaming-launcher-jaxrs</module>
     <module>forwardmeasure-data-streaming-framework-bindings</module>
@@ -241,6 +243,16 @@
       <dependency>
         <groupId>${project.groupId}</groupId>
         <artifactId>forwardmeasure-data-streaming-executor-spark</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-executor-streaming-api</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-executor-kafka-streams</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

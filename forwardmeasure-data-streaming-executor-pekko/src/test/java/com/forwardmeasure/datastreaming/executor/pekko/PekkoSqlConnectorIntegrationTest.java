@@ -20,9 +20,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.forwardmeasure.datastreaming.api.ExecutionSpec;
+import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
+import com.forwardmeasure.datastreaming.api.DeliverySemantics;
+import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
+import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.connector.camel.CamelBridge;
@@ -133,19 +136,25 @@ class PekkoSqlConnectorIntegrationTest {
 
     IngestionSpec spec =
         new IngestionSpec(
-            new SourceSpec(
-                "file",
-                "file:"
-                    + tempDir.toAbsolutePath()
-                    + "?fileName=source.csv&noop=true&initialDelay=0&delay=100",
-                null,
-                null),
-            new TransformSpec(
-                "party",
-                List.of(
-                    new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
-                    new TransformSpec.FieldRule(
-                        "name", "FULL_NAME", null, null, null, null, null))),
+            List.of(
+                new SourcePlan(
+                    "single",
+                    new SourceSpec(
+                        "file",
+                        "file:"
+                            + tempDir.toAbsolutePath()
+                            + "?fileName=source.csv&noop=true&initialDelay=0&delay=100",
+                        null,
+                        null),
+                    new TransformSpec(
+                        "party",
+                        List.of(
+                            new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
+                            new TransformSpec.FieldRule(
+                                "name", "FULL_NAME", null, null, null, null, null))),
+                    1.0)),
+            null,
+            null,
             new SinkSpec(
                 "jdbc",
                 database.hostJdbcUrl(),
@@ -161,7 +170,9 @@ class PekkoSqlConnectorIntegrationTest {
                     database.password(),
                     "query",
                     "insert into party_sink (id, name) values (:?uid, :?name)")),
-            new ExecutionSpec("pekko", new ExecutionSpec.ConcurrencySpec(4, 8), null, null));
+            ExecutionMode.BOUNDED,
+            new DeliverySemantics(true, new ConcurrencySpec(4, 8), null),
+            null);
 
     ActorSystem system = ActorSystem.create("sql-sink-integration-test");
     try {
@@ -203,19 +214,25 @@ class PekkoSqlConnectorIntegrationTest {
 
     IngestionSpec spec =
         new IngestionSpec(
-            new SourceSpec(
-                "file",
-                "file:"
-                    + tempDir.toAbsolutePath()
-                    + "?fileName=source.csv&noop=true&initialDelay=0&delay=100",
-                null,
-                null),
-            new TransformSpec(
-                "party",
-                List.of(
-                    new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
-                    new TransformSpec.FieldRule(
-                        "name", "FULL_NAME", null, null, null, null, null))),
+            List.of(
+                new SourcePlan(
+                    "single",
+                    new SourceSpec(
+                        "file",
+                        "file:"
+                            + tempDir.toAbsolutePath()
+                            + "?fileName=source.csv&noop=true&initialDelay=0&delay=100",
+                        null,
+                        null),
+                    new TransformSpec(
+                        "party",
+                        List.of(
+                            new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
+                            new TransformSpec.FieldRule(
+                                "name", "FULL_NAME", null, null, null, null, null))),
+                    1.0)),
+            null,
+            null,
             new SinkSpec(
                 "jdbc",
                 database.hostJdbcUrl(),
@@ -231,7 +248,9 @@ class PekkoSqlConnectorIntegrationTest {
                     "file:" + passwordFile,
                     "query",
                     "insert into party_sink_secret_ref (id, name) values (:?uid, :?name)")),
-            new ExecutionSpec("pekko", new ExecutionSpec.ConcurrencySpec(2, 4), null, null));
+            ExecutionMode.BOUNDED,
+            new DeliverySemantics(true, new ConcurrencySpec(2, 4), null),
+            null);
 
     ActorSystem system = ActorSystem.create("sql-sink-secret-ref-integration-test");
     try {
@@ -278,19 +297,25 @@ class PekkoSqlConnectorIntegrationTest {
 
     IngestionSpec spec =
         new IngestionSpec(
-            new SourceSpec(
-                "file",
-                "file:"
-                    + tempDir.toAbsolutePath()
-                    + "?fileName=source.csv&noop=true&initialDelay=0&delay=100",
-                null,
-                null),
-            new TransformSpec(
-                "party",
-                List.of(
-                    new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
-                    new TransformSpec.FieldRule(
-                        "name", "FULL_NAME", null, null, null, null, null))),
+            List.of(
+                new SourcePlan(
+                    "single",
+                    new SourceSpec(
+                        "file",
+                        "file:"
+                            + tempDir.toAbsolutePath()
+                            + "?fileName=source.csv&noop=true&initialDelay=0&delay=100",
+                        null,
+                        null),
+                    new TransformSpec(
+                        "party",
+                        List.of(
+                            new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
+                            new TransformSpec.FieldRule(
+                                "name", "FULL_NAME", null, null, null, null, null))),
+                    1.0)),
+            null,
+            null,
             new SinkSpec(
                 "jdbc",
                 database.hostJdbcUrl(),
@@ -306,7 +331,9 @@ class PekkoSqlConnectorIntegrationTest {
                     database.password(),
                     "query",
                     "insert into party_batch_sink (id, name) values (:?uid, :?name)")),
-            new ExecutionSpec("pekko", new ExecutionSpec.ConcurrencySpec(4, 8), null, null));
+            ExecutionMode.BOUNDED,
+            new DeliverySemantics(true, new ConcurrencySpec(4, 8), null),
+            null);
 
     ActorSystem system = ActorSystem.create("sql-batch-sink-integration-test");
     try {

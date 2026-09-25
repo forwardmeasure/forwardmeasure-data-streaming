@@ -3,11 +3,10 @@
  * framework bindings. {@code jakarta.ws.rs-api} only; the actual runtime is supplied by whichever
  * binding (Quarkus/Spring/Micronaut) assembles this into a real deployable.
  *
- * <p>Three resources, one per launcher: {@link
+ * <p>Two resources, one per launcher (collapsed from three 2026-09-21, once the unified {@code
+ * IngestionSpec} removed the last real reason to split direct-mode dispatch by spec shape): {@link
  * com.forwardmeasure.datastreaming.launcher.jaxrs.IngestionRunResource} ({@code /ingestion-runs} -
- * direct, single-source Pekko), {@link
- * com.forwardmeasure.datastreaming.launcher.jaxrs.CorrelationRunResource} ({@code
- * /correlation-runs} - direct, multi-source Spark), and {@link
+ * direct, single-source or correlated, whichever engine the planner resolves), and {@link
  * com.forwardmeasure.datastreaming.launcher.jaxrs.WorkflowRunResource} ({@code /workflow-runs} -
  * through fowf's own workflow engine). The {@code mapper} sub-package translates every real failure
  * these resources can throw into an HTTP response; the {@code dto} sub-package holds the handful of

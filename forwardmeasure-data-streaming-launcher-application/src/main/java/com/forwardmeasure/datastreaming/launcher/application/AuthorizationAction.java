@@ -23,7 +23,9 @@ import com.forwardmeasure.authzen.Action;
  * JAX-RS endpoint in this repo ran with zero caller authorization (see
  * docs/fds-authorization-remediation-guide.md, itself confirmed by direct code inspection, not
  * inferred). One entry per privileged operation, matching the guide's own §3.2 minimum set exactly:
- * three verbs (launch/read/cancel) across the three real run types this launcher exposes.
+ * three verbs (launch/read/cancel) across the real run types this launcher exposes ({@code
+ * CORRELATION_RUN_*} was removed 2026-09-21 when {@code DirectCorrelationLauncher} collapsed into
+ * {@code DirectIngestionLauncher}).
  *
  * <p>Implements {@link Action} directly, mirroring forwardmeasure-openworkflow's and
  * forwardmeasure-entity-intelligence's own {@code AuthorizationAction} enums - both real,
@@ -35,9 +37,6 @@ public enum AuthorizationAction implements Action {
   INGESTION_RUN_LAUNCH("ingestion-run:launch"),
   INGESTION_RUN_READ("ingestion-run:read"),
   INGESTION_RUN_CANCEL("ingestion-run:cancel"),
-  CORRELATION_RUN_LAUNCH("correlation-run:launch"),
-  CORRELATION_RUN_READ("correlation-run:read"),
-  CORRELATION_RUN_CANCEL("correlation-run:cancel"),
   WORKFLOW_RUN_LAUNCH("workflow-run:launch"),
   WORKFLOW_RUN_READ("workflow-run:read"),
   WORKFLOW_RUN_CANCEL("workflow-run:cancel");

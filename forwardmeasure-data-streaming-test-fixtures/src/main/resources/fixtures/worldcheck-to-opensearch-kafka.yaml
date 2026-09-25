@@ -1,0 +1,113 @@
+# The kafka-sourced variant of worldcheck-to-opensearch.yaml - byte-for-byte the same mapper.fields
+# (every WorldCheck transform is STATELESS/LIGHT, so per ExecutionPlanCompiler's own real engine-
+# selection table, "source connector is kafka" is the *only* legitimate trigger left to resolve a
+# BOUNDED WorldCheck spec onto KAFKA_STREAMS instead of the PEKKO_STREAMS default). See
+# WorldCheckFixtures#boundedKafkaSpec's own javadoc for the seeding contract: each Kafka message on
+# the source topic is a flat JSON object whose keys are the identical real WorldCheck column names
+# (e.g. "LAST NAME", "E/I") the file-sourced spec's own mapper.fields reference - the same shape
+# BoundedKafkaConsumerRunner already decodes for every other kafka-sourced spec.
+sources:
+  - sourceKey: worldcheck
+    trustWeight: 1.0
+    source:
+      connector: kafka
+      uri: "{{KAFKA_URI}}"
+      schema:
+        ref: schema://worldcheck/reference-population/1.0
+    mapper:
+      target: schema://party/1.0
+      fields:
+        - target: uid
+          source: UID
+        - target: names
+          template: "{LAST NAME}, {FIRST NAME}"
+          repeated: true
+          metadata:
+            name_type: PRIMARY
+        - target: names
+          source: ALIASES
+          transform: parse_semicolon_list
+          optional: true
+          repeated: true
+          metadata:
+            name_type: ALIAS
+        - target: entity_kind
+          inputs:
+            value: CATEGORY
+            entity_indicator: "E/I"
+          transform: classify_party_kind
+        - target: date_of_birth
+          source: DOB
+          transform: parse_partial_date_ymd
+          optional: true
+        - target: nationalities
+          source: CITIZENSHIP
+          transform: parse_semicolon_iso2_list
+          optional: true
+        - target: countries
+          source: COUNTRIES
+          transform: parse_semicolon_iso2_list
+          optional: true
+        - target: identifiers
+          source: SSN
+          optional: true
+          repeated: true
+          metadata:
+            scheme: SSN
+        - target: position
+          source: POSITION
+          optional: true
+        - target: pep_roles
+          source: "PEP ROLES"
+          transform: parse_tilde_list
+          optional: true
+        - target: pep_status
+          source: "PEP STATUS"
+          optional: true
+        - target: keywords
+          source: KEYWORDS
+          transform: parse_tilde_list
+          optional: true
+        - target: external_sources
+          source: "EXTERNAL SOURCES"
+          transform: parse_url_list
+          optional: true
+        - target: external_source_domains
+          source: "EXTERNAL SOURCES"
+          transform: extract_url_domains
+          optional: true
+        - target: further_information
+          source: "FURTHER INFORMATION"
+          optional: true
+        - target: categories
+          source: "SPECIAL INTEREST CATEGORIES"
+          transform: classify_party_categories
+          optional: true
+        - target: locations
+          source: LOCATIONS
+          transform: parse_tilde_delimited_locations
+          optional: true
+
+sink:
+  connector: opensearch
+  uri: "{{OPENSEARCH_URL}}"
+  index: worldcheck-screening-records
+  schema:
+    ref: schema://party/1.0
+  options:
+    idField: uid
+    indexSettingsFile: "{{INDEX_SETTINGS_FILE}}"
+
+executionMode: BOUNDED
+
+delivery:
+  exactlyOnce: true
+  concurrency:
+    preferred: 16
+    maximum: 32
+  flowControl:
+    maxInFlightRecords: 5000
+
+errors:
+  malformedRecord: dead-letter
+  sinkFailure: retry

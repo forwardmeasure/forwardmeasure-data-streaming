@@ -59,14 +59,15 @@
          SDK for /v1/executions (workflow mode) - both first-party sibling artifacts, pinned locally
          per this repo's own established convention, matching fowf's own root pom revision. -->
     <openworkflow.version>1.1.0</openworkflow.version>
-    <!-- Not published to any remote repository as of 2026-09-14 - requires a local `mvn install`
-         from /home/pn/Documents/code/forwardmeasure/forwardmeasure-authzen before this reactor can
-         resolve it. Real caller authentication/authorization was entirely missing from this repo's
-         launcher (see docs/fds-authorization-remediation-guide.md) until this same day, when it was
-         built directly on this shared library rather than as a third product-local copy (fowf and
+    <!-- Not published to any remote repository - requires a local `mvn install` from
+         /home/pn/Documents/code/forwardmeasure/forwardmeasure-authzen (or forwardmeasure-platform's
+         reactor.xml, which now aggregates it) before this reactor can resolve it. Real caller
+         authentication/authorization was entirely missing from this repo's launcher (see
+         docs/fds-authorization-remediation-guide.md) until 2026-09-17, when it was built directly on
+         this shared library rather than as a third product-local copy (fowf and
          forwardmeasure-entity-intelligence both already had their own; this consolidation is why one
          now exists at all). -->
-    <forwardmeasure-authzen.version>1.0.0</forwardmeasure-authzen.version>
+    <forwardmeasure-authzen.version>1.1.0</forwardmeasure-authzen.version>
     <!-- Camel and Spark used to be pinned locally here (data-fabric's own real
          org.apache.spark.version=4.2.0 was the source of truth for Spark). Both are now managed
          in forwardmeasure-platform itself instead, the same as Pekko/jandex/mapstruct already
@@ -87,6 +88,7 @@
     <module>forwardmeasure-data-streaming-api</module>
     <module>forwardmeasure-data-streaming-transforms</module>
     <module>forwardmeasure-data-streaming-mappers</module>
+    <module>forwardmeasure-data-streaming-test-fixtures</module>
     <module>forwardmeasure-data-streaming-core</module>
     <module>forwardmeasure-data-streaming-connector-camel</module>
     <module>forwardmeasure-data-streaming-connector-jdbc</module>
@@ -165,6 +167,22 @@
         <version>${forwardmeasure-testcontainers.version}</version>
       </dependency>
       <dependency>
+        <!-- Added 2026-09-21 to replace the ad hoc org.testcontainers:testcontainers-kafka usage
+             every real Kafka-backed test in this reactor previously duplicated on its own. -->
+        <groupId>com.forwardmeasure.testcontainers</groupId>
+        <artifactId>forwardmeasure-testcontainers-kafka</artifactId>
+        <version>${forwardmeasure-testcontainers.version}</version>
+      </dependency>
+      <dependency>
+        <!-- Added 2026-09-21 for the real, full live fowf fixture (Phase D) - fowf's own
+             execution-management/engine/operation-adapter services all validate a real Bearer JWT
+             against a real Keycloak issuer; the first real consumer of this artifact in this
+             reactor (confirmed by grep before adding it). -->
+        <groupId>com.forwardmeasure.testcontainers</groupId>
+        <artifactId>forwardmeasure-testcontainers-keycloak</artifactId>
+        <version>${forwardmeasure-testcontainers.version}</version>
+      </dependency>
+      <dependency>
         <groupId>com.forwardmeasure.testcontainers</groupId>
         <artifactId>forwardmeasure-testcontainers-kubernetes</artifactId>
         <version>${forwardmeasure-testcontainers.version}</version>
@@ -182,6 +200,32 @@
       <dependency>
         <groupId>com.forwardmeasure.openworkflow</groupId>
         <artifactId>openworkflow-execution-models</artifactId>
+        <version>${openworkflow.version}</version>
+      </dependency>
+      <dependency>
+        <!-- Phase D (2026-09-21) - the real live fowf fixture publishes a real WorkflowDefinition
+             through fowf's own generated definition-management client SDK, mirroring
+             forwardmeasure-entity-intelligence's own real, already-proven
+             WorkflowDefinitionPublisherMain exactly (create -> validate -> submit -> publish). -->
+        <groupId>com.forwardmeasure.openworkflow</groupId>
+        <artifactId>openworkflow-definition-management-client-apachehttp</artifactId>
+        <version>${openworkflow.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.forwardmeasure.openworkflow</groupId>
+        <artifactId>openworkflow-definition-management-models</artifactId>
+        <version>${openworkflow.version}</version>
+      </dependency>
+      <dependency>
+        <!-- Phase D: fowf's own execution-management/definition-management each run a SECOND,
+             server-side AuthZEN check (AuthzenExecutionAuthorizer/WorkflowGovernanceServiceImpl),
+             independent of this launcher's own AuthorizationService check - the real fixture's
+             minted token needs a real grant against fowf's own OpenWorkflowAuthorizationResources/
+             AuthorizationAction vocabulary too, confirmed live 2026-09-21 (a real
+             AuthorizationDeniedException from execution-management itself, not from this repo's
+             own code). -->
+        <groupId>com.forwardmeasure.openworkflow</groupId>
+        <artifactId>openworkflow-authorization-api</artifactId>
         <version>${openworkflow.version}</version>
       </dependency>
       <dependency>
@@ -213,6 +257,11 @@
       <dependency>
         <groupId>${project.groupId}</groupId>
         <artifactId>forwardmeasure-data-streaming-mappers</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-test-fixtures</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
@@ -254,6 +303,19 @@
         <groupId>${project.groupId}</groupId>
         <artifactId>forwardmeasure-data-streaming-executor-kafka-streams</artifactId>
         <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <!-- Not centrally managed in forwardmeasure-platform yet - confirmed absent repo-wide
+             before adding (grep, then a real Maven Central check). Pekko-core here is 1.7.0/
+             Scala 2.13 (platform pom); pekko-connectors-kafka 1.1.0 is the current release on
+             that Scala binary version. Used by forwardmeasure-data-streaming-executor-pekko's own
+             continuous-mode code (merged in 2026-09-21 from the now-retired
+             forwardmeasure-data-streaming-executor-pekko-streaming module) - deliberately using
+             real Kafka transactions/committable offsets, not a weaker guarantee than the Kafka
+             Streams engine's own EOS v2 default. -->
+        <groupId>org.apache.pekko</groupId>
+        <artifactId>pekko-connectors-kafka_${scala.binary.version}</artifactId>
+        <version>1.1.0</version>
       </dependency>
       <dependency>
         <groupId>${project.groupId}</groupId>

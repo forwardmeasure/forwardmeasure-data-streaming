@@ -40,14 +40,14 @@ import java.util.Optional;
  * own env-var contract already works and is already deployed. This launcher meets that contract
  * as-is: a caller supplies exactly the env var names/values its own image expects, unchanged.
  *
- * <p>Unlike {@link DirectIngestionLauncher} (bound to one fixed Pekko runner image/command at
- * construction time) or {@link DirectCorrelationLauncher}, this launcher has no runner image of its
- * own - {@code image}/{@code command}/{@code args} are supplied per {@link EnvLaunchRequest}, since
- * it exists precisely to launch images that aren't one of FDS's own generic runners. Authorization
- * still goes through the same {@link IngestionJobPolicy} contract (namespace + sha256-pinned image
- * allowlists) every other direct-mode launcher uses, and the same deterministic-Job-name-from-
- * correlation-id convention, so a caller gets the identical idempotency/authorization guarantees
- * regardless of which launcher it uses.
+ * <p>Unlike {@link DirectIngestionLauncher} (bound to fixed per-engine runner images/commands at
+ * construction time), this launcher has no runner image of its own - {@code image}/{@code
+ * command}/{@code args} are supplied per {@link EnvLaunchRequest}, since it exists precisely to
+ * launch images that aren't one of FDS's own generic runners. Authorization still goes through the
+ * same {@link IngestionJobPolicy} contract (namespace + sha256-pinned image allowlists) every other
+ * direct-mode launcher uses, and the same deterministic-Job-name-from- correlation-id convention,
+ * so a caller gets the identical idempotency/authorization guarantees regardless of which launcher
+ * it uses.
  */
 public final class EnvConfiguredJobLauncher {
 
@@ -60,6 +60,7 @@ public final class EnvConfiguredJobLauncher {
 
   private final IngestionJobPolicy policy;
   private final String jobNamePrefix;
+  private final Map<String, String> hostAliases;
 
   public EnvConfiguredJobLauncher(IngestionJobPolicy policy) {
     this(policy, DEFAULT_JOB_NAME_PREFIX);
@@ -74,8 +75,21 @@ public final class EnvConfiguredJobLauncher {
    *     guarantees the same correlation id always maps to the same name.
    */
   public EnvConfiguredJobLauncher(IngestionJobPolicy policy, String jobNamePrefix) {
+    this(policy, jobNamePrefix, Map.of());
+  }
+
+  /**
+   * @param hostAliases written into every Job this instance launches as real {@code
+   *     pod.spec.hostAliases} entries (see {@link KubernetesJobSpec}'s own javadoc) - empty in
+   *     every real deployment; only a test environment whose dispatch target (a
+   *     Testcontainers-managed K3s node) can't resolve a sibling Testcontainers-managed service
+   *     (OpenSearch, Kafka) through cluster DNS needs this at all.
+   */
+  public EnvConfiguredJobLauncher(
+      IngestionJobPolicy policy, String jobNamePrefix, Map<String, String> hostAliases) {
     this.policy = Objects.requireNonNull(policy, "policy");
     this.jobNamePrefix = Objects.requireNonNull(jobNamePrefix, "jobNamePrefix");
+    this.hostAliases = hostAliases == null ? Map.of() : Map.copyOf(hostAliases);
   }
 
   /**
@@ -104,7 +118,8 @@ public final class EnvConfiguredJobLauncher {
             COMPLETIONS,
             BACKOFF_LIMIT,
             request.activeDeadlineSeconds(),
-            request.imagePullSecretNames());
+            request.imagePullSecretNames(),
+            hostAliases);
     KubernetesJobLifecycle.launch(client, jobSpec);
     return jobName;
   }

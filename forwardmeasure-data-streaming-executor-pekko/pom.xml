@@ -26,7 +26,18 @@
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-camel</artifactId></dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-jdbc</artifactId></dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-object-storage</artifactId></dependency>
+    <dependency>
+      <!-- DeliveryEngine/ExecutionHandle - PekkoStreamsDeliveryEngine's own real interfaces. -->
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-executor-streaming-api</artifactId>
+    </dependency>
     <dependency><groupId>org.apache.pekko</groupId><artifactId>pekko-stream_${scala.binary.version}</artifactId></dependency>
+    <dependency>
+      <!-- Continuous-mode Kafka source/sink - merged in 2026-09-21 from the now-retired
+           forwardmeasure-data-streaming-executor-pekko-streaming module. -->
+      <groupId>org.apache.pekko</groupId>
+      <artifactId>pekko-connectors-kafka_${scala.binary.version}</artifactId>
+    </dependency>
     <dependency>
       <!-- run(spec, system)'s own real Camel-backed sink serializes each mapped row to JSON before
            handing it to CamelBridge#sink - the one body type every Camel producer component
@@ -61,6 +72,14 @@
          compatible with OpenSearch's own fork) - camel-http against OpenSearch's own plain REST API
          instead, the same one every real OpenSearch client ultimately calls. -->
     <dependency><groupId>org.apache.camel</groupId><artifactId>camel-http</artifactId></dependency>
+    <!-- Real (not test-scope): with no SLF4J provider on the runtime classpath, every LOGGER.*
+         call in this module's own code (and Camel/Pekko's own internal logging) silently goes
+         nowhere in the real deployed image - the identical gap fei's own ingestion-worker pom
+         already documented and fixed for the same reason. slf4j-simple is the minimal,
+         zero-config provider (stdout, no separate config file) appropriate for a plain worker
+         jar. Not covered by forwardmeasure-platform's BOM; pinned to match this project's own
+         managed slf4j-api 2.0.x line. -->
+    <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-simple</artifactId><version>2.0.18</version></dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
     <!-- Test-only: SqlSourceAndSinkIntegrationTest proves the jdbc/sql path against a real
          Postgres, not mocked, matching this org's own testing convention for anything JDBC-backed
@@ -68,22 +87,11 @@
     <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-junit-jupiter</artifactId><scope>test</scope></dependency>
     <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-postgresql</artifactId><scope>test</scope></dependency>
     <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId><scope>test</scope></dependency>
-    <!-- Test-only: proves the kafka sink/source against a real broker, not mocked. Real artifactId
-         confirmed from the actual cached jar - testcontainers 2.x renamed this from the older
-         "kafka" (1.x) to "testcontainers-kafka". No org-specific @WithKafkaContainer extension
-         exists yet (unlike postgresql/opensearch) - raw Testcontainers JUnit 5 support instead. -->
-    <dependency><groupId>org.testcontainers</groupId><artifactId>testcontainers-kafka</artifactId><scope>test</scope></dependency>
-    <!-- Real artifactId confirmed from the actual cached BOM (2.0.5) - testcontainers 2.x renamed
-         this from the older "junit-jupiter" (1.x) to "testcontainers-junit-jupiter", the exact same
-         renaming pattern as testcontainers-kafka above; missed the first time this was added, only
-         verified for -kafka, not this one. -->
-    <dependency><groupId>org.testcontainers</groupId><artifactId>testcontainers-junit-jupiter</artifactId><scope>test</scope></dependency>
+    <!-- Test-only: proves the kafka sink/source against a real broker, not mocked, via the real
+         @WithKafkaContainer extension (forwardmeasure-testcontainers-kafka module). -->
+    <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-kafka</artifactId><scope>test</scope></dependency>
     <!-- Test-only: proves the opensearch sink against a real, unsecured OpenSearch node. -->
     <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-opensearch</artifactId><scope>test</scope></dependency>
-    <!-- Test-only: with no SLF4J provider on the classpath, every LOGGER.info/debug call in this
-         module (and Camel/Pekko's own internal logging) is silently a no-op - real output is
-         needed to see what a hanging integration test is actually doing. -->
-    <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-simple</artifactId><scope>test</scope></dependency>
     <!-- Test-only: PekkoGrpcRowSourceIntegrationTest proves the gRPC source mechanism (see
          GrpcRowSource's own javadoc for why it's grpc-java's own blocking-stub Iterator, not
          camel-grpc) against a real in-process gRPC server + a real generated stub from a toy
@@ -162,7 +170,11 @@
         <configuration>
           <archive>
             <manifest>
-              <mainClass>com.forwardmeasure.datastreaming.executor.pekko.PekkoIngestionRunner</mainClass>
+              <!-- Retargeted 2026-09-21 from PekkoIngestionRunner (bounded-only, single-source-only)
+                   to PekkoStreamsDeliveryEngine, the real unified entrypoint that branches on
+                   ExecutionMode - PekkoIngestionRunner's own main() cannot run a CONTINUOUS spec at
+                   all, so it can no longer be this image's real entrypoint. -->
+              <mainClass>com.forwardmeasure.datastreaming.executor.pekko.PekkoStreamsDeliveryEngine</mainClass>
               <addClasspath>true</addClasspath>
               <classpathPrefix>dependency/</classpathPrefix>
             </manifest>

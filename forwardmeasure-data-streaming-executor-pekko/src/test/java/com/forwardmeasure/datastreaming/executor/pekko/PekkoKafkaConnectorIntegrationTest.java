@@ -19,13 +19,18 @@ package com.forwardmeasure.datastreaming.executor.pekko;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.forwardmeasure.datastreaming.api.ExecutionSpec;
+import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
+import com.forwardmeasure.datastreaming.api.DeliverySemantics;
+import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
+import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.connector.camel.CamelBridge;
 import com.forwardmeasure.datastreaming.mappers.SourceRow;
+import com.forwardmeasure.testcontainers.junit.kafka.WithKafkaContainer;
+import com.forwardmeasure.testcontainers.kafka.KafkaTestContainer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -37,9 +42,6 @@ import org.apache.pekko.actor.ActorSystem;
 import org.apache.pekko.stream.javadsl.Sink;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.kafka.KafkaContainer;
 
 /**
  * Real, no-mocks proof of the {@code kafka} connector both directions add 2026-09-13: the sink
@@ -49,37 +51,43 @@ import org.testcontainers.kafka.KafkaContainer;
  * with an explicit {@code maxMessages} bound, since (unlike {@code file}/{@code jdbc}) Camel's
  * kafka consumer has no built-in "read a snapshot and stop" semantics.
  */
-@Testcontainers
+@WithKafkaContainer
 class PekkoKafkaConnectorIntegrationTest {
 
-  @Container private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0");
-
   @Test
-  void sinkPublishesEachMappedRowAndSourceReadsThemBackBounded(@TempDir Path tempDir)
-      throws Exception {
+  void sinkPublishesEachMappedRowAndSourceReadsThemBackBounded(
+      @TempDir Path tempDir, KafkaTestContainer kafka) throws Exception {
     Path sourceCsv = tempDir.resolve("source.csv");
     Files.writeString(
         sourceCsv, "ID,FULL_NAME\nS1,Alice Anderson\nS2,Bob Baker\n", StandardCharsets.UTF_8);
     String topic = "fds-kafka-connector-test-" + UUID.randomUUID();
-    String brokers = KAFKA.getBootstrapServers();
+    String brokers = kafka.bootstrapServers();
 
     IngestionSpec sinkSpec =
         new IngestionSpec(
-            new SourceSpec(
-                "file",
-                "file:"
-                    + tempDir.toAbsolutePath()
-                    + "?fileName=source.csv&noop=true&initialDelay=0&delay=100",
-                null,
-                null),
-            new TransformSpec(
-                "party",
-                List.of(
-                    new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
-                    new TransformSpec.FieldRule(
-                        "name", "FULL_NAME", null, null, null, null, null))),
+            List.of(
+                new SourcePlan(
+                    "single",
+                    new SourceSpec(
+                        "file",
+                        "file:"
+                            + tempDir.toAbsolutePath()
+                            + "?fileName=source.csv&noop=true&initialDelay=0&delay=100",
+                        null,
+                        null),
+                    new TransformSpec(
+                        "party",
+                        List.of(
+                            new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
+                            new TransformSpec.FieldRule(
+                                "name", "FULL_NAME", null, null, null, null, null))),
+                    1.0)),
+            null,
+            null,
             new SinkSpec("kafka", "kafka:" + topic + "?brokers=" + brokers, "n/a", null, null),
-            new ExecutionSpec("pekko", new ExecutionSpec.ConcurrencySpec(2, 4), null, null));
+            ExecutionMode.BOUNDED,
+            new DeliverySemantics(true, new ConcurrencySpec(2, 4), null),
+            null);
 
     ActorSystem sinkSystem = ActorSystem.create("kafka-sink-integration-test");
     try {

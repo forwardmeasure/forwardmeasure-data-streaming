@@ -84,14 +84,15 @@ class DirectIngestionLauncherKeycloakIntegrationTest {
     // silently drifting out of sync with the factory again the way it did before this fix.
     String ingestionRunsResourceId =
         DataStreamingAuthorizationResources.ingestionRun(GRANTED_RESOURCE_ID).id();
+    UUID tenantId = UUID.randomUUID();
+    String organizationId = fixture.provisionTenant("datastreaming-org", tenantId, GRANTED_ROLE);
     fixture.grantResourceAuthorization(
+        organizationId,
         "datastreaming-ingestion-run",
         ingestionRunsResourceId,
         "ingestion-run-launch-permission",
         GRANTED_ROLE,
         Set.of(AuthorizationAction.INGESTION_RUN_LAUNCH.scope()));
-    UUID tenantId = UUID.randomUUID();
-    fixture.provisionTenant("datastreaming-org", tenantId, GRANTED_ROLE);
 
     String accessToken = fixture.mintUserToken();
     Map<String, Object> claims = decodeClaims(accessToken);
@@ -120,7 +121,12 @@ class DirectIngestionLauncherKeycloakIntegrationTest {
   void deniesAnUngrantedCancelBeforeEverTouchingKubernetes() {
     DirectIngestionLauncher launcher =
         new DirectIngestionLauncher(
-            IngestionJobPolicy.rejecting(), authorization, "unused-image", "unused-command");
+            IngestionJobPolicy.rejecting(),
+            authorization,
+            "unused-image",
+            "unused-command",
+            "unused-image",
+            "unused-command");
     // GRANTED_ROLE only ever received the INGESTION_RUN_LAUNCH scope (see @BeforeAll) - never
     // INGESTION_RUN_CANCEL - so this is a real, never-granted permission, denied by the real PDP
     // exactly as fail-closed requires. Deliberately not "a different correlationId than the

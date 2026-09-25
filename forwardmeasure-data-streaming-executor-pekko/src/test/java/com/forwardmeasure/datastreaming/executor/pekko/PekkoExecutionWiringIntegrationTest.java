@@ -20,9 +20,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.forwardmeasure.datastreaming.api.ExecutionSpec;
+import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
+import com.forwardmeasure.datastreaming.api.DeliverySemantics;
+import com.forwardmeasure.datastreaming.api.ErrorPolicy;
+import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
+import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.connector.camel.CamelBridge;
@@ -105,12 +109,8 @@ class PekkoExecutionWiringIntegrationTest {
   void sinkFailureRetryEventuallySucceedsAgainstARealFlakyCamelRoute() throws Exception {
     AtomicInteger attempts = new AtomicInteger();
     SinkSpec sink = new SinkSpec("direct", "direct:flaky", "n/a", null, null);
-    ExecutionSpec execution =
-        new ExecutionSpec(
-            "pekko",
-            new ExecutionSpec.ConcurrencySpec(1, null),
-            null,
-            new ExecutionSpec.FailureSpec(null, "retry"));
+    DeliverySemantics delivery = new DeliverySemantics(true, new ConcurrencySpec(1, null), null);
+    ErrorPolicy errors = new ErrorPolicy(null, "retry");
 
     ActorSystem system = ActorSystem.create("sink-failure-retry-test");
     try (CamelBridge bridge = new CamelBridge()) {
@@ -132,7 +132,7 @@ class PekkoExecutionWiringIntegrationTest {
 
       Sink<Map<String, Object>, CompletionStage<Done>> builtSink =
           PekkoIngestionRunner.buildSink(
-              bridge, sink, execution, new ObjectMapper(), new AtomicLong());
+              bridge, sink, delivery, errors, new ObjectMapper(), new AtomicLong());
       Source.single(Map.<String, Object>of("uid", "S1", "name", "Alice Anderson"))
           .runWith(builtSink, system)
           .toCompletableFuture()
@@ -157,12 +157,8 @@ class PekkoExecutionWiringIntegrationTest {
   void sinkFailureFailPropagatesARealWriteFailureRatherThanSilentlyRetrying() throws Exception {
     AtomicInteger attempts = new AtomicInteger();
     SinkSpec sink = new SinkSpec("direct", "direct:alwaysFails", "n/a", null, null);
-    ExecutionSpec execution =
-        new ExecutionSpec(
-            "pekko",
-            new ExecutionSpec.ConcurrencySpec(1, null),
-            null,
-            new ExecutionSpec.FailureSpec(null, "fail"));
+    DeliverySemantics delivery = new DeliverySemantics(true, new ConcurrencySpec(1, null), null);
+    ErrorPolicy errors = new ErrorPolicy(null, "fail");
 
     ActorSystem system = ActorSystem.create("sink-failure-fail-test");
     try (CamelBridge bridge = new CamelBridge()) {
@@ -183,7 +179,7 @@ class PekkoExecutionWiringIntegrationTest {
 
       Sink<Map<String, Object>, CompletionStage<Done>> builtSink =
           PekkoIngestionRunner.buildSink(
-              bridge, sink, execution, new ObjectMapper(), new AtomicLong());
+              bridge, sink, delivery, errors, new ObjectMapper(), new AtomicLong());
       assertThrows(
           Exception.class,
           () ->
@@ -206,35 +202,39 @@ class PekkoExecutionWiringIntegrationTest {
     Path outputDir = tempDir.resolve("output");
 
     return new IngestionSpec(
-        new SourceSpec(
-            "file",
-            "file:"
-                + tempDir.toAbsolutePath()
-                + "?fileName=source.csv&noop=true&initialDelay=0&delay=100",
-            null,
-            null),
-        new TransformSpec(
-            "party",
-            List.of(
-                new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
-                new TransformSpec.FieldRule(
-                    "name",
-                    "FULL_NAME",
+        List.of(
+            new SourcePlan(
+                "single",
+                new SourceSpec(
+                    "file",
+                    "file:"
+                        + tempDir.toAbsolutePath()
+                        + "?fileName=source.csv&noop=true&initialDelay=0&delay=100",
                     null,
-                    null,
-                    "this_transform_was_never_registered",
-                    null,
-                    null))),
+                    null),
+                new TransformSpec(
+                    "party",
+                    List.of(
+                        new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
+                        new TransformSpec.FieldRule(
+                            "name",
+                            "FULL_NAME",
+                            null,
+                            null,
+                            "this_transform_was_never_registered",
+                            null,
+                            null))),
+                1.0)),
+        null,
+        null,
         new SinkSpec(
             "file",
             "file:" + outputDir.toAbsolutePath() + "?fileName=output.jsonl&fileExist=Append",
             "n/a",
             null,
             null),
-        new ExecutionSpec(
-            "pekko",
-            new ExecutionSpec.ConcurrencySpec(4, null),
-            null,
-            new ExecutionSpec.FailureSpec(malformedRecord, null)));
+        ExecutionMode.BOUNDED,
+        new DeliverySemantics(true, new ConcurrencySpec(4, null), null),
+        new ErrorPolicy(malformedRecord, null));
   }
 }

@@ -19,21 +19,26 @@ package com.forwardmeasure.datastreaming.executor.spark;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.forwardmeasure.datastreaming.api.ExecutionSpec;
-import com.forwardmeasure.datastreaming.api.IngestionSpec;
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
+import com.forwardmeasure.datastreaming.api.DeliverySemantics;
+import com.forwardmeasure.datastreaming.api.ErrorPolicy;
+import com.forwardmeasure.datastreaming.api.ExecutionMode;
+import com.forwardmeasure.datastreaming.api.ExecutionPlan;
+import com.forwardmeasure.datastreaming.api.ExecutionProfile;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
+import com.forwardmeasure.datastreaming.api.SourceCardinality;
+import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
+import com.forwardmeasure.datastreaming.api.SparkStagePlan;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
-import com.sun.net.httpserver.HttpServer;
-import java.net.InetSocketAddress;
+import com.forwardmeasure.testcontainers.junit.kafka.WithKafkaContainer;
+import com.forwardmeasure.testcontainers.kafka.KafkaTestContainer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
-import org.apache.spark.api.java.JavaRDD;
-import org.apache.spark.api.java.JavaSparkContext;
+import java.util.Optional;
+import java.util.UUID;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -47,7 +52,20 @@ import org.junit.jupiter.api.io.TempDir;
  * NamedTransformRegistry} function is defensive (never throws on bad data), so a genuinely
  * malformed row in this system is a spec-level mistake (an unregistered transform name), uniform
  * across every row - not per-row bad data.
+ *
+ * <p><b>Retired 2026-09-21</b>: this class used to also prove {@code sinkFailure: retry} eventually
+ * succeeding against a real flaky HTTP server backing the old {@code opensearch} sink's
+ * per-document write loop - deleted along with that sink (see {@link SparkSinks}' own javadoc). The
+ * retry *mechanism* itself ({@code IngestionPipeline#withSinkFailureHandlingBlocking}) is already
+ * proven generically by {@code IngestionPipelineTest} in {@code
+ * forwardmeasure-data-streaming-core}, independent of any one connector; {@code writeKafka}'s
+ * single whole-batch {@code .save()} call has no natural per-attempt flakiness to inject against a
+ * real broker the way the old per-document loop did, so re-proving retry-specifically-on-Spark here
+ * would need real chaos engineering (pausing/resuming the broker container) for a mechanism already
+ * covered - not built, flagged here rather than silently dropped. {@code sinkFailure: fail}
+ * propagation is still proven below, now against an unreachable Kafka broker instead of Postgres.
  */
+@WithKafkaContainer
 class SparkExecutionWiringIntegrationTest {
 
   private static SparkSession spark;
@@ -69,20 +87,23 @@ class SparkExecutionWiringIntegrationTest {
   }
 
   @Test
-  void malformedRecordSkipLetsTheRunCompleteWithNothingWritten(@TempDir Path tempDir)
-      throws Exception {
-    IngestionSpec spec = specWithUnregisteredTransform(tempDir, "skip");
+  void malformedRecordSkipLetsTheRunCompleteWithNothingWritten(
+      @TempDir Path tempDir, KafkaTestContainer kafka) throws Exception {
+    String brokers = kafka.bootstrapServers();
+    ExecutionPlan plan = planWithUnregisteredTransform(tempDir, "skip", brokers);
 
-    SparkIngestionRunner.IngestionResult result = SparkIngestionRunner.run(spark, spec);
+    SparkIngestionRunner.IngestionResult result = SparkIngestionRunner.run(spark, plan, brokers);
 
     assertEquals(0, result.recordsWritten(), "every row hits the same unregistered transform");
   }
 
   @Test
-  void malformedRecordFailFailsTheWholeRun(@TempDir Path tempDir) throws Exception {
-    IngestionSpec spec = specWithUnregisteredTransform(tempDir, "fail");
+  void malformedRecordFailFailsTheWholeRun(@TempDir Path tempDir, KafkaTestContainer kafka)
+      throws Exception {
+    String brokers = kafka.bootstrapServers();
+    ExecutionPlan plan = planWithUnregisteredTransform(tempDir, "fail", brokers);
 
-    assertThrows(Exception.class, () -> SparkIngestionRunner.run(spark, spec));
+    assertThrows(Exception.class, () -> SparkIngestionRunner.run(spark, plan, brokers));
   }
 
   @Test
@@ -91,102 +112,64 @@ class SparkExecutionWiringIntegrationTest {
     Path sourceCsv = tempDir.resolve("source.csv");
     Files.writeString(sourceCsv, "ID,FULL_NAME\nS1,Alice Anderson\n", StandardCharsets.UTF_8);
 
-    IngestionSpec spec =
-        new IngestionSpec(
-            new SourceSpec("file", sourceCsv.toString(), null, null),
-            new TransformSpec(
-                "party",
-                List.of(new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null))),
-            // No real Postgres listening on this port - a real, deterministic connection failure.
-            new SinkSpec(
-                "jdbc",
-                "jdbc:postgresql://127.0.0.1:1/nonexistent",
-                "party_sink",
-                null,
-                null,
-                java.util.Map.of("driver", "org.postgresql.Driver", "user", "x", "password", "x")),
-            new ExecutionSpec("spark", null, null, new ExecutionSpec.FailureSpec(null, "fail")));
+    ExecutionPlan plan =
+        new ExecutionPlan(
+            new ExecutionProfile(
+                SourceCardinality.SINGLE, ExecutionMode.BOUNDED, DeliveryEngineKind.PEKKO_STREAMS),
+            List.of(
+                new SourcePlan(
+                    "single",
+                    new SourceSpec("file", sourceCsv.toString(), null, null),
+                    new TransformSpec(
+                        "party",
+                        List.of(
+                            new TransformSpec.FieldRule(
+                                "uid", "ID", null, null, null, null, null))),
+                    1.0)),
+            null,
+            Optional.of(
+                new SparkStagePlan(List.of("test-heavy-transform"), "unreachable-handoff-topic")),
+            null,
+            new SinkSpec("opensearch", "http://unused", "unused", null, null, java.util.Map.of()),
+            new DeliverySemantics(true, null, null),
+            new ErrorPolicy(null, "fail"));
 
-    assertThrows(Exception.class, () -> SparkIngestionRunner.run(spark, spec));
+    // No real Kafka broker listening on this port - a real, deterministic connection failure.
+    assertThrows(Exception.class, () -> SparkIngestionRunner.run(spark, plan, "127.0.0.1:1"));
   }
 
-  /**
-   * The other half of sink-failure wiring, added 2026-09-14 once a direct side-by-side comparison
-   * with {@code PekkoExecutionWiringIntegrationTest} surfaced that this class only ever proved
-   * {@code fail} genuinely propagating a real, permanently-broken connection - nothing proved
-   * {@code retry} actually recovering from a real transient failure the way the Pekko side's own
-   * {@code sinkFailureRetryEventuallySucceedsAgainstARealFlakyCamelRoute} does (a real flaky
-   * in-process Camel route there; a real flaky in-process HTTP server here, since Spark's own
-   * {@code opensearch} sink has no Camel route to install into - {@link SparkSinks#write} is called
-   * directly, the same "call the sink-building code directly" pattern the Pekko test uses via
-   * {@code PekkoIngestionRunner#buildSink}).
-   */
-  @Test
-  void sinkFailureRetryEventuallySucceedsAgainstARealFlakyHttpServer() throws Exception {
-    AtomicInteger attempts = new AtomicInteger();
-    HttpServer server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
-    server.createContext(
-        "/",
-        exchange -> {
-          try {
-            if (attempts.incrementAndGet() < 3) {
-              exchange.sendResponseHeaders(500, -1);
-            } else {
-              byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
-              exchange.sendResponseHeaders(200, body.length);
-              exchange.getResponseBody().write(body);
-            }
-          } finally {
-            exchange.close();
-          }
-        });
-    server.start();
-    try {
-      SinkSpec sink =
-          new SinkSpec(
-              "opensearch",
-              "http://localhost:" + server.getAddress().getPort(),
-              "flaky-index",
-              null,
-              null,
-              Map.of("idField", "uid"));
-      ExecutionSpec execution =
-          new ExecutionSpec("spark", null, null, new ExecutionSpec.FailureSpec(null, "retry"));
-
-      JavaRDD<Map<String, Object>> mapped =
-          new JavaSparkContext(spark.sparkContext())
-              .parallelize(List.of(Map.of("uid", "S1", "name", "Alice Anderson")));
-      SparkSinks.write(spark, mapped, sink, execution, List.of());
-    } finally {
-      server.stop(0);
-    }
-
-    assertEquals(3, attempts.get(), "must have retried twice before the 3rd attempt succeeded");
-  }
-
-  private static IngestionSpec specWithUnregisteredTransform(Path tempDir, String malformedRecord)
-      throws Exception {
+  private static ExecutionPlan planWithUnregisteredTransform(
+      Path tempDir, String malformedRecord, String brokers) throws Exception {
     Path sourceCsv = tempDir.resolve("source.csv");
     Files.writeString(
         sourceCsv, "ID,FULL_NAME\nS1,Alice Anderson\nS2,Bob Baker\n", StandardCharsets.UTF_8);
-    Path outputDir = tempDir.resolve("output");
+    String handoffTopic = "fds-spark-execution-wiring-test-" + UUID.randomUUID();
 
-    return new IngestionSpec(
-        new SourceSpec("file", sourceCsv.toString(), null, null),
-        new TransformSpec(
-            "party",
-            List.of(
-                new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
-                new TransformSpec.FieldRule(
-                    "name",
-                    "FULL_NAME",
-                    null,
-                    null,
-                    "this_transform_was_never_registered",
-                    null,
-                    null))),
-        new SinkSpec("file", outputDir.toString(), "n/a", null, null),
-        new ExecutionSpec(
-            "spark", null, null, new ExecutionSpec.FailureSpec(malformedRecord, null)));
+    return new ExecutionPlan(
+        new ExecutionProfile(
+            SourceCardinality.SINGLE, ExecutionMode.BOUNDED, DeliveryEngineKind.PEKKO_STREAMS),
+        List.of(
+            new SourcePlan(
+                "single",
+                new SourceSpec("file", sourceCsv.toString(), null, null),
+                new TransformSpec(
+                    "party",
+                    List.of(
+                        new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
+                        new TransformSpec.FieldRule(
+                            "name",
+                            "FULL_NAME",
+                            null,
+                            null,
+                            "this_transform_was_never_registered",
+                            null,
+                            null))),
+                1.0)),
+        null,
+        Optional.of(new SparkStagePlan(List.of("test-heavy-transform"), handoffTopic)),
+        null,
+        new SinkSpec("opensearch", "http://unused", "unused", null, null, java.util.Map.of()),
+        new DeliverySemantics(true, null, null),
+        new ErrorPolicy(malformedRecord, null));
   }
 }

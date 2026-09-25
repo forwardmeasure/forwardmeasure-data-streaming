@@ -16,11 +16,13 @@
  */
 package com.forwardmeasure.datastreaming.executor.spark;
 
+import com.forwardmeasure.datastreaming.api.ExecutionPlan;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
-import com.forwardmeasure.datastreaming.api.TransformSpec;
+import com.forwardmeasure.datastreaming.api.SinkSpec;
+import com.forwardmeasure.datastreaming.api.SourcePlan;
+import com.forwardmeasure.datastreaming.core.ExecutionPlanCompiler;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Map;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.sql.SparkSession;
@@ -28,21 +30,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * {@link IngestionSpec}'s (single-source, no correlation) Spark entrypoint - renamed 2026-09-13
- * from {@code SparkSourceIngestionRunner} once its only reason to exist as a class separate from
- * this one (housing a distinct {@code main()} apart from a class that also carried {@code
- * CorrelationSpec} handling) went away: this class now owns that {@code main()} directly, and the
- * {@code CorrelationSpec} path this class used to also carry moved out to its own {@link
- * SparkCorrelationRunner}. Mirrors {@code forwardmeasure-data-streaming-executor-pekko}'s own
- * {@code PekkoIngestionRunner}/{@code PekkoCorrelationRunner} split - one {@code
- * {Engine}{SpecShape}Runner} class per (engine, spec-shape) pair, consistently, rather than one
- * class holding both spec types' logic plus a second class that exists only to give one of them its
- * own {@code main()}.
+ * {@link ExecutionPlan}'s ({@code sources.size() == 1}, no correlation) Spark entrypoint - only
+ * ever invoked for a plan the planner gave a {@link
+ * com.forwardmeasure.datastreaming.api.SparkStagePlan} (see {@link ExecutionPlanCompiler}); {@link
+ * #run} rejects a plan without one rather than guessing a destination.
  *
- * <p>Sink writing (generalized 2026-09-13, see {@link SparkSinks} for the full dispatch and why it
- * was extracted into its own shared class once it stopped being {@code file}-only) delegates
- * entirely to {@link SparkSinks#write} - this class's own job is just reading/mapping the one
- * declared source and handing the result off.
+ * <p>Sink writing (retargeted 2026-09-21, see {@link SparkSinks} for the full retirement of its old
+ * {@code file}/{@code jdbc}/{@code opensearch} direct-write paths) always delegates to {@link
+ * SparkSinks#write} against the plan's own {@code sparkStage().handoffTopic()} - never {@code
+ * plan.destination()} directly. A real business-destination write is a {@code DeliveryEngine}'s
+ * job, picked up from that topic afterward (a real two-Job pipeline this repo's launcher layer
+ * deliberately doesn't dispatch yet - see {@code DirectIngestionLauncher}'s own javadoc).
  */
 public final class SparkIngestionRunner {
 
@@ -54,37 +52,60 @@ public final class SparkIngestionRunner {
   public record IngestionResult(long recordsWritten) {}
 
   /**
-   * Runs {@code spec}: reads and maps its one declared source (see {@link
+   * Runs {@code plan}: reads and maps its one declared source (see {@link
    * SparkCorrelationEngine#readAndMapSingleSource} for why this is genuinely not "correlation with
    * one source" - no grouping/merging step exists here at all), and writes every mapped row to
-   * {@code spec.sink()} via {@link SparkSinks#write}. The Spark-engine counterpart to {@code
-   * PekkoIngestionRunner}'s own Pekko-engine single-source run - same {@link IngestionSpec} input,
-   * same "every row independent, nothing ever merged" semantics, different execution engine.
+   * {@code plan.sparkStage().get().handoffTopic()} on the real Kafka cluster reachable at {@code
+   * kafkaBootstrapServers} via {@link SparkSinks#write}.
    */
-  public static IngestionResult run(SparkSession spark, IngestionSpec spec) {
+  public static IngestionResult run(
+      SparkSession spark, ExecutionPlan plan, String kafkaBootstrapServers) {
+    if (plan.sources().size() != 1) {
+      throw new IllegalArgumentException(
+          "SparkIngestionRunner: expected exactly one source, got "
+              + plan.sources().size()
+              + " - use SparkCorrelationRunner for a correlated plan");
+    }
+    if (plan.sparkStage().isEmpty()) {
+      throw new IllegalStateException(
+          "SparkIngestionRunner: plan has no sparkStage - it should never have been dispatched to"
+              + " Spark at all (see this class's own javadoc)");
+    }
+    SourcePlan sourcePlan = plan.sources().get(0);
     IngestionPipeline.MalformedRecordPolicy malformedRecordPolicy =
-        IngestionPipeline.MalformedRecordPolicy.from(spec.execution().failure());
+        IngestionPipeline.MalformedRecordPolicy.from(plan.errors());
     JavaRDD<Map<String, Object>> mapped =
         SparkCorrelationEngine.readAndMapSingleSource(
-                spark, spec.source(), spec.mapper(), Map.of(), malformedRecordPolicy)
+                spark, sourcePlan.source(), sourcePlan.mapper(), Map.of(), malformedRecordPolicy)
             .cache();
     long recordsWritten = mapped.count();
-    List<String> columns =
-        spec.mapper().fields().stream().map(TransformSpec.FieldRule::target).distinct().toList();
-    SparkSinks.write(spark, mapped, spec.sink(), spec.execution(), columns);
+    SinkSpec handoffSink = handoffSink(plan, kafkaBootstrapServers);
+    SparkSinks.write(spark, mapped, handoffSink, plan.errors());
     return new IngestionResult(recordsWritten);
+  }
+
+  static SinkSpec handoffSink(ExecutionPlan plan, String kafkaBootstrapServers) {
+    return new SinkSpec(
+        "kafka",
+        kafkaBootstrapServers,
+        plan.sparkStage().get().handoffTopic(),
+        null,
+        null,
+        Map.of());
   }
 
   public static void main(String[] args) throws Exception {
     String specPath = args.length > 0 ? args[0] : requiredEnv("INGESTION_SPEC_PATH");
     IngestionSpec spec = IngestionSpec.load(Path.of(specPath));
+    ExecutionPlan plan = ExecutionPlanCompiler.compile(spec);
+    String kafkaBootstrapServers = kafkaBootstrapServersFromEnv();
 
     SparkSession spark =
         SparkSessionFactory.create(
             "forwardmeasure-data-streaming-ingestion", sparkExecutorConfigFromEnv());
     int exitCode = 0;
     try {
-      IngestionResult result = run(spark, spec);
+      IngestionResult result = run(spark, plan, kafkaBootstrapServers);
       LOGGER.info("SparkIngestionRunner: recordsWritten={}", result.recordsWritten());
     } catch (Exception e) {
       LOGGER.error("SparkIngestionRunner: run failed", e);
@@ -113,6 +134,16 @@ public final class SparkIngestionRunner {
         System.getenv("SPARK_KUBERNETES_NAMESPACE"),
         System.getenv("SPARK_KUBERNETES_SERVICE_ACCOUNT"),
         System.getenv("SPARK_EXECUTOR_POD_TEMPLATE_FILE"));
+  }
+
+  /**
+   * The real Kafka cluster's own bootstrap servers - deliberately not part of the compiled {@link
+   * ExecutionPlan} (the planner has no business knowing a runtime infra address; {@code
+   * SparkStagePlan#handoffTopic()} is just a topic name). Package-visible so {@link
+   * SparkCorrelationRunner} reads the identical env var.
+   */
+  static String kafkaBootstrapServersFromEnv() {
+    return requiredEnv("KAFKA_BOOTSTRAP_SERVERS");
   }
 
   private static String requiredEnv(String name) {

@@ -16,6 +16,12 @@
   </properties>
   <dependencies>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
+    <!-- ExecutionPlanCompiler (the planner) reads TransformSpec.FieldRule#transform() names against
+         forwardmeasure-data-streaming-mappers' own TransformCharacteristicsRegistry, which in turn
+         depends on forwardmeasure-data-streaming-transforms' NamedTransformRegistry - both new
+         2026-09-21 for this reason. -->
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-transforms</artifactId></dependency>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-mappers</artifactId></dependency>
     <dependency><groupId>org.apache.pekko</groupId><artifactId>pekko-stream_${scala.binary.version}</artifactId></dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
   </dependencies>

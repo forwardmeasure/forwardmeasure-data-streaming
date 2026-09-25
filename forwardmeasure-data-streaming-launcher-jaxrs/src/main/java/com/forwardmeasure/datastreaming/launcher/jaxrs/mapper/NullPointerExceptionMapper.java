@@ -23,13 +23,13 @@ import jakarta.ws.rs.ext.Provider;
 
 /**
  * Translates {@link NullPointerException} into 400 Bad Request - specifically the ones {@code
- * DirectLaunchRequest}/{@code DirectCorrelationLaunchRequest}/{@code WorkflowLaunchRequest}'s own
- * compact constructors raise via {@code Objects.requireNonNull} when a request body this module's
- * resources deserialize directly off the wire is missing a required field. Those request records
- * are this API's only request bodies and their constructors are this API's only real validation
- * mechanism, so an {@link NullPointerException} reaching this layer means exactly one thing: a
- * missing required field, never an internal bug - unlike a blanket app-wide NPE-to-400 mapping,
- * which would be dangerous precisely because it could mask a real defect as a client error.
+ * DirectLaunchRequest}/{@code WorkflowLaunchRequest}'s own compact constructors raise via {@code
+ * Objects.requireNonNull} when a request body this module's resources deserialize directly off the
+ * wire is missing a required field. Those request records are this API's only request bodies and
+ * their constructors are this API's only real validation mechanism, so an {@link
+ * NullPointerException} reaching this layer means exactly one thing: a missing required field,
+ * never an internal bug - unlike a blanket app-wide NPE-to-400 mapping, which would be dangerous
+ * precisely because it could mask a real defect as a client error.
  *
  * <p>Not {@code final} - see {@code SecurityExceptionMapper}'s own javadoc for why.
  */

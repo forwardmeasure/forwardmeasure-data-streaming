@@ -19,11 +19,13 @@ package com.forwardmeasure.datastreaming.executor.pekko;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.forwardmeasure.datastreaming.api.ExecutionSpec;
+import com.forwardmeasure.datastreaming.api.DeliverySemantics;
+import com.forwardmeasure.datastreaming.api.ErrorPolicy;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.OpenSearchIndexInitializer;
 import com.forwardmeasure.datastreaming.api.SecretRefs;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
+import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.connector.camel.CamelBridge;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline;
@@ -75,14 +77,14 @@ import org.slf4j.LoggerFactory;
  * assumed); every other connector still gets the JSON-string body every Camel producer component
  * reliably accepts regardless of which one it is.
  *
- * <p><b>{@code execution.flowControl}/{@code execution.failure}/{@code sink.batching}, wired for
- * real 2026-09-13</b> - see {@link IngestionPipeline}'s own javadoc for the two real, previously-
- * silent bugs this closes (a single malformed record or transient sink failure used to crash the
- * whole run). {@code sink.batching} is real for {@code jdbc}/{@code sql} (a genuine wire-level JDBC
- * batch INSERT via {@code camel-sql}'s own {@code batch=true} mode - see {@link #camelBatchSink});
- * for every other connector (no bulk wire API exists in this codebase), it's real *pacing* instead
- * - a whole group's rows dispatched together, the next group waiting for the current one - not a
- * fake bulk call.
+ * <p><b>{@code delivery.flowControl}/{@code errors}/{@code sink.batching}, wired for real
+ * 2026-09-13</b> - see {@link IngestionPipeline}'s own javadoc for the two real, previously- silent
+ * bugs this closes (a single malformed record or transient sink failure used to crash the whole
+ * run). {@code sink.batching} is real for {@code jdbc}/{@code sql} (a genuine wire-level JDBC batch
+ * INSERT via {@code camel-sql}'s own {@code batch=true} mode - see {@link #camelBatchSink}); for
+ * every other connector (no bulk wire API exists in this codebase), it's real *pacing* instead - a
+ * whole group's rows dispatched together, the next group waiting for the current one - not a fake
+ * bulk call.
  *
  * <p>{@link #run(IngestionSpec, ActorSystem)} writes to a real sink (added 2026-09-13, once the
  * launcher work surfaced that it never had one - see {@link SinkSpec#uri()}'s own javadoc).
@@ -126,6 +128,21 @@ public final class PekkoIngestionRunner {
   public record IngestionResult(long recordsProcessed) {}
 
   /**
+   * This runner handles the single-source cell of the capability matrix; {@link
+   * PekkoCorrelationRunner} handles {@code sources.size() > 1}. Both consume the same unified
+   * {@link IngestionSpec} now that {@code CorrelationSpec} no longer exists as a separate type.
+   */
+  private static SourcePlan singleSource(IngestionSpec spec) {
+    if (spec.sources().size() != 1) {
+      throw new IllegalArgumentException(
+          "PekkoIngestionRunner: expected exactly one source, got "
+              + spec.sources().size()
+              + " - use PekkoCorrelationRunner for a correlated spec");
+    }
+    return spec.sources().get(0);
+  }
+
+  /**
    * Runs {@code spec} with the real mapping engine, writing each mapped row to {@code
    * spec.sink()}'s real Camel producer endpoint. Source and sink share one {@link CamelBridge}/
    * {@link org.apache.camel.CamelContext} (matching that class's own "one bridge per bounded run"
@@ -133,17 +150,23 @@ public final class PekkoIngestionRunner {
    * ActorSystem, Function, Sink)}, which opens its own bridge scoped to the source side only.
    */
   public IngestionResult run(IngestionSpec spec, ActorSystem system) throws IOException {
+    SourcePlan sourcePlan = singleSource(spec);
     FieldMappingEngine engine = new FieldMappingEngine();
     ObjectMapper objectMapper = new ObjectMapper();
     AtomicLong processed = new AtomicLong();
 
     try (CamelBridge bridge = new CamelBridge()) {
-      Source<SourceRow, ?> source = rowSource(bridge, spec.source());
+      Source<SourceRow, ?> source = rowSource(bridge, sourcePlan.source());
       Sink<Map<String, Object>, CompletionStage<Done>> sink =
-          buildSink(bridge, spec.sink(), spec.execution(), objectMapper, processed);
+          buildSink(bridge, spec.sink(), spec.delivery(), spec.errors(), objectMapper, processed);
       CompletionStage<Done> resultStage =
           IngestionPipeline.run(
-              source, spec.execution(), row -> engine.map(row, spec.mapper()), sink, system);
+              source,
+              spec.delivery(),
+              spec.errors(),
+              row -> engine.map(row, sourcePlan.mapper()),
+              sink,
+              system);
       resultStage.toCompletableFuture().join();
     } catch (CompletionException e) {
       // join() always wraps a stage's real failure here, even one this method otherwise promises
@@ -178,15 +201,16 @@ public final class PekkoIngestionRunner {
   static Sink<Map<String, Object>, CompletionStage<Done>> buildSink(
       CamelBridge bridge,
       SinkSpec sink,
-      ExecutionSpec execution,
+      DeliverySemantics delivery,
+      ErrorPolicy errors,
       ObjectMapper objectMapper,
       AtomicLong processed) {
     if (OPENSEARCH_CONNECTOR.equals(sink.connector())) {
       OpenSearchIndexInitializer.ensureIndex(sink.uri(), sink.index(), sink.options());
     }
-    int parallelism = IngestionPipeline.effectiveParallelism(execution.concurrency());
+    int parallelism = IngestionPipeline.effectiveParallelism(delivery.concurrency());
     IngestionPipeline.SinkFailurePolicy sinkFailurePolicy =
-        IngestionPipeline.SinkFailurePolicy.from(execution.failure());
+        IngestionPipeline.SinkFailurePolicy.from(errors);
     SinkSpec.BatchingSpec batching = sink.batching();
     if (batching == null || batching.maxRecords() == null) {
       return camelSink(bridge, sink, objectMapper, processed, parallelism, sinkFailurePolicy);
@@ -310,8 +334,14 @@ public final class PekkoIngestionRunner {
         });
   }
 
-  /** One row's own send, shared by both the unbatched and batched (per-row-fan-out) sink paths. */
-  private static CompletionStage<Void> sendOneRow(
+  /**
+   * One row's own send, shared by both the unbatched and batched (per-row-fan-out) sink paths.
+   * Package-visible (not {@code private}) so {@link PekkoStreamsDeliveryEngine}'s own {@code
+   * CONTINUOUS} branch can reuse it directly for a real per-message commit-after-write, without a
+   * second reimplementation of "how to send one mapped row through whichever Camel producer
+   * endpoint {@code sink.connector()} resolves to."
+   */
+  static CompletionStage<Void> sendOneRow(
       SinkSpec sink,
       ProducerTemplate producerTemplate,
       ObjectMapper objectMapper,
@@ -383,7 +413,7 @@ public final class PekkoIngestionRunner {
 
   /**
    * Runs {@code spec}'s source through {@code transform} and {@code sink} with real concurrency
-   * bounded by {@code spec.execution()}. Blocks the calling thread until the run completes -
+   * bounded by {@code spec.delivery()}. Blocks the calling thread until the run completes -
    * matching {@code main()}'s own needs - even though row processing itself is concurrent. The
    * caller owns {@code sink} entirely here (a test/observation escape hatch), so {@code
    * sink.batching()} does not apply - only {@link #run(IngestionSpec, ActorSystem)}'s own real
@@ -395,10 +425,11 @@ public final class PekkoIngestionRunner {
       Function<SourceRow, T> transform,
       Sink<T, CompletionStage<R>> sink)
       throws IOException {
+    SourcePlan sourcePlan = singleSource(spec);
     try (CamelBridge bridge = new CamelBridge()) {
-      Source<SourceRow, ?> source = rowSource(bridge, spec.source());
+      Source<SourceRow, ?> source = rowSource(bridge, sourcePlan.source());
       CompletionStage<R> resultStage =
-          IngestionPipeline.run(source, spec.execution(), transform, sink, system);
+          IngestionPipeline.run(source, spec.delivery(), spec.errors(), transform, sink, system);
       return resultStage.toCompletableFuture().join();
     } catch (CompletionException e) {
       Throwable cause = e.getCause();

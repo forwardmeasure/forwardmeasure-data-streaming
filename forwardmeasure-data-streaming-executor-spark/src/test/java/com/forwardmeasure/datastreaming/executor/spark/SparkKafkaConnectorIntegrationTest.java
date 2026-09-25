@@ -19,17 +19,26 @@ package com.forwardmeasure.datastreaming.executor.spark;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.forwardmeasure.datastreaming.api.ExecutionSpec;
-import com.forwardmeasure.datastreaming.api.IngestionSpec;
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
+import com.forwardmeasure.datastreaming.api.DeliverySemantics;
+import com.forwardmeasure.datastreaming.api.ExecutionMode;
+import com.forwardmeasure.datastreaming.api.ExecutionPlan;
+import com.forwardmeasure.datastreaming.api.ExecutionProfile;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
+import com.forwardmeasure.datastreaming.api.SourceCardinality;
+import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
+import com.forwardmeasure.datastreaming.api.SparkStagePlan;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline;
+import com.forwardmeasure.testcontainers.junit.kafka.WithKafkaContainer;
+import com.forwardmeasure.testcontainers.kafka.KafkaTestContainer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.sql.SparkSession;
@@ -37,9 +46,6 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.kafka.KafkaContainer;
 
 /**
  * Real, no-mocks proof of Spark's own {@code kafka} source+sink, both added 2026-09-13: the sink
@@ -51,10 +57,8 @@ import org.testcontainers.kafka.KafkaContainer;
  * SparkCorrelationEngine} - see {@code sourceRowFor} - to parse as JSON before {@link
  * com.forwardmeasure.datastreaming.mappers.FieldMappingEngine} ever sees it.
  */
-@Testcontainers
+@WithKafkaContainer
 class SparkKafkaConnectorIntegrationTest {
-
-  @Container private static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.0");
 
   private static SparkSession spark;
 
@@ -75,28 +79,38 @@ class SparkKafkaConnectorIntegrationTest {
   }
 
   @Test
-  void sinkPublishesEachMappedRowAndSourceReadsThemBackBounded(@TempDir Path tempDir)
-      throws Exception {
+  void sinkPublishesEachMappedRowAndSourceReadsThemBackBounded(
+      @TempDir Path tempDir, KafkaTestContainer kafka) throws Exception {
     Path sourceCsv = tempDir.resolve("source.csv");
     Files.writeString(
         sourceCsv, "ID,FULL_NAME\nS1,Alice Anderson\nS2,Bob Baker\n", StandardCharsets.UTF_8);
     String topic = "fds-spark-kafka-connector-test-" + UUID.randomUUID();
-    String brokers = KAFKA.getBootstrapServers();
+    String brokers = kafka.bootstrapServers();
 
-    IngestionSpec sinkSpec =
-        new IngestionSpec(
-            new SourceSpec("file", sourceCsv.toString(), null, null),
-            new TransformSpec(
-                "party",
-                List.of(
-                    new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
-                    new TransformSpec.FieldRule(
-                        "name", "FULL_NAME", null, null, null, null, null))),
-            new SinkSpec(
-                "kafka", brokers, topic, null, null, Map.of("kafka.bootstrap.servers", brokers)),
-            new ExecutionSpec("spark", null, null, null));
+    ExecutionPlan sinkPlan =
+        new ExecutionPlan(
+            new ExecutionProfile(
+                SourceCardinality.SINGLE, ExecutionMode.BOUNDED, DeliveryEngineKind.PEKKO_STREAMS),
+            List.of(
+                new SourcePlan(
+                    "single",
+                    new SourceSpec("file", sourceCsv.toString(), null, null),
+                    new TransformSpec(
+                        "party",
+                        List.of(
+                            new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
+                            new TransformSpec.FieldRule(
+                                "name", "FULL_NAME", null, null, null, null, null))),
+                    1.0)),
+            null,
+            Optional.of(new SparkStagePlan(List.of("test-heavy-transform"), topic)),
+            null,
+            new SinkSpec("kafka", brokers, "unused-real-destination", null, null, Map.of()),
+            new DeliverySemantics(true, null, null),
+            null);
 
-    SparkIngestionRunner.IngestionResult sinkResult = SparkIngestionRunner.run(spark, sinkSpec);
+    SparkIngestionRunner.IngestionResult sinkResult =
+        SparkIngestionRunner.run(spark, sinkPlan, brokers);
     assertEquals(2, sinkResult.recordsWritten());
 
     SourceSpec kafkaSource =

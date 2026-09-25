@@ -20,12 +20,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forwardmeasure.authzen.ActiveOrganizationProvider;
 import com.forwardmeasure.authzen.AuthorizationService;
 import com.forwardmeasure.authzen.client.AuthzenAuthorizationFactory;
-import com.forwardmeasure.datastreaming.launcher.application.DirectCorrelationLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.DirectIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.IngestionJobPolicy;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.auth.KeycloakClientCredentialsTokenSupplier;
-import com.forwardmeasure.datastreaming.launcher.jaxrs.CorrelationRunResource;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.IngestionRunResource;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.WorkflowRunResource;
 import com.forwardmeasure.openworkflow.execution.client.ApiClient;
@@ -81,10 +79,27 @@ public class LauncherQuarkusBinding {
    * The one shared, product-wide real {@link AuthorizationService} - real, fail-closed caller
    * authorization against a real Keycloak AuthZEN PDP, added 2026-09-14 to close a confirmed real
    * gap (see docs/fds-authorization-remediation-guide.md). Excluded from the {@code test} build
-   * profile, matching forwardmeasure-entity-intelligence's own {@code
-   * QuarkusAuthorizationServiceProducer} exactly - real tests get {@code
-   * StubAuthorizationService.permitAll()} instead (see each deployment leaf's own test-scoped
-   * producer).
+   * profile, mirroring forwardmeasure-entity-intelligence's own {@code
+   * QuarkusAuthorizationServiceProducer}.
+   *
+   * <p>As of 2026-09-20 this repo has no
+   * {@code @QuarkusTest}/{@code @SpringBootTest}/{@code @MicronautTest} for the launcher (no test
+   * here boots a framework deployment context at all, so this producer never actually fires under
+   * test), and the shared {@code StubAuthorizationService} this javadoc used to point at has been
+   * removed repo-wide - it masked a real Keycloak Organizations-group authorization bug (native
+   * Role policies don't see roles granted only via Organization membership; see
+   * forwardmeasure-authzen's {@code OrganizationRolePolicyProvider}). The one real Keycloak-backed
+   * proof for this launcher ({@code DirectIngestionLauncherKeycloakIntegrationTest}) builds its own
+   * {@link AuthzenAuthorizationFactory}-based service directly in plain JUnit against {@code
+   * AuthzenKeycloakFixture} and never goes through this CDI producer at all; every other test that
+   * needs an {@link AuthorizationService} but isn't testing authorization itself now uses a small,
+   * file-local fake declared in that test class, not a shared stub. If a real
+   * {@code @QuarkusTest}/{@code @SpringBootTest}/{@code @MicronautTest} is added for this launcher
+   * later, follow forwardmeasure-entity-intelligence's and forwardmeasure-openworkflow's own {@code
+   * AuthorizationSmokeResourceTest} precedent (a
+   * `QuarkusTestResourceLifecycleManager`/{@code @DynamicPropertySource}/{@code
+   * TestPropertyProvider} that starts a Keycloak fixture and injects its issuer/client config as
+   * real properties) rather than reintroducing a stub producer.
    */
   @Produces
   @ApplicationScoped
@@ -127,23 +142,23 @@ public class LauncherQuarkusBinding {
   DirectIngestionLauncher directIngestionLauncher(
       IngestionJobPolicy policy,
       AuthorizationService authorization,
-      @ConfigProperty(name = "datastreaming.launcher.pekko.image") String image,
-      @ConfigProperty(name = "datastreaming.launcher.pekko.command") String command,
-      @ConfigProperty(name = "datastreaming.launcher.k8s.image-pull-secrets") String pullSecrets) {
+      @ConfigProperty(name = "datastreaming.launcher.pekko.image") String pekkoImage,
+      @ConfigProperty(name = "datastreaming.launcher.pekko.command") String pekkoCommand,
+      @ConfigProperty(name = "datastreaming.launcher.kafka-streams.image") String kafkaStreamsImage,
+      @ConfigProperty(name = "datastreaming.launcher.kafka-streams.command")
+          String kafkaStreamsCommand,
+      @ConfigProperty(name = "datastreaming.launcher.k8s.image-pull-secrets") String pullSecrets,
+      @ConfigProperty(name = "datastreaming.launcher.k8s.host-aliases", defaultValue = "")
+          String hostAliases) {
     return new DirectIngestionLauncher(
-        policy, authorization, image, command, commaSeparatedList(pullSecrets));
-  }
-
-  @Produces
-  @ApplicationScoped
-  DirectCorrelationLauncher directCorrelationLauncher(
-      IngestionJobPolicy policy,
-      AuthorizationService authorization,
-      @ConfigProperty(name = "datastreaming.launcher.spark.image") String image,
-      @ConfigProperty(name = "datastreaming.launcher.spark.command") String command,
-      @ConfigProperty(name = "datastreaming.launcher.k8s.image-pull-secrets") String pullSecrets) {
-    return new DirectCorrelationLauncher(
-        policy, authorization, image, command, commaSeparatedList(pullSecrets));
+        policy,
+        authorization,
+        pekkoImage,
+        pekkoCommand,
+        kafkaStreamsImage,
+        kafkaStreamsCommand,
+        commaSeparatedList(pullSecrets),
+        commaSeparatedMap(hostAliases));
   }
 
   @Produces
@@ -160,15 +175,6 @@ public class LauncherQuarkusBinding {
       KubernetesClient client,
       ActiveOrganizationProvider organizations) {
     return new IngestionRunResource(launcher, client, organizations);
-  }
-
-  @Produces
-  @ApplicationScoped
-  CorrelationRunResource correlationRunResource(
-      DirectCorrelationLauncher launcher,
-      KubernetesClient client,
-      ActiveOrganizationProvider organizations) {
-    return new CorrelationRunResource(launcher, client, organizations);
   }
 
   @Produces
@@ -190,5 +196,22 @@ public class LauncherQuarkusBinding {
         .map(String::trim)
         .filter(entry -> !entry.isEmpty())
         .collect(Collectors.toList());
+  }
+
+  /**
+   * {@code hostname=ip,hostname2=ip2} - real, only in a test environment whose dispatch target (a
+   * Testcontainers-managed K3s node) can't resolve a sibling Testcontainers-managed service through
+   * cluster DNS (see {@link DirectIngestionLauncher}'s own {@code hostAliases} constructor param
+   * javadoc); empty in every real deployment.
+   */
+  private static java.util.Map<String, String> commaSeparatedMap(String value) {
+    java.util.Map<String, String> result = new java.util.LinkedHashMap<>();
+    for (String entry : commaSeparatedList(value)) {
+      int equals = entry.indexOf('=');
+      if (equals > 0) {
+        result.put(entry.substring(0, equals).trim(), entry.substring(equals + 1).trim());
+      }
+    }
+    return result;
   }
 }

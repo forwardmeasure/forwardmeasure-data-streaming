@@ -16,8 +16,10 @@
  */
 package com.forwardmeasure.datastreaming.executor.spark;
 
-import com.forwardmeasure.datastreaming.api.CorrelationSpec;
-import com.forwardmeasure.datastreaming.api.TransformSpec;
+import com.forwardmeasure.datastreaming.api.ExecutionPlan;
+import com.forwardmeasure.datastreaming.api.IngestionSpec;
+import com.forwardmeasure.datastreaming.api.SinkSpec;
+import com.forwardmeasure.datastreaming.core.ExecutionPlanCompiler;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline;
 import java.nio.file.Path;
 import java.util.List;
@@ -28,18 +30,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * {@link CorrelationSpec}'s (multi-source correlation) Spark entrypoint - split out 2026-09-13 from
- * what used to be {@code SparkIngestionRunner}'s own second {@code run()} overload plus a second
- * {@code main()}, once that arrangement was called out as an inconsistency next to {@code
- * forwardmeasure-data-streaming-executor-pekko}'s own clean {@code PekkoIngestionRunner}/{@code
- * PekkoCorrelationRunner} split: this module now has the same one-class-per-(engine, spec-shape)
- * shape. Drives {@link SparkCorrelationEngine}'s real read/map/correlate/merge logic across however
- * many sources the spec declares and writes the merged result to a real sink - the same "spec in,
- * real Job out" shape {@code PekkoCorrelationRunner} has, generalized to Spark.
- *
- * <p>Sink writing (generalized 2026-09-13) delegates entirely to {@link SparkSinks#write} - see
- * that class's own javadoc for the full dispatch (file/kafka/jdbc/opensearch/any other Spark-native
- * format).
+ * {@link ExecutionPlan}'s ({@code sources.size() > 1}, multi-source correlation) Spark entrypoint -
+ * only ever invoked for a plan the planner gave a {@link
+ * com.forwardmeasure.datastreaming.api.SparkStagePlan}, mirroring {@link SparkIngestionRunner}'s
+ * own single-source counterpart exactly. Drives {@link SparkCorrelationEngine}'s real
+ * read/map/correlate/merge logic across however many sources the plan declares and hands the merged
+ * result off to a real Kafka topic - never a real business destination directly, see {@link
+ * SparkSinks}' own javadoc for why.
  */
 public final class SparkCorrelationRunner {
 
@@ -51,49 +48,55 @@ public final class SparkCorrelationRunner {
   public record CorrelationResult(long sourceCount, long groupCount) {}
 
   /**
-   * Runs {@code spec}: reads and maps every declared source, correlates them on {@code
-   * spec.blockingField()}, merges each group by trust weight (see {@link
-   * SparkCorrelationEngine#correlate}), and writes the merged rows to {@code spec.sink()} via
-   * {@link SparkSinks#write}.
+   * Runs {@code plan}: reads and maps every declared source, correlates them on {@code
+   * plan.blockingField()}, merges each group by trust weight (see {@link
+   * SparkCorrelationEngine#correlate}), and writes the merged rows to {@code
+   * plan.sparkStage().get().handoffTopic()} on the real Kafka cluster reachable at {@code
+   * kafkaBootstrapServers} via {@link SparkSinks#write}.
    */
-  public static CorrelationResult run(SparkSession spark, CorrelationSpec spec) {
+  public static CorrelationResult run(
+      SparkSession spark, ExecutionPlan plan, String kafkaBootstrapServers) {
+    if (plan.sources().size() <= 1) {
+      throw new IllegalArgumentException(
+          "SparkCorrelationRunner: expected more than one source, got "
+              + plan.sources().size()
+              + " - use SparkIngestionRunner for a single-source plan");
+    }
+    if (plan.sparkStage().isEmpty()) {
+      throw new IllegalStateException(
+          "SparkCorrelationRunner: plan has no sparkStage - it should never have been dispatched"
+              + " to Spark at all (see this class's own javadoc)");
+    }
     IngestionPipeline.MalformedRecordPolicy malformedRecordPolicy =
-        IngestionPipeline.MalformedRecordPolicy.from(spec.execution().failure());
+        IngestionPipeline.MalformedRecordPolicy.from(plan.errors());
     List<JavaRDD<SparkCorrelationRecord>> mapped =
-        spec.sources().stream()
+        plan.sources().stream()
             .map(
                 entry ->
                     SparkCorrelationEngine.readAndMap(
                         spark,
                         new SparkSourceConfig(
                             entry.sourceKey(), entry.source(), entry.mapper(), entry.trustWeight()),
-                        spec.blockingField(),
+                        plan.blockingField(),
                         Map.of(),
                         malformedRecordPolicy))
             .toList();
 
-    // Cached deliberately: count() below and the saveAsTextFile() write are two separate actions
-    // on the same lazily-evaluated RDD - without caching, Spark would recompute the entire
+    // Cached deliberately: count() below and the write() call are two separate actions on the
+    // same lazily-evaluated RDD - without caching, Spark would recompute the entire
     // read/map/correlate/merge pipeline (across every source) a second time for the write alone.
     JavaRDD<Map<String, Object>> merged = SparkCorrelationEngine.correlate(mapped).cache();
     long groupCount = merged.count();
-    // The merged rows' own key set is exactly the union of every source's own mapper().fields()
-    // target names (see SparkCorrelationEngine#mergeGroup - each merged row's fields all come from
-    // some source's own TransformSpec output) - declared statically here, not scanned from the
-    // data, for the same reason SparkIngestionRunner derives its own columns from spec.mapper().
-    List<String> columns =
-        spec.sources().stream()
-            .flatMap(entry -> entry.mapper().fields().stream())
-            .map(TransformSpec.FieldRule::target)
-            .distinct()
-            .toList();
-    SparkSinks.write(spark, merged, spec.sink(), spec.execution(), columns);
-    return new CorrelationResult(spec.sources().size(), groupCount);
+    SinkSpec handoffSink = SparkIngestionRunner.handoffSink(plan, kafkaBootstrapServers);
+    SparkSinks.write(spark, merged, handoffSink, plan.errors());
+    return new CorrelationResult(plan.sources().size(), groupCount);
   }
 
   public static void main(String[] args) throws Exception {
     String specPath = args.length > 0 ? args[0] : requiredEnv("CORRELATION_SPEC_PATH");
-    CorrelationSpec spec = CorrelationSpec.load(Path.of(specPath));
+    IngestionSpec spec = IngestionSpec.load(Path.of(specPath));
+    ExecutionPlan plan = ExecutionPlanCompiler.compile(spec);
+    String kafkaBootstrapServers = SparkIngestionRunner.kafkaBootstrapServersFromEnv();
 
     SparkSession spark =
         SparkSessionFactory.create(
@@ -101,7 +104,7 @@ public final class SparkCorrelationRunner {
             SparkIngestionRunner.sparkExecutorConfigFromEnv());
     int exitCode = 0;
     try {
-      CorrelationResult result = run(spark, spec);
+      CorrelationResult result = run(spark, plan, kafkaBootstrapServers);
       LOGGER.info(
           "SparkCorrelationRunner: sourceCount={} groupCount={}",
           result.sourceCount(),

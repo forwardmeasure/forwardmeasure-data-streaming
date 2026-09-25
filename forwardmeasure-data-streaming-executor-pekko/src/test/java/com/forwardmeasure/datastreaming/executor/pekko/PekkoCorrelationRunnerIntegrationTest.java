@@ -21,9 +21,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.forwardmeasure.datastreaming.api.CorrelationSpec;
-import com.forwardmeasure.datastreaming.api.ExecutionSpec;
+import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
+import com.forwardmeasure.datastreaming.api.DeliverySemantics;
+import com.forwardmeasure.datastreaming.api.ExecutionMode;
+import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
+import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import java.io.IOException;
@@ -57,10 +60,10 @@ class PekkoCorrelationRunnerIntegrationTest {
     Path outputFile = tempDir.resolve("output.jsonl");
     String dir = tempDir.toAbsolutePath().toString();
 
-    CorrelationSpec spec =
-        new CorrelationSpec(
+    IngestionSpec spec =
+        new IngestionSpec(
             List.of(
-                new CorrelationSpec.SourceEntry(
+                new SourcePlan(
                     "core",
                     new SourceSpec(
                         "file",
@@ -69,7 +72,7 @@ class PekkoCorrelationRunnerIntegrationTest {
                         null),
                     mappingA(),
                     1.0),
-                new CorrelationSpec.SourceEntry(
+                new SourcePlan(
                     "enrichment",
                     new SourceSpec(
                         "file",
@@ -79,13 +82,16 @@ class PekkoCorrelationRunnerIntegrationTest {
                     mappingB(),
                     0.4)),
             "uid",
+            null,
             new SinkSpec(
                 "file",
                 "file:" + dir + "?fileName=output.jsonl&fileExist=Append",
                 "n/a",
                 null,
                 null),
-            new ExecutionSpec("pekko", new ExecutionSpec.ConcurrencySpec(4, 8), null, null));
+            ExecutionMode.BOUNDED,
+            new DeliverySemantics(true, new ConcurrencySpec(4, 8), null),
+            null);
 
     ActorSystem system = ActorSystem.create("pekko-correlation-runner-integration-test");
     PekkoCorrelationRunner.CorrelationResult result;

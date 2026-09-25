@@ -20,12 +20,6 @@ micronaut:
       - pattern: /ingestion-runs/**
         access:
           - isAuthenticated()
-      - pattern: /correlation-runs
-        access:
-          - isAuthenticated()
-      - pattern: /correlation-runs/**
-        access:
-          - isAuthenticated()
       - pattern: /workflow-runs
         access:
           - isAuthenticated()
@@ -39,10 +33,11 @@ datastreaming:
       namespaces: ""
       images: ""
       image-pull-secrets: ""
+      host-aliases: ""
     pekko:
       image: ""
       command: "java -jar /deployments/application.jar"
-    spark:
+    kafka-streams:
       image: ""
       command: "java -jar /deployments/application.jar"
     fowf:
@@ -56,7 +51,12 @@ datastreaming:
       issuer: ${DATASTREAMING_KEYCLOAK_ISSUER:`http://localhost:8080/realms/datastreaming`}
       client-id: ${DATASTREAMING_AUTHORIZATION_CLIENT_ID:datastreaming}
       client-secret: ${DATASTREAMING_AUTHORIZATION_CLIENT_SECRET:}
-      request-timeout: 5S
-      decision-ttl: 5S
+      # Real config gap found and fixed 2026-09-23, building this module's first-ever real boot
+      # test: Micronaut's own Duration converter rejects "5S" ("Unparseable date format (5S).
+      # Should either be a ISO-8601 duration or a round number followed by the unit type") - unlike
+      # Quarkus/Spring's own more lenient duration parsers, which accept it as shorthand. ISO-8601
+      # (PT5S) is the one format all three frameworks' Duration converters accept.
+      request-timeout: PT5S
+      decision-ttl: PT5S
       maximum-cache-entries: 10000
       policy-version: v1

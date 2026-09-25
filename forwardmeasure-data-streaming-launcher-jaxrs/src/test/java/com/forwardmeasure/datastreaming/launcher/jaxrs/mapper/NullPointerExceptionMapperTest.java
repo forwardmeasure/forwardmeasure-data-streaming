@@ -19,8 +19,8 @@ package com.forwardmeasure.datastreaming.launcher.jaxrs.mapper;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.forwardmeasure.datastreaming.api.CorrelationSpec;
-import com.forwardmeasure.datastreaming.launcher.application.DirectCorrelationLaunchRequest;
+import com.forwardmeasure.datastreaming.api.IngestionSpec;
+import com.forwardmeasure.datastreaming.launcher.application.DirectLaunchRequest;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.ErrorResponse;
 import jakarta.ws.rs.core.Response;
 import java.util.Map;
@@ -41,12 +41,12 @@ class NullPointerExceptionMapperTest {
         org.junit.jupiter.api.Assertions.assertThrows(
             NullPointerException.class,
             () ->
-                new DirectCorrelationLaunchRequest(
-                    "corr-1", "ns", (CorrelationSpec) null, Map.of(), Map.of(), null));
+                new DirectLaunchRequest(
+                    "corr-1", "ns", (IngestionSpec) null, Map.of(), Map.of(), null));
 
     Response response = mapper.toResponse(thrown);
 
     assertEquals(400, response.getStatus());
-    assertTrue(((ErrorResponse) response.getEntity()).message().contains("correlationSpec"));
+    assertTrue(((ErrorResponse) response.getEntity()).message().contains("ingestionSpec"));
   }
 }

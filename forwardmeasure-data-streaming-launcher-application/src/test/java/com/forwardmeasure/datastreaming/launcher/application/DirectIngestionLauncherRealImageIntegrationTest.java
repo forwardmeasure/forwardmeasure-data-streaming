@@ -19,10 +19,15 @@ package com.forwardmeasure.datastreaming.launcher.application;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.forwardmeasure.authzen.ActiveOrganization;
-import com.forwardmeasure.authzen.testkit.StubAuthorizationService;
-import com.forwardmeasure.datastreaming.api.ExecutionSpec;
+import com.forwardmeasure.authzen.AuthorizationDecision;
+import com.forwardmeasure.authzen.AuthorizationRequest;
+import com.forwardmeasure.authzen.AuthorizationService;
+import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
+import com.forwardmeasure.datastreaming.api.DeliverySemantics;
+import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
+import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.jpa.tenancy.TenantDatabase;
@@ -66,6 +71,15 @@ import org.junit.jupiter.api.Timeout;
  * /tmp/source.csv} before invoking the real {@code java -jar /deployments/application.jar} - there
  * is no volume-mounting concept in {@code KubernetesJobSpec} (deliberate, see its own javadoc), so
  * this is the only way to give the real pod real input data without adding one.
+ *
+ * <p><b>2026-09-21</b>: this class's former Spark sibling ({@code
+ * DirectCorrelationLauncherRealImageIntegrationTest}, which pulled the real {@code
+ * data-streaming-executor-spark} image and ran {@code SparkCorrelationRunner.main()} directly) was
+ * removed, not merged in - {@link DirectIngestionLauncher} no longer accepts a raw Spark image at
+ * all now that Spark is an optional compute stage, never a delivery engine (see this class's own
+ * javadoc). A real second image proof belongs here once a real, pushed Kafka Streams executor image
+ * exists (see the repo's own gap-bridging plan, Phase C) - not before, since there is nothing real
+ * yet to point it at.
  */
 @WithKubernetesContainer
 final class DirectIngestionLauncherRealImageIntegrationTest {
@@ -73,10 +87,29 @@ final class DirectIngestionLauncherRealImageIntegrationTest {
   private static final org.slf4j.Logger LOGGER =
       org.slf4j.LoggerFactory.getLogger(DirectIngestionLauncherRealImageIntegrationTest.class);
   private static final String NAMESPACE = "real-pekko-image-test";
+
+  /**
+   * Re-pinned 2026-09-21: the previous digest's image had no real SLF4J provider on its runtime
+   * classpath ({@code slf4j-simple} was {@code test}-scoped only in {@code -executor-pekko}'s own
+   * pom) - Pekko's own logging bootstrap fails hard with no provider bound, causing an immediate
+   * {@code CoordinatedShutdown} before any real work ran, which surfaced as this exact test's own
+   * {@code BackoffLimitExceeded} failure the first time real credentials let it actually run
+   * instead of skip. Fixed and re-pushed under the same {@code 1.1.0} tag.
+   */
   private static final String PEKKO_IMAGE =
       "docker.io/forwardmeasure/data-streaming-executor-pekko@sha256:"
-          + "ed6ad7e517d98553ad412d03b5346dace6ab6574a85a7114f73ad1449aa1ac44";
+          + "1b3d5e60475535643db17ce9038c293252eba3f0be1a48e2e982ad09c96f36af";
+
   private static final String PULL_SECRET_NAME = "dockerhub-pull-secret";
+
+  /**
+   * No real, pushed Kafka Streams executor image exists yet (see this repo's own gap-bridging plan,
+   * Phase C) - this placeholder is never actually dispatched, since {@link #realIngestionSpec()}'s
+   * file-sourced, all-{@code LIGHT}-transform spec always resolves to {@code PEKKO_STREAMS} via
+   * {@code ExecutionPlanCompiler}. Revisit once that image is real.
+   */
+  private static final String KAFKA_STREAMS_IMAGE_PLACEHOLDER = "unused";
+
   private static final String SEED_AND_RUN_COMMAND =
       "sh -c 'printf \"id,name\\nS1,Alice Anderson\\n\" > /tmp/source.csv && "
           + "exec java -jar /deployments/application.jar /tmp/ingestion-spec.yaml'";
@@ -113,9 +146,11 @@ final class DirectIngestionLauncherRealImageIntegrationTest {
       DirectIngestionLauncher launcher =
           new DirectIngestionLauncher(
               IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(PEKKO_IMAGE)),
-              StubAuthorizationService.permitAll(),
+              new PermitAllAuthorizationService(),
               PEKKO_IMAGE,
               SEED_AND_RUN_COMMAND,
+              KAFKA_STREAMS_IMAGE_PLACEHOLDER,
+              KAFKA_STREAMS_IMAGE_PLACEHOLDER,
               List.of(PULL_SECRET_NAME));
       DirectLaunchRequest request =
           new DirectLaunchRequest(
@@ -141,18 +176,26 @@ final class DirectIngestionLauncherRealImageIntegrationTest {
 
   private static IngestionSpec realIngestionSpec() {
     return new IngestionSpec(
-        new SourceSpec(
-            "file",
-            "file:/tmp?fileName=source.csv&noop=true&initialDelay=0&delay=100",
-            new SourceSpec.FormatSpec("csv"),
-            null),
-        new TransformSpec(
-            "party",
-            List.of(
-                new TransformSpec.FieldRule("uid", "id", null, null, null, null, null),
-                new TransformSpec.FieldRule("name", "name", null, null, null, null, null))),
+        List.of(
+            new SourcePlan(
+                "single",
+                new SourceSpec(
+                    "file",
+                    "file:/tmp?fileName=source.csv&noop=true&initialDelay=0&delay=100",
+                    new SourceSpec.FormatSpec("csv"),
+                    null),
+                new TransformSpec(
+                    "party",
+                    List.of(
+                        new TransformSpec.FieldRule("uid", "id", null, null, null, null, null),
+                        new TransformSpec.FieldRule("name", "name", null, null, null, null, null))),
+                1.0)),
+        null,
+        null,
         new SinkSpec("file", "file:/tmp?fileName=output.jsonl&fileExist=Append", null, null, null),
-        new ExecutionSpec("pekko", new ExecutionSpec.ConcurrencySpec(1, 1), null, null));
+        ExecutionMode.BOUNDED,
+        new DeliverySemantics(true, new ConcurrencySpec(1, 1), null),
+        null);
   }
 
   private static Secret dockerConfigSecret(String username, String token) {
@@ -221,5 +264,26 @@ final class DirectIngestionLauncherRealImageIntegrationTest {
   private static boolean isTerminal(KubernetesJobObservation.Phase phase) {
     return phase == KubernetesJobObservation.Phase.SUCCEEDED
         || phase == KubernetesJobObservation.Phase.FAILED;
+  }
+
+  /**
+   * A local, file-scoped stand-in for {@link AuthorizationService} - deliberately not a shared,
+   * importable-from-anywhere stub class. The shared {@code StubAuthorizationService} this class
+   * used to import was removed repo-wide 2026-09-20: it masked a real Keycloak Organizations-group
+   * authorization bug elsewhere in the product (native Role policies don't see roles granted only
+   * via Organization membership). What's under test here is the real, private Pekko runner image
+   * against a real K3s cluster, not the authorization decision itself, so a permissive local fake -
+   * not a real Keycloak-backed check - is the right amount of realism.
+   */
+  private static final class PermitAllAuthorizationService implements AuthorizationService {
+    @Override
+    public AuthorizationDecision evaluate(AuthorizationRequest request) {
+      return new AuthorizationDecision(true, request.correlationId(), Map.of());
+    }
+
+    @Override
+    public List<AuthorizationDecision> evaluateBatch(List<AuthorizationRequest> requests) {
+      return requests.stream().map(this::evaluate).toList();
+    }
   }
 }

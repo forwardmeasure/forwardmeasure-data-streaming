@@ -28,6 +28,13 @@
   <dependencies>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
     <dependency>
+      <!-- ExecutionPlanCompiler - the planner DirectIngestionLauncher calls to resolve which
+           DeliveryEngineKind a spec runs on (2026-09-21, once the unified IngestionSpec removed the
+           author-specified engine string this launcher used to read). -->
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-core</artifactId>
+    </dependency>
+    <dependency>
       <!-- Direct-mode: real K8s Job launch/observe/cancel, shared with fowf's own
            AsyncApiKubernetesJobOperationExecutor - see that repo's own module of the same name. -->
       <groupId>com.forwardmeasure.openworkflow</groupId>
@@ -79,15 +86,6 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-      <!-- StubAuthorizationService.permitAll()/denyAll() - every existing launcher test proves its
-           own real launch/observe/cancel mechanics, not the AuthZEN decision itself (that's proven
-           separately, by this module's own DirectIngestionLauncherKeycloakIntegrationTest), so
-           these tests use a stub the same way forwardmeasure-entity-intelligence's own tests do. -->
-      <groupId>com.forwardmeasure.authzen</groupId>
-      <artifactId>forwardmeasure-authzen-testkit</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
       <!-- The real Keycloak AuthZEN PDP client - DirectIngestionLauncherKeycloakIntegrationTest's
            own proof that this launcher's real authorize(...) call reaches a genuine Keycloak 26.7
            AuthZEN evaluation, not a fake/stubbed one, mirroring
@@ -96,5 +94,104 @@
       <artifactId>forwardmeasure-authzen-client</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <!-- AuthzenKeycloakFixture - real Keycloak 26.7 AuthZEN container, used directly by
+           DirectIngestionLauncherKeycloakIntegrationTest. StubAuthorizationService (this testkit
+           module's other former export) was removed repo-wide 2026-09-20 - every other test in this
+           module now uses a small, file-local fake instead of a shared stub. -->
+      <groupId>com.forwardmeasure.authzen</groupId>
+      <artifactId>forwardmeasure-authzen-testkit</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Phase D (2026-09-21): the real live fowf fixture (execution-management + engine-kafka-
+           streams + operation-adapter + definition-management, all real Docker images) needs its
+           own real Postgres - fowf's own platform/tenant-registry database, migrated by the real
+           openworkflow-migrations image, never a mock or an in-memory substitute. -->
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Phase D: fowf's own execution-management/engine/operation-adapter all validate a real
+           Bearer JWT against OPENWORKFLOW_KEYCLOAK_ISSUER - the same Keycloak container
+           AuthzenKeycloakFixture already stands up for this launcher's own authorization check is
+           reused as that issuer (confirmed: fowf's QuarkusActiveOrganizationProvider reads the
+           identical com.forwardmeasure.authzen.KeycloakOrganizationClaims shape). -->
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-keycloak</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Phase D: fowf's own kafka-streams engine needs a real Kafka broker (OPENWORKFLOW_KAFKA_
+           BOOTSTRAP_SERVERS) - the same real module this repo's own -executor-kafka-streams/
+           -executor-pekko already use. -->
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-kafka</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Phase D: publishing a real WorkflowDefinition against the real definition-management
+           image, mirroring forwardmeasure-entity-intelligence's own real, already-proven
+           WorkflowDefinitionPublisherMain. -->
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-definition-management-client-apachehttp</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-definition-management-models</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Phase D: granting fowf's own real, server-side AuthZEN resource/scope for the fixture's
+           minted token - see this repo's own root pom for the full "why". -->
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-authorization-api</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- DirectIngestionLauncherKafkaStreamsRealImageIntegrationTest's own real KafkaProducer,
+           seeding one real WorldCheck row onto a real topic before dispatch. -->
+      <groupId>org.apache.kafka</groupId>
+      <artifactId>kafka-clients</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- DirectIngestionLauncherKafkaStreamsRealImageIntegrationTest's own real OpenSearch sink -
+           the real Kafka Streams executor's own BoundedKafkaConsumerRunner writes there via
+           OpenSearchSinkRowWriter, matched here so the test can independently verify the write. -->
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-opensearch</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- The real, shared WorldCheck IngestionSpec/TSV fixtures (Phase F) - reused here so the
+           real Kafka Streams executor image gets proven against genuine WorldCheck field-mapping
+           business logic, the same level of proof as PekkoWorldCheckToOpenSearchIntegrationTest
+           already gives the Pekko engine, not a toy id/name spec. -->
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-test-fixtures</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <!-- Phase G (2026-09-24): RealFowfWorkflowFixture (the real 6-service fowf boot machinery)
+             is the one real, working proof this module's own workflow-bounded tests already use -
+             a per-framework matrix cell (launcher/quarkus, /spring, /micronaut) needs to reuse it
+             directly rather than duplicate ~800 lines of container-orchestration code per framework.
+             A test-jar is the standard Maven way to make one module's own test-scoped classes
+             consumable from another module's test scope. -->
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals><goal>test-jar</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>

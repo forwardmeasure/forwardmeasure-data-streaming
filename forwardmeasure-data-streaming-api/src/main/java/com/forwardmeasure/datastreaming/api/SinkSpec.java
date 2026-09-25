@@ -16,6 +16,7 @@
  */
 package com.forwardmeasure.datastreaming.api;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.io.Serializable;
@@ -47,6 +48,11 @@ public record SinkSpec(
     @JsonProperty("options") Map<String, String> options)
     implements Serializable {
 
+  // @JsonCreator disambiguates the deserialization entry point - see SourceSpec's own compact
+  // constructor javadoc for the real, live-found Micronaut Serde bug this fixes (3+ constructors,
+  // no explicit creator -> the generated BeanIntrospection silently picked the shortest legacy
+  // constructor below, always dropping uri/options over real HTTP).
+  @JsonCreator
   public SinkSpec {
     options = options == null ? Map.of() : Map.copyOf(options);
   }

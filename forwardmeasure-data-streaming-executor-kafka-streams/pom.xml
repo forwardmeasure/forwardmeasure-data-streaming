@@ -23,8 +23,9 @@
 
   <properties>
     <maven.javadoc.skip>false</maven.javadoc.skip>
+    <container-image.name>data-streaming-executor-kafka-streams</container-image.name>
   </properties>
-  
+
   <dependencies>
     <dependency>
       <groupId>${project.groupId}</groupId>
@@ -39,39 +40,148 @@
       <artifactId>forwardmeasure-data-streaming-mappers</artifactId>
     </dependency>
     <dependency>
+      <!-- IngestionPipeline.MalformedRecordPolicy/SinkFailurePolicy - the same real malformed-
+           record/sink-retry policy the bounded engines already use, reused here (2026-09-21) for
+           KafkaStreamsDeliveryEngine's own continuous and bounded branches. -->
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-core</artifactId>
+    </dependency>
+    <dependency>
       <groupId>org.apache.kafka</groupId>
       <artifactId>kafka-streams</artifactId>
     </dependency>
     <dependency>
+      <!-- Plain kafka-clients Consumer/Producer/Admin - BoundedKafkaConsumerRunner's own
+           InputFrontier poll loop (2026-09-21) doesn't use the Kafka Streams DSL runtime at all,
+           which has no native "stop at these offsets" concept. -->
+      <groupId>org.apache.kafka</groupId>
+      <artifactId>kafka-clients</artifactId>
+    </dependency>
+    <dependency>
       <groupId>com.fasterxml.jackson.core</groupId>
       <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <!-- Real (not test-scope): with no SLF4J provider on the runtime classpath, every LOGGER.*
+         call in this module's own code (and Kafka Streams' own internal logging) silently goes
+         nowhere in the real deployed image - the identical gap fei's own ingestion-worker pom
+         already documented and fixed for the same reason, and the same fix just applied to this
+         repo's own -executor-pekko sibling module. slf4j-simple is the minimal, zero-config
+         provider (stdout, no separate config file) appropriate for a plain worker jar. -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-simple</artifactId>
+      <version>2.0.18</version>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Real Kafka broker for the end-to-end spike test, via the real @WithKafkaContainer
+         extension (forwardmeasure-testcontainers-kafka module). -->
     <dependency>
-      <groupId>org.slf4j</groupId>
-      <artifactId>slf4j-simple</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <!-- Real Kafka broker for the end-to-end spike test - plain org.testcontainers.junit.jupiter
-         @Testcontainers/@Container, the exact same pattern forwardmeasure-data-streaming-executor-
-         pekko's/-spark's own real PekkoKafkaConnectorIntegrationTest/SparkKafkaConnectorIntegration
-         Test already use successfully. No org-specific forwardmeasure-testcontainers-kafka wrapper
-         module exists or is needed for this - unlike Postgres/OpenSearch/Kubernetes/Keycloak (which
-         need bespoke setup: security, custom images, network wiring), a plain KafkaContainer's
-         default setup is trivial and testcontainers' own annotations already manage its lifecycle. -->
-    <dependency>
-      <groupId>org.testcontainers</groupId>
-      <artifactId>testcontainers-kafka</artifactId>
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-junit-jupiter</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
-      <groupId>org.testcontainers</groupId>
-      <artifactId>testcontainers-junit-jupiter</artifactId>
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-kafka</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Real OpenSearch node - KafkaStreamsDeliveryEngineIntegrationTest's own proof that both
+           modes genuinely write to a real sink now, not just topic-out (2026-09-21). -->
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-opensearch</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <build>
+    <!-- No Kafka Streams executor image existed before 2026-09-21 - this module is now, like
+         -executor-pekko/-executor-spark, a plain Java main() entrypoint
+         (KafkaStreamsDeliveryEngine), not a Quarkus/Spring/Micronaut app. Mirrors those two
+         modules' own real, working configuration exactly: maven-dependency-plugin copies runtime
+         deps to target/dependency/, maven-jar-plugin points the jar's own manifest Class-Path at
+         them, so `java -jar` alone resolves the full classpath. -->
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>copy-dependencies</id>
+            <phase>prepare-package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/dependency</outputDirectory>
+              <includeScope>runtime</includeScope>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifest>
+              <mainClass>com.forwardmeasure.datastreaming.executor.kafkastreams.KafkaStreamsDeliveryEngine</mainClass>
+              <addClasspath>true</addClasspath>
+              <classpathPrefix>dependency/</classpathPrefix>
+            </manifest>
+          </archive>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <id>container-image</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>io.fabric8</groupId>
+            <artifactId>docker-maven-plugin</artifactId>
+            <configuration>
+              <images>
+                <image>
+                  <name>${container-image.registry}/${container-image.group}/${container-image.name}:${container-image.tag}</name>
+                  <build>
+                    <contextDir>${project.basedir}</contextDir>
+                    <dockerFile>src/main/docker/Dockerfile.jvm</dockerFile>
+                    <args>
+                      <APPLICATION_JAR>target/${project.build.finalName}.jar</APPLICATION_JAR>
+                      <DEPENDENCY_DIR>target/dependency</DEPENDENCY_DIR>
+                      <BASE_IMAGE>${container-image.base-jre}</BASE_IMAGE>
+                    </args>
+                  </build>
+                </image>
+              </images>
+            </configuration>
+            <executions>
+              <execution>
+                <id>build-container-image</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>build</goal>
+                </goals>
+              </execution>
+              <execution>
+                <id>push-container-image</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>push</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>

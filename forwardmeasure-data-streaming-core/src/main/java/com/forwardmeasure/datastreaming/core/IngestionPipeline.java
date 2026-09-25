@@ -16,7 +16,9 @@
  */
 package com.forwardmeasure.datastreaming.core;
 
-import com.forwardmeasure.datastreaming.api.ExecutionSpec;
+import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
+import com.forwardmeasure.datastreaming.api.DeliverySemantics;
+import com.forwardmeasure.datastreaming.api.ErrorPolicy;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -44,7 +46,8 @@ import org.slf4j.LoggerFactory;
  * record at a time.
  *
  * <p><b>{@code flowControl}/{@code failure}, wired for real 2026-09-13</b> - closing a real gap:
- * these {@link ExecutionSpec} fields parsed from YAML and did nothing before this. Two real,
+ * these fields (now carried on {@link DeliverySemantics}/{@link ErrorPolicy} rather than the old,
+ * deleted {@code ExecutionSpec}) parsed from YAML and did nothing before this. Two real,
  * previously-silent bugs this closes, not just missing features: with no {@code failure} handling
  * at all, a single malformed record (any {@code NamedTransform} throwing - including simply naming
  * an unregistered transform) or a single transient sink failure used to crash the *entire* run, on
@@ -59,9 +62,9 @@ public final class IngestionPipeline {
   private static final Logger LOGGER = LoggerFactory.getLogger(IngestionPipeline.class);
 
   /**
-   * Not spec-configurable today (a real, stated scope boundary, not an oversight) - {@code
-   * ExecutionSpec.FailureSpec} has no attempts/backoff fields of its own; a future need for
-   * per-spec tuning would add them there, not invent a separate mechanism.
+   * Not spec-configurable today (a real, stated scope boundary, not an oversight) - {@link
+   * ErrorPolicy} has no attempts/backoff fields of its own; a future need for per-spec tuning would
+   * add them there, not invent a separate mechanism.
    */
   private static final int SINK_FAILURE_MAX_ATTEMPTS = 3;
 
@@ -69,9 +72,7 @@ public final class IngestionPipeline {
 
   private IngestionPipeline() {}
 
-  /**
-   * How one malformed record is handled - see {@link ExecutionSpec.FailureSpec#malformedRecord()}.
-   */
+  /** How one malformed record is handled - see {@link ErrorPolicy#malformedRecord()}. */
   public enum MalformedRecordPolicy {
     /** Log at WARN, drop the record, keep the run going. The default when unset. */
     SKIP,
@@ -80,8 +81,8 @@ public final class IngestionPipeline {
     /** Let the failure propagate and fail the whole run. */
     FAIL;
 
-    public static MalformedRecordPolicy from(ExecutionSpec.FailureSpec failure) {
-      String value = failure == null ? null : failure.malformedRecord();
+    public static MalformedRecordPolicy from(ErrorPolicy errors) {
+      String value = errors == null ? null : errors.malformedRecord();
       if (value == null) {
         return SKIP;
       }
@@ -93,36 +94,35 @@ public final class IngestionPipeline {
     }
   }
 
-  /**
-   * How one sink write failure is handled - see {@link ExecutionSpec.FailureSpec#sinkFailure()}.
-   */
+  /** How one sink write failure is handled - see {@link ErrorPolicy#sinkFailure()}. */
   public enum SinkFailurePolicy {
     /** Let the failure propagate and fail the whole run. The default when unset. */
     FAIL,
     /** Retry with bounded attempts and exponential backoff before giving up. */
     RETRY;
 
-    public static SinkFailurePolicy from(ExecutionSpec.FailureSpec failure) {
-      String value = failure == null ? null : failure.sinkFailure();
+    public static SinkFailurePolicy from(ErrorPolicy errors) {
+      String value = errors == null ? null : errors.sinkFailure();
       return "retry".equals(value) ? RETRY : FAIL;
     }
   }
 
   /**
-   * Runs {@code source} through {@code transform} (bounded by {@code execution}'s own {@code
-   * concurrency}/{@code flowControl}, with {@code execution.failure().malformedRecord()} deciding
-   * what happens to a row that fails to transform) and into {@code sink}.
+   * Runs {@code source} through {@code transform} (bounded by {@code delivery}'s own {@code
+   * concurrency}/{@code flowControl}, with {@code errors.malformedRecord()} deciding what happens
+   * to a row that fails to transform) and into {@code sink}.
    */
   public static <S, T, Mat> Mat run(
       Source<S, ?> source,
-      ExecutionSpec execution,
+      DeliverySemantics delivery,
+      ErrorPolicy errors,
       Function<S, T> transform,
       Sink<T, Mat> sink,
       ActorSystem system) {
-    int parallelism = effectiveParallelism(execution.concurrency());
+    int parallelism = effectiveParallelism(delivery.concurrency());
     Integer maxInFlight =
-        execution.flowControl() == null ? null : execution.flowControl().maxInFlightRecords();
-    MalformedRecordPolicy malformedRecordPolicy = MalformedRecordPolicy.from(execution.failure());
+        delivery.flowControl() == null ? null : delivery.flowControl().maxInFlightRecords();
+    MalformedRecordPolicy malformedRecordPolicy = MalformedRecordPolicy.from(errors);
 
     Source<S, ?> flowControlled =
         maxInFlight == null ? source : source.buffer(maxInFlight, OverflowStrategy.backpressure());
@@ -142,7 +142,7 @@ public final class IngestionPipeline {
    * class uses internally for the transform stage - {@code concurrency.preferred}, clamped to
    * {@code concurrency.maximum} when set.
    */
-  public static int effectiveParallelism(ExecutionSpec.ConcurrencySpec concurrency) {
+  public static int effectiveParallelism(ConcurrencySpec concurrency) {
     int preferred = concurrency.preferred();
     Integer maximum = concurrency.maximum();
     return maximum == null ? preferred : Math.min(preferred, maximum);

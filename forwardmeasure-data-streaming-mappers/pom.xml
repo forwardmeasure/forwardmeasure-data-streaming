@@ -22,6 +22,12 @@
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-transforms</artifactId></dependency>
     <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId></dependency>
+    <dependency>
+      <!-- OpenSearchSinkRowWriter's own JSON body serialization - same real need
+           PekkoIngestionRunner's own Camel sink has, ported here for the shared SinkRowWriter. -->
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
   </dependencies>
 </project>

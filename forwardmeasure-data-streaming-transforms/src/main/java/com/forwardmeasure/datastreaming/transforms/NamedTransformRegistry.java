@@ -17,6 +17,7 @@
 package com.forwardmeasure.datastreaming.transforms;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * One flat {@code name -> transform} registry - adding a new named transform, single- or
@@ -97,5 +98,15 @@ public final class NamedTransformRegistry {
 
   public static boolean contains(String name) {
     return TRANSFORMS.containsKey(name);
+  }
+
+  /**
+   * Every registered name - public so a consumer's own {@code TransformCharacteristics} registry
+   * (see {@code forwardmeasure-data-streaming-mappers}' own {@code
+   * TransformCharacteristicsRegistry}) can assert against this one and catch drift, rather than
+   * silently missing a newly-added transform.
+   */
+  public static Set<String> names() {
+    return TRANSFORMS.keySet();
   }
 }

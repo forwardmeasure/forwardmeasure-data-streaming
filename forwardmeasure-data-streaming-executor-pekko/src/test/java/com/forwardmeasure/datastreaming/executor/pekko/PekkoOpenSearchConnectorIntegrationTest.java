@@ -20,9 +20,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.forwardmeasure.datastreaming.api.ExecutionSpec;
+import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
+import com.forwardmeasure.datastreaming.api.DeliverySemantics;
+import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
+import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.testcontainers.junit.opensearch.WithOpenSearchContainer;
@@ -66,20 +69,27 @@ class PekkoOpenSearchConnectorIntegrationTest {
     String index = "party-connector-test";
     IngestionSpec spec =
         new IngestionSpec(
-            new SourceSpec(
-                "file",
-                "file:"
-                    + tempDir.toAbsolutePath()
-                    + "?fileName=source.csv&noop=true&initialDelay=0&delay=100",
-                null,
-                null),
-            new TransformSpec(
-                "party",
-                List.of(
-                    new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
-                    new TransformSpec.FieldRule("name", "FULL_NAME", null, null, null, null, null),
-                    new TransformSpec.FieldRule(
-                        "category", "CATEGORY", null, null, null, null, null))),
+            List.of(
+                new SourcePlan(
+                    "single",
+                    new SourceSpec(
+                        "file",
+                        "file:"
+                            + tempDir.toAbsolutePath()
+                            + "?fileName=source.csv&noop=true&initialDelay=0&delay=100",
+                        null,
+                        null),
+                    new TransformSpec(
+                        "party",
+                        List.of(
+                            new TransformSpec.FieldRule("uid", "ID", null, null, null, null, null),
+                            new TransformSpec.FieldRule(
+                                "name", "FULL_NAME", null, null, null, null, null),
+                            new TransformSpec.FieldRule(
+                                "category", "CATEGORY", null, null, null, null, null))),
+                    1.0)),
+            null,
+            null,
             new SinkSpec(
                 "opensearch",
                 opensearch.hostEndpoint().toString(),
@@ -87,7 +97,9 @@ class PekkoOpenSearchConnectorIntegrationTest {
                 null,
                 null,
                 Map.of("idField", "uid")),
-            new ExecutionSpec("pekko", new ExecutionSpec.ConcurrencySpec(2, 4), null, null));
+            ExecutionMode.BOUNDED,
+            new DeliverySemantics(true, new ConcurrencySpec(2, 4), null),
+            null);
 
     ActorSystem system = ActorSystem.create("opensearch-sink-integration-test");
     try {

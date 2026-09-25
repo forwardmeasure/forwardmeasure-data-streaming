@@ -50,6 +50,108 @@
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-junit</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.rest-assured</groupId>
+      <artifactId>rest-assured</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- The real, first-ever end-to-end boot proof for this deployable - Phase G's own matrix
+           (see the repo's own gap-bridging plan) - needs the real WorldCheck fixture, a real
+           Keycloak testcontainer for both this launcher's own AuthorizationService and inbound JWT
+           verification, and real K3s/Kafka/OpenSearch testcontainers to dispatch into. -->
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-test-fixtures</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.authzen</groupId>
+      <artifactId>forwardmeasure-authzen-testkit</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-kubernetes</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-opensearch</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- DirectIngestionMatrixQuarkusKafkaStreamsSmokeTest's own real Kafka broker, matching
+           -launcher-application's own DirectIngestionLauncherKafkaStreamsRealImageIntegrationTest
+           dependency. -->
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-kafka</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Real KafkaProducer, seeding one real WorldCheck row before dispatch. -->
+      <groupId>org.apache.kafka</groupId>
+      <artifactId>kafka-clients</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Real, live-verified gap (found 2026-09-21): Quarkus's own @QuarkusTestResource
+           classloader does not pick up org.opensearch:opensearch-testcontainers transitively
+           through forwardmeasure-testcontainers-opensearch the way plain Surefire/JUnit does for
+           every other real consumer (confirmed live: ClassNotFoundException at
+           QuarkusTestResourceLifecycleManager#start time, even though `mvn dependency:tree`
+           confirms it's genuinely resolved onto this module's own test classpath) - declaring it
+           directly here works around whatever Quarkus-specific classpath partitioning causes that.
+           Same version forwardmeasure-testcontainers-opensearch itself pins. -->
+      <groupId>org.opensearch</groupId>
+      <artifactId>opensearch-testcontainers</artifactId>
+      <version>4.1.0</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Phase G workflow-bounded matrix cell: reuses RealFowfWorkflowFixture directly (the real
+           6-service fowf boot machinery -launcher-application's own workflow-bounded tests already
+           use) rather than duplicating ~800 lines of container-orchestration code per framework. -->
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-launcher-application</artifactId>
+      <version>${project.version}</version>
+      <classifier>tests</classifier>
+      <type>test-jar</type>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- RealFowfWorkflowFixture's own real Postgres (fowf's platform/tenant-registry database). -->
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Publishing a real WorkflowDefinition against the real definition-management image. -->
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-definition-management-client-apachehttp</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-definition-management-models</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Granting fowf's own real, server-side AuthZEN resource/scope for the fixture's minted
+           token. -->
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-authorization-api</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
   <build>
     <plugins>

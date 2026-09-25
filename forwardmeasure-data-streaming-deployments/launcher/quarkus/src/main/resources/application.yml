@@ -4,10 +4,15 @@ datastreaming:
       namespaces: ""
       images: ""
       image-pull-secrets: ""
+      # Real Kubernetes pod.spec.hostAliases entries ("hostname=ip,hostname2=ip2") - empty in
+      # every real deployment; only a test environment whose dispatch target (a
+      # Testcontainers-managed K3s node) can't resolve a sibling Testcontainers-managed service
+      # through cluster DNS needs this at all (see KubernetesJobSpec's own javadoc in fowf).
+      host-aliases: ""
     pekko:
       image: ""
       command: "java -jar /deployments/application.jar"
-    spark:
+    kafka-streams:
       image: ""
       command: "java -jar /deployments/application.jar"
     fowf:

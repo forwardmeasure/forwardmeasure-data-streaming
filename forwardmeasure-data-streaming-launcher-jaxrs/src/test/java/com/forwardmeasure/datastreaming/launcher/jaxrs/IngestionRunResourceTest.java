@@ -22,10 +22,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.forwardmeasure.authzen.ActiveOrganization;
 import com.forwardmeasure.authzen.ActiveOrganizationProvider;
-import com.forwardmeasure.authzen.testkit.StubAuthorizationService;
-import com.forwardmeasure.datastreaming.api.ExecutionSpec;
+import com.forwardmeasure.authzen.AuthorizationDecision;
+import com.forwardmeasure.authzen.AuthorizationRequest;
+import com.forwardmeasure.authzen.AuthorizationService;
+import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
+import com.forwardmeasure.datastreaming.api.DeliverySemantics;
+import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
+import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.launcher.application.DirectIngestionLauncher;
@@ -63,6 +68,16 @@ final class IngestionRunResourceTest {
       "docker.io/library/busybox@sha256:"
           + "73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662";
   private static final String MARKER = "ingestion-run-resource-marker-2b6d";
+
+  /**
+   * Every spec here uses a {@code file} source, which {@code ExecutionPlanCompiler} always resolves
+   * to {@code PEKKO_STREAMS} - this command is never actually exec'd, only configured so {@link
+   * DirectIngestionLauncher}'s constructor (which requires both engines' images/commands) can be
+   * satisfied.
+   */
+  private static final String KAFKA_STREAMS_STAND_IN_COMMAND =
+      "grep -q this-marker-only-exists-in-the-kafka-streams-path-never-in-this-test";
+
   private static final ActiveOrganization ACTOR =
       new ActiveOrganization(
           new TenantId(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")),
@@ -71,6 +86,7 @@ final class IngestionRunResourceTest {
           "actor-1",
           Set.of("reviewer"));
   private static final ActiveOrganizationProvider ORGANIZATIONS = () -> ACTOR;
+  private static final AuthorizationService AUTHORIZATION = new PermitAllAuthorizationService();
 
   @BeforeAll
   static void createNamespace(KubernetesTestContainer kubernetes) {
@@ -92,9 +108,11 @@ final class IngestionRunResourceTest {
           new IngestionRunResource(
               new DirectIngestionLauncher(
                   IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
-                  StubAuthorizationService.permitAll(),
+                  AUTHORIZATION,
                   STAND_IN_IMAGE,
-                  "grep -q " + MARKER),
+                  "grep -q " + MARKER,
+                  STAND_IN_IMAGE,
+                  KAFKA_STREAMS_STAND_IN_COMMAND),
               client,
               ORGANIZATIONS);
       DirectLaunchRequest request =
@@ -128,9 +146,11 @@ final class IngestionRunResourceTest {
           new IngestionRunResource(
               new DirectIngestionLauncher(
                   IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
-                  StubAuthorizationService.permitAll(),
+                  AUTHORIZATION,
                   STAND_IN_IMAGE,
-                  "grep -q " + MARKER),
+                  "grep -q " + MARKER,
+                  STAND_IN_IMAGE,
+                  KAFKA_STREAMS_STAND_IN_COMMAND),
               client,
               ORGANIZATIONS);
 
@@ -148,9 +168,11 @@ final class IngestionRunResourceTest {
           new IngestionRunResource(
               new DirectIngestionLauncher(
                   IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
-                  StubAuthorizationService.permitAll(),
+                  AUTHORIZATION,
                   STAND_IN_IMAGE,
-                  "grep -q " + MARKER),
+                  "grep -q " + MARKER,
+                  STAND_IN_IMAGE,
+                  KAFKA_STREAMS_STAND_IN_COMMAND),
               client,
               ORGANIZATIONS);
 
@@ -168,7 +190,9 @@ final class IngestionRunResourceTest {
           new IngestionRunResource(
               new DirectIngestionLauncher(
                   IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
-                  StubAuthorizationService.permitAll(),
+                  AUTHORIZATION,
+                  STAND_IN_IMAGE,
+                  "sh -c 'sleep 300 #'",
                   STAND_IN_IMAGE,
                   "sh -c 'sleep 300 #'"),
               client,
@@ -209,10 +233,18 @@ final class IngestionRunResourceTest {
 
   private static IngestionSpec ingestionSpecWithMarker() {
     return new IngestionSpec(
-        new SourceSpec("file", "file:///" + MARKER, new SourceSpec.FormatSpec("csv"), null),
-        new TransformSpec("party", List.of()),
+        List.of(
+            new SourcePlan(
+                "single",
+                new SourceSpec("file", "file:///" + MARKER, new SourceSpec.FormatSpec("csv"), null),
+                new TransformSpec("party", List.of()),
+                1.0)),
+        null,
+        null,
         new SinkSpec("opensearch", "test-index", null, null),
-        new ExecutionSpec("pekko", new ExecutionSpec.ConcurrencySpec(1, 1), null, null));
+        ExecutionMode.BOUNDED,
+        new DeliverySemantics(true, new ConcurrencySpec(1, 1), null),
+        null);
   }
 
   private static KubernetesJobObservation pollUntilTerminal(
@@ -227,6 +259,28 @@ final class IngestionRunResourceTest {
         }
       }
       Thread.sleep(500);
+    }
+  }
+
+  /**
+   * A local, file-scoped stand-in for {@link AuthorizationService} - deliberately not a shared,
+   * importable-from-anywhere stub class. The shared {@code StubAuthorizationService} this class
+   * used to import was removed repo-wide 2026-09-20: it masked a real Keycloak Organizations-group
+   * authorization bug elsewhere in the product (native Role policies don't see roles granted only
+   * via Organization membership). What's under test here is {@link IngestionRunResource}'s real
+   * HTTP-status-code/Location wiring against a real K3s cluster, not the authorization decision
+   * itself, so a permissive local fake - not a real Keycloak-backed check - is the right amount of
+   * realism.
+   */
+  private static final class PermitAllAuthorizationService implements AuthorizationService {
+    @Override
+    public AuthorizationDecision evaluate(AuthorizationRequest request) {
+      return new AuthorizationDecision(true, request.correlationId(), Map.of());
+    }
+
+    @Override
+    public List<AuthorizationDecision> evaluateBatch(List<AuthorizationRequest> requests) {
+      return requests.stream().map(this::evaluate).toList();
     }
   }
 }

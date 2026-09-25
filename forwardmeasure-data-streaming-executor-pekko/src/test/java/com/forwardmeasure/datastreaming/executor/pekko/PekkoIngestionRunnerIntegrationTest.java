@@ -19,9 +19,14 @@ package com.forwardmeasure.datastreaming.executor.pekko;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.forwardmeasure.datastreaming.api.ExecutionSpec;
+import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
+import com.forwardmeasure.datastreaming.api.DeliverySemantics;
+import com.forwardmeasure.datastreaming.api.ErrorPolicy;
+import com.forwardmeasure.datastreaming.api.ExecutionMode;
+import com.forwardmeasure.datastreaming.api.FlowControlSpec;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
+import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.mappers.FieldMappingEngine;
@@ -61,24 +66,29 @@ class PekkoIngestionRunnerIntegrationTest {
 
     IngestionSpec spec =
         new IngestionSpec(
-            new SourceSpec(
-                "file",
-                "file:"
-                    + tempDir.toAbsolutePath()
-                    + "?fileName=input.csv&noop=true&initialDelay=0&delay=100",
-                new SourceSpec.FormatSpec("csv"),
-                new SourceSpec.SchemaRef("schema://test/source/1.0")),
-            new TransformSpec(
-                "schema://test/target/1.0",
-                List.of(
-                    new TransformSpec.FieldRule("id", "id", null, null, null, null, null),
-                    new TransformSpec.FieldRule("name", "name", null, null, null, null, null))),
+            List.of(
+                new SourcePlan(
+                    "single",
+                    new SourceSpec(
+                        "file",
+                        "file:"
+                            + tempDir.toAbsolutePath()
+                            + "?fileName=input.csv&noop=true&initialDelay=0&delay=100",
+                        new SourceSpec.FormatSpec("csv"),
+                        new SourceSpec.SchemaRef("schema://test/source/1.0")),
+                    new TransformSpec(
+                        "schema://test/target/1.0",
+                        List.of(
+                            new TransformSpec.FieldRule("id", "id", null, null, null, null, null),
+                            new TransformSpec.FieldRule(
+                                "name", "name", null, null, null, null, null))),
+                    1.0)),
+            null,
+            null,
             new SinkSpec("log", "n/a", new SourceSpec.SchemaRef("schema://test/target/1.0"), null),
-            new ExecutionSpec(
-                "pekko",
-                new ExecutionSpec.ConcurrencySpec(16, 32),
-                new ExecutionSpec.FlowControlSpec(5000),
-                new ExecutionSpec.FailureSpec("dead-letter", "retry")));
+            ExecutionMode.BOUNDED,
+            new DeliverySemantics(true, new ConcurrencySpec(16, 32), new FlowControlSpec(5000)),
+            new ErrorPolicy("dead-letter", "retry"));
 
     Set<String> threadNames = ConcurrentHashMap.newKeySet();
     FieldMappingEngine engine = new FieldMappingEngine();
@@ -90,7 +100,7 @@ class PekkoIngestionRunnerIntegrationTest {
           } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
           }
-          return engine.map(row, spec.mapper());
+          return engine.map(row, spec.sources().get(0).mapper());
         };
     Sink<Map<String, Object>, CompletionStage<Long>> countingSink =
         Sink.fold(0L, (count, ignored) -> count + 1);

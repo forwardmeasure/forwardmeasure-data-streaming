@@ -20,7 +20,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.forwardmeasure.datastreaming.api.ExecutionSpec;
+import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
+import com.forwardmeasure.datastreaming.api.DeliverySemantics;
+import com.forwardmeasure.datastreaming.api.ErrorPolicy;
+import com.forwardmeasure.datastreaming.api.FlowControlSpec;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -54,7 +57,7 @@ class IngestionPipelineTest {
 
   @Test
   void runsEveryElementThroughTransformAndSinkWhenNothingFails() {
-    List<Integer> written = runCollecting(List.of(1, 2, 3), execution(4, null, null, null));
+    List<Integer> written = runCollecting(List.of(1, 2, 3), delivery(4, null));
     assertEquals(List.of(2, 4, 6), sorted(written));
   }
 
@@ -67,7 +70,7 @@ class IngestionPipelineTest {
     for (int i = 0; i < 50; i++) {
       input.add(i);
     }
-    List<Integer> written = runCollecting(input, execution(4, 2, null, null));
+    List<Integer> written = runCollecting(input, delivery(4, 2));
     assertEquals(50, written.size());
     List<Integer> expected = new ArrayList<>();
     for (int i = 0; i < 50; i++) {
@@ -78,11 +81,12 @@ class IngestionPipelineTest {
 
   @Test
   void malformedRecordSkipDropsTheBadRowAndKeepsTheRunGoing() {
-    ExecutionSpec execution = execution(4, null, "skip", null);
+    ErrorPolicy errors = errors("skip", null);
     List<Integer> written =
         runCollecting(
             List.of(1, 2, 3),
-            execution,
+            delivery(4, null),
+            errors,
             value -> {
               if (value == 2) {
                 throw new IllegalStateException("simulated malformed row");
@@ -94,11 +98,12 @@ class IngestionPipelineTest {
 
   @Test
   void malformedRecordDeadLetterAlsoDropsTheBadRowAndKeepsTheRunGoing() {
-    ExecutionSpec execution = execution(4, null, "dead-letter", null);
+    ErrorPolicy errors = errors("dead-letter", null);
     List<Integer> written =
         runCollecting(
             List.of(1, 2, 3),
-            execution,
+            delivery(4, null),
+            errors,
             value -> {
               if (value == 2) {
                 throw new IllegalStateException("simulated malformed row");
@@ -110,11 +115,11 @@ class IngestionPipelineTest {
 
   @Test
   void malformedRecordDefaultsToSkipWhenFailureSpecIsAbsent() {
-    ExecutionSpec execution = new ExecutionSpec("pekko", concurrency(4, null), null, null);
     List<Integer> written =
         runCollecting(
             List.of(1, 2, 3),
-            execution,
+            delivery(4, null),
+            null,
             value -> {
               if (value == 2) {
                 throw new IllegalStateException("simulated malformed row");
@@ -126,14 +131,15 @@ class IngestionPipelineTest {
 
   @Test
   void malformedRecordFailFailsTheWholeRun() {
-    ExecutionSpec execution = execution(4, null, "fail", null);
+    ErrorPolicy errors = errors("fail", null);
     Exception failure =
         assertThrows(
             Exception.class,
             () ->
                 runCollecting(
                     List.of(1, 2, 3),
-                    execution,
+                    delivery(4, null),
+                    errors,
                     value -> {
                       if (value == 2) {
                         throw new IllegalStateException("simulated malformed row");
@@ -261,17 +267,19 @@ class IngestionPipelineTest {
     assertTrue(attempts.get() > 1);
   }
 
-  private List<Integer> runCollecting(List<Integer> input, ExecutionSpec execution) {
-    return runCollecting(input, execution, value -> value * 2);
+  private List<Integer> runCollecting(List<Integer> input, DeliverySemantics delivery) {
+    return runCollecting(input, delivery, null, value -> value * 2);
   }
 
   private List<Integer> runCollecting(
       List<Integer> input,
-      ExecutionSpec execution,
+      DeliverySemantics delivery,
+      ErrorPolicy errors,
       java.util.function.Function<Integer, Integer> transform) {
     Sink<Integer, CompletionStage<List<Integer>>> collectingSink = Sink.seq();
     CompletionStage<List<Integer>> result =
-        IngestionPipeline.run(Source.from(input), execution, transform, collectingSink, system);
+        IngestionPipeline.run(
+            Source.from(input), delivery, errors, transform, collectingSink, system);
     return result.toCompletableFuture().join();
   }
 
@@ -281,16 +289,17 @@ class IngestionPipelineTest {
     return copy;
   }
 
-  private static ExecutionSpec execution(
-      int preferred, Integer maximum, String malformedRecord, String sinkFailure) {
-    ExecutionSpec.FailureSpec failure =
-        (malformedRecord == null && sinkFailure == null)
-            ? null
-            : new ExecutionSpec.FailureSpec(malformedRecord, sinkFailure);
-    return new ExecutionSpec("pekko", concurrency(preferred, maximum), null, failure);
+  private static DeliverySemantics delivery(int preferred, Integer flowControlMax) {
+    FlowControlSpec flowControl =
+        flowControlMax == null ? null : new FlowControlSpec(flowControlMax);
+    return new DeliverySemantics(true, concurrency(preferred, null), flowControl);
   }
 
-  private static ExecutionSpec.ConcurrencySpec concurrency(int preferred, Integer maximum) {
-    return new ExecutionSpec.ConcurrencySpec(preferred, maximum);
+  private static ErrorPolicy errors(String malformedRecord, String sinkFailure) {
+    return new ErrorPolicy(malformedRecord, sinkFailure);
+  }
+
+  private static ConcurrencySpec concurrency(int preferred, Integer maximum) {
+    return new ConcurrencySpec(preferred, maximum);
   }
 }

@@ -26,25 +26,52 @@ import java.io.InputStream;
 import java.io.Serializable;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Objects;
 
 /**
- * The top-level, framework-agnostic ingestion contract: source, field-mapping (D3, corrected - a
- * runtime-interpreted {@link TransformSpec}, not a generated MapStruct mapper), sink, and execution
- * settings for one bounded ingestion run. Matches the YAML shape in the design plan's §2, as
- * refined by §5's build order.
+ * The single, author-facing declarative ingestion spec - replaces the old {@code IngestionSpec}/
+ * {@code CorrelationSpec}/{@code ExecutionSpec}/{@code StreamingStageSpec} as four types with one
+ * (see the repo's own gap-bridging plan, "a single IngestionSpec, not four types"). {@code
+ * sources.size()==1} means single-source; {@code >1} means correlated, merged on {@code
+ * blockingField} - one list serves both cardinalities, there is no separate correlation type.
  *
- * <p>{@code mapper} carries the field-mapping spec inline in the same document, per §5's own
- * correction: since the mapping is runtime-interpreted metadata rather than something a MapStruct
- * mapper would generate at compile time, it belongs structurally in this spec, not in a separate
- * downstream artifact.
+ * <p>{@code engine}/{@code deliveryEngine} are deliberately absent: which {@link
+ * DeliveryEngineKind} runs this plan (and whether a {@link SparkStagePlan} is inserted) is resolved
+ * automatically by the planner from the transform graph's own declared {@link
+ * TransformCharacteristics} - the author never names an engine here, only sources, transforms, and
+ * a sink. {@link #executionMode} is the one thing that stays author-declared, since it's a
+ * deployment-intent decision (bounded vs. continuous), not something inferable from transform
+ * shape.
+ *
+ * <p>{@code transforms} is nullable - the simplest pipelines need nothing beyond each source's own
+ * {@link SourcePlan#mapper()} field mapping, with no further stage graph before the sink.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record IngestionSpec(
-    @JsonProperty("source") SourceSpec source,
-    @JsonProperty("mapper") TransformSpec mapper,
+    @JsonProperty("sources") List<SourcePlan> sources,
+    @JsonProperty("blockingField") String blockingField,
+    @JsonProperty("transforms") TransformGraph transforms,
     @JsonProperty("sink") SinkSpec sink,
-    @JsonProperty("execution") ExecutionSpec execution)
+    @JsonProperty("executionMode") ExecutionMode executionMode,
+    @JsonProperty("delivery") DeliverySemantics delivery,
+    @JsonProperty("errors") ErrorPolicy errors)
     implements Serializable {
+
+  public IngestionSpec {
+    sources = sources == null ? List.of() : List.copyOf(sources);
+    if (sources.isEmpty()) {
+      throw new IllegalArgumentException("An IngestionSpec must have at least one source");
+    }
+    Objects.requireNonNull(sink, "sink");
+    Objects.requireNonNull(executionMode, "executionMode");
+    delivery = delivery == null ? DeliverySemantics.defaults() : delivery;
+  }
+
+  /** {@code sources.size() > 1} - a correlated spec needs a real {@code blockingField}. */
+  public SourceCardinality sourceCardinality() {
+    return sources.size() > 1 ? SourceCardinality.CORRELATED : SourceCardinality.SINGLE;
+  }
 
   private static final ObjectMapper YAML =
       new ObjectMapper(new YAMLFactory()).registerModule(new JavaTimeModule());

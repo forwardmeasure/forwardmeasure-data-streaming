@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Real, live-caught gap (2026-09-24): this module has no logback config at all, so Logback falls
+  back to its own bare default (BasicConfigurator, DEBUG on the root logger with no filtering) -
+  unlike Quarkus/Spring's own sensible INFO-level defaults. Under a real, no-mocks test that
+  transfers a large image tar into a testcontainer (KubernetesTestContainer#loadImageAndPinDigest),
+  this logged the entire binary transfer byte-for-byte via docker-java's own wire-level HTTP client
+  logging, producing multi-gigabyte log files in one run and exhausting this machine's RAM
+  (tmpfs-backed /tmp) and swap. A real logback.xml/-test.xml is standard practice regardless; this
+  is the reason it was finally needed.
+-->
+<configuration>
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} -- %msg%n</pattern>
+    </encoder>
+  </appender>
+  <logger name="org.apache.hc.client5.http.wire" level="WARN"/>
+  <logger name="org.apache.hc.client5.http.headers" level="WARN"/>
+  <logger name="com.github.dockerjava" level="INFO"/>
+  <root level="INFO">
+    <appender-ref ref="STDOUT"/>
+  </root>
+</configuration>

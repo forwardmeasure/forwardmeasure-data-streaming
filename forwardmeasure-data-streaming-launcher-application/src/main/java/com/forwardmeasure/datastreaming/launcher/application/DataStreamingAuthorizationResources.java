@@ -22,11 +22,13 @@ import java.util.Map;
 /**
  * FDS's own AuthZEN resource vocabulary, built 2026-09-14 alongside {@link AuthorizationAction} to
  * close the same confirmed gap (see docs/fds-authorization-remediation-guide.md). One factory per
- * real run type this launcher exposes - {@code id} names the resource collection, the specific
- * correlation/execution id lives in {@code properties}, matching this same day's real siblings
- * ({@code OpenWorkflowAuthorizationResources} in forwardmeasure-openworkflow, {@code
- * EntityIntelligenceAuthorizationResources} in forwardmeasure-entity-intelligence) in both naming
- * convention (product-prefixed, recognizable across module boundaries) and shape.
+ * real run type this launcher exposes ({@code correlationRun} was removed 2026-09-21 when {@code
+ * DirectCorrelationLauncher} collapsed into {@code DirectIngestionLauncher} - a correlated run is
+ * just an ingestion run whose spec has more than one source now) - {@code id} names the resource
+ * collection, the specific correlation/execution id lives in {@code properties}, matching this same
+ * day's real siblings ({@code OpenWorkflowAuthorizationResources} in forwardmeasure-openworkflow,
+ * {@code EntityIntelligenceAuthorizationResources} in forwardmeasure-entity-intelligence) in both
+ * naming convention (product-prefixed, recognizable across module boundaries) and shape.
  *
  * <p>A pure static-factory utility over the shared {@link AuthorizationResource} record, not a
  * record of its own - fowf hit a real bug the first time this pattern was built (a local record
@@ -41,13 +43,6 @@ public final class DataStreamingAuthorizationResources {
     return new AuthorizationResource(
         "datastreaming-ingestion-run",
         "ingestion-runs",
-        Map.of("correlation_id", requireText(correlationId, "correlationId")));
-  }
-
-  public static AuthorizationResource correlationRun(String correlationId) {
-    return new AuthorizationResource(
-        "datastreaming-correlation-run",
-        "correlation-runs",
         Map.of("correlation_id", requireText(correlationId, "correlationId")));
   }
 

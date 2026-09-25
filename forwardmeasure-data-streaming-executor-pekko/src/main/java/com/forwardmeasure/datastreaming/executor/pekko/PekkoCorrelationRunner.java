@@ -17,7 +17,7 @@
 package com.forwardmeasure.datastreaming.executor.pekko;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.forwardmeasure.datastreaming.api.CorrelationSpec;
+import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.connector.camel.CamelBridge;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline;
 import java.io.IOException;
@@ -37,18 +37,20 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * The standalone entrypoint for {@link PekkoCorrelationEngine} - {@code CorrelationSpec}'s {@code
- * engine: pekko} counterpart to {@code SparkCorrelationRunner}'s own {@code CorrelationSpec}
- * handling, added 2026-09-13 so multi-source correlation isn't Spark-only. Same real sink mechanism
- * {@link PekkoIngestionRunner} already proved this session ({@link ProducerTemplate#asyncSendBody(
- * String, Object)} + {@link Sink#foreachAsync}): any {@code SinkSpec.connector} Camel supports
- * works here, via {@link PekkoIngestionRunner#buildSink}. <b>Correction, 2026-09-14</b>: this
- * javadoc originally contrasted that with a "{@code SparkCorrelationRunner}'s own {@code
- * file}-sink-only restriction" - true when this class was first written, but {@code
- * SparkCorrelationRunner} was generalized the same day (2026-09-13) to delegate to {@code
- * SparkSinks#write} (file/kafka/jdbc/ opensearch/any Spark-native format) just like {@code
- * SparkIngestionRunner} does - see that class's own current javadoc. Both correlation runners
- * support the same connector set today; there is no asymmetry to call out here any more.
+ * The standalone entrypoint for {@link PekkoCorrelationEngine} - handles the {@code sources.size()
+ * > 1} cell of the unified {@link IngestionSpec} (the {@code CorrelationSpec} type this class
+ * originally took has since been folded into {@code IngestionSpec}), Pekko's own counterpart to
+ * {@code SparkCorrelationRunner}'s own correlated-spec handling, added 2026-09-13 so multi-source
+ * correlation isn't Spark-only. Same real sink mechanism {@link PekkoIngestionRunner} already
+ * proved this session ({@link ProducerTemplate#asyncSendBody( String, Object)} + {@link
+ * Sink#foreachAsync}): any {@code SinkSpec.connector} Camel supports works here, via {@link
+ * PekkoIngestionRunner#buildSink}. <b>Correction, 2026-09-14</b>: this javadoc originally
+ * contrasted that with a "{@code SparkCorrelationRunner}'s own {@code file}-sink-only restriction"
+ * - true when this class was first written, but {@code SparkCorrelationRunner} was generalized the
+ * same day (2026-09-13) to delegate to {@code SparkSinks#write} (file/kafka/jdbc/ opensearch/any
+ * Spark-native format) just like {@code SparkIngestionRunner} does - see that class's own current
+ * javadoc. Both correlation runners support the same connector set today; there is no asymmetry to
+ * call out here any more.
  */
 public final class PekkoCorrelationRunner {
 
@@ -64,10 +66,16 @@ public final class PekkoCorrelationRunner {
    * spec.blockingField()}, merges each group by trust weight (see {@link
    * PekkoCorrelationEngine#correlate}), and writes the merged rows to {@code spec.sink()}.
    */
-  public static CorrelationResult run(CorrelationSpec spec, ActorSystem system) throws IOException {
+  public static CorrelationResult run(IngestionSpec spec, ActorSystem system) throws IOException {
+    if (spec.sources().size() <= 1) {
+      throw new IllegalArgumentException(
+          "PekkoCorrelationRunner: expected more than one source, got "
+              + spec.sources().size()
+              + " - use PekkoIngestionRunner for a single-source spec");
+    }
     AtomicLong written = new AtomicLong();
     IngestionPipeline.MalformedRecordPolicy malformedRecordPolicy =
-        IngestionPipeline.MalformedRecordPolicy.from(spec.execution().failure());
+        IngestionPipeline.MalformedRecordPolicy.from(spec.errors());
     try (CamelBridge bridge = new CamelBridge()) {
       List<CompletableFuture<List<PekkoCorrelationEngine.PekkoCorrelationRecord>>> reads =
           spec.sources().stream()
@@ -94,7 +102,7 @@ public final class PekkoCorrelationRunner {
       ObjectMapper objectMapper = new ObjectMapper();
       Sink<Map<String, Object>, CompletionStage<Done>> sink =
           PekkoIngestionRunner.buildSink(
-              bridge, spec.sink(), spec.execution(), objectMapper, written);
+              bridge, spec.sink(), spec.delivery(), spec.errors(), objectMapper, written);
       Source.from(merged).runWith(sink, system).toCompletableFuture().join();
 
       return new CorrelationResult(spec.sources().size(), merged.size());
@@ -120,7 +128,7 @@ public final class PekkoCorrelationRunner {
 
   public static void main(String[] args) throws Exception {
     String specPath = args.length > 0 ? args[0] : requiredEnv("CORRELATION_SPEC_PATH");
-    CorrelationSpec spec = CorrelationSpec.load(Path.of(specPath));
+    IngestionSpec spec = IngestionSpec.load(Path.of(specPath));
 
     ActorSystem system = ActorSystem.create("forwardmeasure-data-streaming-correlation");
     int exitCode = 0;

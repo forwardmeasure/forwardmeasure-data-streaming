@@ -4,10 +4,11 @@ datastreaming:
       namespaces: ""
       images: ""
       image-pull-secrets: ""
+      host-aliases: ""
     pekko:
       image: ""
       command: "java -jar /deployments/application.jar"
-    spark:
+    kafka-streams:
       image: ""
       command: "java -jar /deployments/application.jar"
     fowf:

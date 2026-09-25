@@ -35,19 +35,20 @@ import jakarta.ws.rs.core.Response;
 import java.util.Objects;
 
 /**
- * Direct mode's REST surface over {@link DirectIngestionLauncher} (single-source, Pekko) - {@code
- * POST /ingestion-runs} (202 Accepted + {@code Location} + {@link RunAccepted}), {@code GET
- * /ingestion-runs/{correlationId}?namespace=...} (the raw {@link KubernetesJobObservation}, or 404
- * once the underlying Job is gone or was never launched), {@code POST
- * /ingestion-runs/{correlationId}/cancel?namespace=...}.
+ * Direct mode's REST surface over {@link DirectIngestionLauncher} - one unified {@link
+ * com.forwardmeasure.datastreaming.api.IngestionSpec} (single-source or correlated, dispatched to
+ * whichever engine the planner resolves) - {@code POST /ingestion-runs} (202 Accepted + {@code
+ * Location} + {@link RunAccepted}), {@code GET /ingestion-runs/{correlationId}?namespace=...} (the
+ * raw {@link KubernetesJobObservation}, or 404 once the underlying Job is gone or was never
+ * launched), {@code POST /ingestion-runs/{correlationId}/cancel?namespace=...}.
  *
  * <p>Plain class, no framework annotations - each framework binding wires an instance of this in
  * its own idiomatic way, mirroring this org's established shared-JAX-RS-resource convention (e.g.
  * {@code ReferencePopulationResource} in forwardmeasure-entity-intelligence). Every failure this
  * class's own methods can throw ({@link SecurityException} from policy rejection, {@link
- * UnsupportedOperationException} from a non-pekko engine, {@link NullPointerException} from a
- * missing required field on the request body) is translated by this module's own {@code mapper}
- * package - nothing here builds an error {@code Response} by hand.
+ * UnsupportedOperationException} from an unsupported execution mode/Spark stage, {@link
+ * NullPointerException} from a missing required field on the request body) is translated by this
+ * module's own {@code mapper} package - nothing here builds an error {@code Response} by hand.
  *
  * <p>Both {@link #get} and {@link #cancel} require {@code namespace} as a query parameter: {@link
  * DirectIngestionLauncher#observe}/{@link DirectIngestionLauncher#cancel} need it to scope the

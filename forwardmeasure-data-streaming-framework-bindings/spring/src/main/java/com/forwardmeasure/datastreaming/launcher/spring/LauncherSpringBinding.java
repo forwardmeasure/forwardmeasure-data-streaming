@@ -20,12 +20,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forwardmeasure.authzen.ActiveOrganizationProvider;
 import com.forwardmeasure.authzen.AuthorizationService;
 import com.forwardmeasure.authzen.client.AuthzenAuthorizationFactory;
-import com.forwardmeasure.datastreaming.launcher.application.DirectCorrelationLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.DirectIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.IngestionJobPolicy;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.auth.KeycloakClientCredentialsTokenSupplier;
-import com.forwardmeasure.datastreaming.launcher.jaxrs.CorrelationRunResource;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.IngestionRunResource;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.WorkflowRunResource;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.mapper.ApiExceptionMapper;
@@ -45,7 +43,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.glassfish.jersey.server.ResourceConfig;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.jersey.autoconfigure.ResourceConfigCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -69,6 +69,24 @@ public class LauncherSpringBinding {
   @Bean
   KubernetesClient kubernetesClient() {
     return new KubernetesClientBuilder().build();
+  }
+
+  /**
+   * Real gap found and fixed 2026-09-21 while building this module's first-ever real boot test:
+   * Spring Boot's own {@code JerseyAutoConfiguration} is gated by
+   * {@code @ConditionalOnBean(ResourceConfig.class)} (confirmed by disassembling {@code
+   * spring-boot-jersey-4.1.1.jar}) - unlike earlier Spring Boot versions, it no longer supplies a
+   * default {@code ResourceConfig} of its own if none exists; without one, the whole
+   * autoconfiguration class is skipped and Jersey's servlet is never registered, so every request
+   * 404s with no Jersey log output at all. The identical gap (and identical fix) is already
+   * documented in forwardmeasure-entity-intelligence's own {@code
+   * JerseyResourceConfigConfiguration} - this app never had one since nothing had reached a working
+   * HTTP round trip on Spring until now.
+   */
+  @Bean
+  @ConditionalOnMissingBean
+  ResourceConfig resourceConfig() {
+    return new ResourceConfig();
   }
 
   @Bean
@@ -134,22 +152,21 @@ public class LauncherSpringBinding {
   DirectIngestionLauncher directIngestionLauncher(
       IngestionJobPolicy policy,
       AuthorizationService authorization,
-      @Value("${datastreaming.launcher.pekko.image}") String image,
-      @Value("${datastreaming.launcher.pekko.command}") String command,
-      @Value("${datastreaming.launcher.k8s.image-pull-secrets}") String pullSecrets) {
+      @Value("${datastreaming.launcher.pekko.image}") String pekkoImage,
+      @Value("${datastreaming.launcher.pekko.command}") String pekkoCommand,
+      @Value("${datastreaming.launcher.kafka-streams.image}") String kafkaStreamsImage,
+      @Value("${datastreaming.launcher.kafka-streams.command}") String kafkaStreamsCommand,
+      @Value("${datastreaming.launcher.k8s.image-pull-secrets}") String pullSecrets,
+      @Value("${datastreaming.launcher.k8s.host-aliases}") String hostAliases) {
     return new DirectIngestionLauncher(
-        policy, authorization, image, command, commaSeparatedList(pullSecrets));
-  }
-
-  @Bean
-  DirectCorrelationLauncher directCorrelationLauncher(
-      IngestionJobPolicy policy,
-      AuthorizationService authorization,
-      @Value("${datastreaming.launcher.spark.image}") String image,
-      @Value("${datastreaming.launcher.spark.command}") String command,
-      @Value("${datastreaming.launcher.k8s.image-pull-secrets}") String pullSecrets) {
-    return new DirectCorrelationLauncher(
-        policy, authorization, image, command, commaSeparatedList(pullSecrets));
+        policy,
+        authorization,
+        pekkoImage,
+        pekkoCommand,
+        kafkaStreamsImage,
+        kafkaStreamsCommand,
+        commaSeparatedList(pullSecrets),
+        commaSeparatedMap(hostAliases));
   }
 
   @Bean
@@ -167,14 +184,6 @@ public class LauncherSpringBinding {
   }
 
   @Bean
-  CorrelationRunResource correlationRunResource(
-      DirectCorrelationLauncher launcher,
-      KubernetesClient client,
-      ActiveOrganizationProvider organizations) {
-    return new CorrelationRunResource(launcher, client, organizations);
-  }
-
-  @Bean
   WorkflowRunResource workflowRunResource(
       WorkflowIngestionLauncher launcher, ActiveOrganizationProvider organizations) {
     return new WorkflowRunResource(launcher, organizations);
@@ -182,13 +191,10 @@ public class LauncherSpringBinding {
 
   @Bean
   ResourceConfigCustomizer launcherResourceConfigCustomizer(
-      IngestionRunResource ingestionRuns,
-      CorrelationRunResource correlationRuns,
-      WorkflowRunResource workflowRuns) {
+      IngestionRunResource ingestionRuns, WorkflowRunResource workflowRuns) {
     return resourceConfig ->
         resourceConfig
             .register(ingestionRuns)
-            .register(correlationRuns)
             .register(workflowRuns)
             .register(SecurityExceptionMapper.class)
             .register(UnsupportedOperationExceptionMapper.class)
@@ -211,5 +217,24 @@ public class LauncherSpringBinding {
         .map(String::trim)
         .filter(entry -> !entry.isEmpty())
         .collect(Collectors.toList());
+  }
+
+  /**
+   * {@code hostname=ip,hostname2=ip2} - real, only in a test environment whose dispatch target (a
+   * Testcontainers-managed K3s node) can't resolve a sibling Testcontainers-managed service through
+   * cluster DNS (see {@link DirectIngestionLauncher}'s own {@code hostAliases} constructor param
+   * javadoc); empty in every real deployment. Ported from {@code LauncherQuarkusBinding}'s own
+   * identical helper - this binding was missing it entirely until now, a real gap found while
+   * building this framework's own boot-test infrastructure.
+   */
+  private static java.util.Map<String, String> commaSeparatedMap(String value) {
+    java.util.Map<String, String> result = new java.util.LinkedHashMap<>();
+    for (String entry : commaSeparatedList(value)) {
+      int equals = entry.indexOf('=');
+      if (equals > 0) {
+        result.put(entry.substring(0, equals).trim(), entry.substring(equals + 1).trim());
+      }
+    }
+    return result;
   }
 }

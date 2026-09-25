@@ -16,6 +16,7 @@
  */
 package com.forwardmeasure.datastreaming.api;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.io.Serializable;
@@ -50,6 +51,15 @@ public record SourceSpec(
     @JsonProperty("options") Map<String, String> options)
     implements Serializable {
 
+  // @JsonCreator disambiguates the deserialization entry point - a real, live-found bug
+  // (2026-09-23): with 3+ constructors and no explicit creator, Micronaut Serde's compile-time
+  // BeanIntrospection codegen silently picked the shortest legacy constructor below instead of
+  // this canonical one, so every field past its arg list (here: query, options) always
+  // deserialized as null/empty over real HTTP, no matter what the JSON body actually contained.
+  // Confirmed via javap on the generated $SourceSpec$Introspection.instantiateInternal bytecode.
+  // Plain Jackson (used by this module's own toYaml()/parseYaml() and the JAX-RS MessageBodyReader)
+  // was never affected - only Micronaut's own separate serde codegen path.
+  @JsonCreator
   public SourceSpec {
     options = options == null ? Map.of() : Map.copyOf(options);
   }

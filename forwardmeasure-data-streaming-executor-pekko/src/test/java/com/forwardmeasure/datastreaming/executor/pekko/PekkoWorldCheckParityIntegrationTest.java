@@ -18,9 +18,14 @@ package com.forwardmeasure.datastreaming.executor.pekko;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import com.forwardmeasure.datastreaming.api.ExecutionSpec;
+import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
+import com.forwardmeasure.datastreaming.api.DeliverySemantics;
+import com.forwardmeasure.datastreaming.api.ErrorPolicy;
+import com.forwardmeasure.datastreaming.api.ExecutionMode;
+import com.forwardmeasure.datastreaming.api.FlowControlSpec;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
+import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.mappers.FieldMappingEngine;
@@ -74,23 +79,28 @@ class PekkoWorldCheckParityIntegrationTest {
 
     IngestionSpec spec =
         new IngestionSpec(
-            new SourceSpec(
-                "file",
-                "file:"
-                    + tempDir.toAbsolutePath()
-                    + "?fileName=worldcheck.csv&noop=true&initialDelay=0&delay=100",
-                new SourceSpec.FormatSpec("csv"),
-                new SourceSpec.SchemaRef("schema://worldcheck/simple-ingestion/1.0")),
-            worldCheckMapping(),
+            List.of(
+                new SourcePlan(
+                    "single",
+                    new SourceSpec(
+                        "file",
+                        "file:"
+                            + tempDir.toAbsolutePath()
+                            + "?fileName=worldcheck.csv&noop=true&initialDelay=0&delay=100",
+                        new SourceSpec.FormatSpec("csv"),
+                        new SourceSpec.SchemaRef("schema://worldcheck/simple-ingestion/1.0")),
+                    worldCheckMapping(),
+                    1.0)),
+            null,
+            null,
             new SinkSpec("log", "n/a", new SourceSpec.SchemaRef("schema://party/1.0"), null),
-            new ExecutionSpec(
-                "pekko",
-                new ExecutionSpec.ConcurrencySpec(16, 32),
-                new ExecutionSpec.FlowControlSpec(5000),
-                new ExecutionSpec.FailureSpec("dead-letter", "retry")));
+            ExecutionMode.BOUNDED,
+            new DeliverySemantics(true, new ConcurrencySpec(16, 32), new FlowControlSpec(5000)),
+            new ErrorPolicy("dead-letter", "retry"));
 
     FieldMappingEngine engine = new FieldMappingEngine();
-    Function<SourceRow, Map<String, Object>> transform = row -> engine.map(row, spec.mapper());
+    Function<SourceRow, Map<String, Object>> transform =
+        row -> engine.map(row, spec.sources().get(0).mapper());
 
     Sink<Map<String, Object>, CompletionStage<Map<String, Map<String, Object>>>> collectingSink =
         Sink.fold(

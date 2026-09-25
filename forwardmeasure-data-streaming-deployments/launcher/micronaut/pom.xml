@@ -67,6 +67,89 @@
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>io.micronaut.test</groupId>
+      <artifactId>micronaut-test-junit5</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- @Client-injectable HttpClient for the test - fowf's own real Micronaut deployment tests
+           (e.g. StudioControllerTest) use this, not rest-assured; mirrored here. -->
+      <groupId>io.micronaut</groupId>
+      <artifactId>micronaut-http-client</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-kubernetes</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-opensearch</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-kafka</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.kafka</groupId>
+      <artifactId>kafka-clients</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Same real, live-verified gap forwardmeasure-data-streaming-deployments/launcher/quarkus's
+           own pom already documents - a Quarkus-specific classloader quirk, listed defensively here
+           too since this module's own test resource lifecycle hasn't been proven yet either. -->
+      <groupId>org.opensearch</groupId>
+      <artifactId>opensearch-testcontainers</artifactId>
+      <version>4.1.0</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.authzen</groupId>
+      <artifactId>forwardmeasure-authzen-testkit</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.datastreaming</groupId>
+      <artifactId>forwardmeasure-data-streaming-test-fixtures</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Phase G workflow-bounded matrix cell: RealFowfWorkflowFixture - a test-jar with its real
+           classifier/type is required to reuse it (this module's own plain dependency above never
+           pulled test classes at all), mirroring launcher/quarkus and launcher/spring's own
+           identical fix. -->
+      <groupId>com.forwardmeasure.datastreaming</groupId>
+      <artifactId>forwardmeasure-data-streaming-launcher-application</artifactId>
+      <version>${project.version}</version>
+      <classifier>tests</classifier>
+      <type>test-jar</type>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-definition-management-client-apachehttp</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-definition-management-models</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-authorization-api</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
   <build>
     <plugins>

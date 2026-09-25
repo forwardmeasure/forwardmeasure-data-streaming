@@ -21,17 +21,35 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.forwardmeasure.datastreaming.api.CorrelationSpec;
-import com.forwardmeasure.datastreaming.api.ExecutionSpec;
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
+import com.forwardmeasure.datastreaming.api.DeliverySemantics;
+import com.forwardmeasure.datastreaming.api.ExecutionMode;
+import com.forwardmeasure.datastreaming.api.ExecutionPlan;
+import com.forwardmeasure.datastreaming.api.ExecutionProfile;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
+import com.forwardmeasure.datastreaming.api.SourceCardinality;
+import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
+import com.forwardmeasure.datastreaming.api.SparkStagePlan;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
+import com.forwardmeasure.testcontainers.junit.kafka.WithKafkaContainer;
+import com.forwardmeasure.testcontainers.kafka.KafkaTestContainer;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Stream;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Properties;
+import java.util.UUID;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -42,12 +60,14 @@ import org.junit.jupiter.api.io.TempDir;
  * Real, no-mocks proof that {@link SparkCorrelationRunner} - split out 2026-09-13 from what used to
  * be {@code SparkIngestionRunner}'s own second {@code run()} overload, once that arrangement was
  * flagged as inconsistent with the Pekko side's clean one-class-per-spec-shape split - actually
- * drives {@link SparkCorrelationEngine} end to end from a {@link CorrelationSpec}: the exact same
- * two-source, three-subject scenario {@code CorrelatedSourceIngestionWorkerIntegrationTest} (fei),
- * {@code SparkCorrelationEngineIntegrationTest}, and {@code PekkoCorrelationRunnerIntegrationTest}
- * (this repo) already prove, this time driven purely by a loadable spec document, with the merged
- * output read back from a real file {@code saveAsTextFile} wrote.
+ * drives {@link SparkCorrelationEngine} end to end from a compiled {@link ExecutionPlan}: the exact
+ * same two-source, three-subject scenario {@code CorrelatedSourceIngestionWorkerIntegrationTest}
+ * (fei), {@code SparkCorrelationEngineIntegrationTest}, and {@code
+ * PekkoCorrelationRunnerIntegrationTest} (this repo) already prove, this time driven purely by a
+ * compiled plan, with the merged output handed off to a real Kafka topic (retargeted 2026-09-21
+ * from a direct {@code file} sink write - see {@link SparkSinks}' own javadoc for why).
  */
+@WithKafkaContainer
 class SparkCorrelationRunnerIntegrationTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -70,34 +90,44 @@ class SparkCorrelationRunnerIntegrationTest {
   }
 
   @Test
-  void runCorrelatesTwoSourcesAndWritesTheMergedResult(@TempDir Path tempDir) throws Exception {
+  void runCorrelatesTwoSourcesAndWritesTheMergedResult(
+      @TempDir Path tempDir, KafkaTestContainer kafka) throws Exception {
     Path sourceACsv = writeFile(tempDir, "source-a.csv", SOURCE_A_CSV);
     Path sourceBCsv = writeFile(tempDir, "source-b.csv", SOURCE_B_CSV);
-    Path outputDir = tempDir.resolve("output");
+    String brokers = kafka.bootstrapServers();
+    String handoffTopic = "fds-spark-correlation-runner-test-" + UUID.randomUUID();
 
-    CorrelationSpec spec =
-        new CorrelationSpec(
+    ExecutionPlan plan =
+        new ExecutionPlan(
+            new ExecutionProfile(
+                SourceCardinality.CORRELATED,
+                ExecutionMode.BOUNDED,
+                DeliveryEngineKind.PEKKO_STREAMS),
             List.of(
-                new CorrelationSpec.SourceEntry(
+                new SourcePlan(
                     "core",
                     new SourceSpec("file", sourceACsv.toString(), null, null),
                     mappingA(),
                     1.0),
-                new CorrelationSpec.SourceEntry(
+                new SourcePlan(
                     "enrichment",
                     new SourceSpec("file", sourceBCsv.toString(), null, null),
                     mappingB(),
                     0.4)),
             "uid",
-            new SinkSpec("file", outputDir.toString(), "n/a", null, null),
-            new ExecutionSpec("spark", null, null, null));
+            Optional.of(new SparkStagePlan(List.of("test-heavy-transform"), handoffTopic)),
+            null,
+            new SinkSpec("opensearch", "http://unused", "unused", null, null, Map.of()),
+            new DeliverySemantics(true, null, null),
+            null);
 
-    SparkCorrelationRunner.CorrelationResult result = SparkCorrelationRunner.run(spark, spec);
+    SparkCorrelationRunner.CorrelationResult result =
+        SparkCorrelationRunner.run(spark, plan, brokers);
 
     assertEquals(2, result.sourceCount());
     assertEquals(3, result.groupCount(), "expected 3 correlated groups: S1 (merged), S2, S3");
 
-    List<JsonNode> rows = readNdjson(outputDir);
+    List<JsonNode> rows = consumeAll(brokers, handoffTopic, 3);
     assertEquals(3, rows.size());
 
     JsonNode s1 = findByUid(rows, "S1");
@@ -121,20 +151,29 @@ class SparkCorrelationRunnerIntegrationTest {
         .orElseThrow(() -> new AssertionError("no merged record for uid " + uid));
   }
 
-  private static List<JsonNode> readNdjson(Path outputDir) throws IOException {
-    try (Stream<Path> files = Files.list(outputDir)) {
-      List<Path> partFiles =
-          files.filter(p -> p.getFileName().toString().startsWith("part-")).toList();
-      List<JsonNode> rows = new java.util.ArrayList<>();
-      for (Path partFile : partFiles) {
-        for (String line : Files.readAllLines(partFile, StandardCharsets.UTF_8)) {
-          if (!line.isBlank()) {
-            rows.add(MAPPER.readTree(line));
-          }
+  private static List<JsonNode> consumeAll(String brokers, String topic, int expectedCount)
+      throws IOException {
+    Properties props = new Properties();
+    props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, brokers);
+    props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+    props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+    props.put(ConsumerConfig.GROUP_ID_CONFIG, "spark-correlation-runner-test-" + UUID.randomUUID());
+    props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+    List<JsonNode> rows = new ArrayList<>();
+    try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props)) {
+      consumer.subscribe(List.of(topic));
+      long deadline = System.currentTimeMillis() + Duration.ofSeconds(30).toMillis();
+      while (rows.size() < expectedCount && System.currentTimeMillis() < deadline) {
+        ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(2));
+        for (ConsumerRecord<String, String> record : records) {
+          rows.add(MAPPER.readTree(record.value()));
         }
       }
-      return rows;
     }
+    assertTrue(
+        rows.size() >= expectedCount,
+        "expected at least " + expectedCount + " records on topic '" + topic + "', got " + rows);
+    return rows;
   }
 
   private static TransformSpec mappingA() {

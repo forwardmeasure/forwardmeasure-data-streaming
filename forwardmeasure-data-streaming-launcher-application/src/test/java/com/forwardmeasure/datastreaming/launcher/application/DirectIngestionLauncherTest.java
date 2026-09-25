@@ -21,11 +21,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.forwardmeasure.authzen.ActiveOrganization;
+import com.forwardmeasure.authzen.AuthorizationDecision;
+import com.forwardmeasure.authzen.AuthorizationRequest;
 import com.forwardmeasure.authzen.AuthorizationService;
-import com.forwardmeasure.authzen.testkit.StubAuthorizationService;
-import com.forwardmeasure.datastreaming.api.ExecutionSpec;
+import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
+import com.forwardmeasure.datastreaming.api.DeliverySemantics;
+import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
+import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.jpa.tenancy.TenantDatabase;
@@ -46,11 +50,13 @@ import org.junit.jupiter.api.Timeout;
 
 /**
  * Real, no-mocks proof against an actual single-node K3s cluster that {@link
- * DirectIngestionLauncher} correctly encodes an {@link IngestionSpec} into a Job's env var and that
- * the pod-side reconstruction (base64 decode -> file -> exec) genuinely works - using a stand-in
- * {@code pekkoRunnerCommand} ({@code grep}, not a real packaged runner image; see this class's own
- * javadoc for why no such image exists yet) that verifies a marker value from the spec's own {@code
- * source.uri} survived the whole round trip.
+ * DirectIngestionLauncher} correctly encodes an {@link IngestionSpec} into a Job's env var, that
+ * the pod-side reconstruction (base64 decode -> file -> exec) genuinely works, and that the
+ * planner- driven engine dispatch (see {@code ExecutionPlanCompiler}) genuinely picks the right
+ * runner command - using stand-in {@code pekkoRunnerCommand}/{@code kafkaStreamsRunnerCommand}
+ * values ({@code grep}, not real packaged runner images; see this class's own javadoc for why no
+ * such image exists for every engine yet) that verify a marker value from the spec's own source URI
+ * survived the whole round trip.
  */
 @WithKubernetesContainer
 final class DirectIngestionLauncherTest {
@@ -60,7 +66,7 @@ final class DirectIngestionLauncherTest {
       "docker.io/library/busybox@sha256:"
           + "73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662";
   private static final String MARKER = "launcher-test-marker-9f3c";
-  private static final AuthorizationService AUTHORIZATION = StubAuthorizationService.permitAll();
+  private static final AuthorizationService AUTHORIZATION = new PermitAllAuthorizationService();
   private static final ActiveOrganization ACTOR =
       new ActiveOrganization(
           new TenantId(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")),
@@ -89,12 +95,14 @@ final class DirectIngestionLauncherTest {
             IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
             AUTHORIZATION,
             STAND_IN_IMAGE,
-            "grep -q " + MARKER);
+            "grep -q " + MARKER,
+            STAND_IN_IMAGE,
+            "grep -q this-marker-only-exists-in-the-kafka-streams-path-never-in-this-test");
     DirectLaunchRequest request =
         new DirectLaunchRequest(
             UUID.randomUUID().toString(),
             NAMESPACE,
-            ingestionSpecWithMarker(),
+            ingestionSpecWithMarker("file"),
             Map.of(),
             Map.of(),
             null);
@@ -112,12 +120,13 @@ final class DirectIngestionLauncherTest {
 
   @Test
   @Timeout(180)
-  void launchDispatchesToTheSparkRunnerWhenTheSpecAsksForIt(KubernetesTestContainer kubernetes)
-      throws InterruptedException {
+  void launchDispatchesToTheKafkaStreamsRunnerForAKafkaSourcedSpec(
+      KubernetesTestContainer kubernetes) throws InterruptedException {
     // Deliberately distinguishing stand-in commands, not the same one for both engines: the pekko
     // command looks for a marker that never appears in this spec's own source URI, so if dispatch
     // ever picked the wrong (pekko) command by mistake, the Job would FAIL, not just "happen to
-    // also succeed" - a real, not incidental, proof that the spark path actually ran.
+    // also succeed" - a real, not incidental, proof that ExecutionPlanCompiler's own
+    // kafka-source-in-BOUNDED-mode -> KAFKA_STREAMS rule actually drove dispatch.
     DirectIngestionLauncher launcher =
         new DirectIngestionLauncher(
             IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
@@ -131,11 +140,7 @@ final class DirectIngestionLauncherTest {
         new DirectLaunchRequest(
             UUID.randomUUID().toString(),
             NAMESPACE,
-            new IngestionSpec(
-                new SourceSpec("file", "file:///" + MARKER, null, null),
-                new TransformSpec("party", List.of()),
-                new SinkSpec("opensearch", "test-index", null, null),
-                new ExecutionSpec("spark", null, null, null)),
+            ingestionSpecWithMarker("kafka"),
             Map.of(),
             Map.of(),
             null);
@@ -152,22 +157,19 @@ final class DirectIngestionLauncherTest {
 
   @Test
   @Timeout(60)
-  void launchRejectsANonPekkoEngineWithoutTouchingTheCluster(KubernetesTestContainer kubernetes) {
+  void launchRejectsAContinuousSpecWithoutTouchingTheCluster(KubernetesTestContainer kubernetes) {
     DirectIngestionLauncher launcher =
         new DirectIngestionLauncher(
             IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
             AUTHORIZATION,
             STAND_IN_IMAGE,
+            "grep -q " + MARKER,
+            STAND_IN_IMAGE,
             "grep -q " + MARKER);
-    IngestionSpec sparkSpec =
-        new IngestionSpec(
-            new SourceSpec("file", "file:///" + MARKER, null, null),
-            new TransformSpec("party", List.of()),
-            new SinkSpec("opensearch", "test-index", null, null),
-            new ExecutionSpec("spark", null, null, null));
+    IngestionSpec continuousSpec = ingestionSpecWithMarker("kafka", ExecutionMode.CONTINUOUS);
     DirectLaunchRequest request =
         new DirectLaunchRequest(
-            UUID.randomUUID().toString(), NAMESPACE, sparkSpec, Map.of(), Map.of(), null);
+            UUID.randomUUID().toString(), NAMESPACE, continuousSpec, Map.of(), Map.of(), null);
 
     try (KubernetesClient client = kubernetes.createClient()) {
       assertThrows(
@@ -193,12 +195,14 @@ final class DirectIngestionLauncherTest {
             IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
             AUTHORIZATION,
             STAND_IN_IMAGE,
+            "sh -c 'sleep 300 #'",
+            STAND_IN_IMAGE,
             "sh -c 'sleep 300 #'");
     DirectLaunchRequest request =
         new DirectLaunchRequest(
             UUID.randomUUID().toString(),
             NAMESPACE,
-            ingestionSpecWithMarker(),
+            ingestionSpecWithMarker("file"),
             Map.of(),
             Map.of(),
             null);
@@ -228,12 +232,26 @@ final class DirectIngestionLauncherTest {
     }
   }
 
-  private static IngestionSpec ingestionSpecWithMarker() {
+  private static IngestionSpec ingestionSpecWithMarker(String sourceConnector) {
+    return ingestionSpecWithMarker(sourceConnector, ExecutionMode.BOUNDED);
+  }
+
+  private static IngestionSpec ingestionSpecWithMarker(
+      String sourceConnector, ExecutionMode executionMode) {
     return new IngestionSpec(
-        new SourceSpec("file", "file:///" + MARKER, new SourceSpec.FormatSpec("csv"), null),
-        new TransformSpec("party", List.of()),
+        List.of(
+            new SourcePlan(
+                "single",
+                new SourceSpec(
+                    sourceConnector, "file:///" + MARKER, new SourceSpec.FormatSpec("csv"), null),
+                new TransformSpec("party", List.of()),
+                1.0)),
+        null,
+        null,
         new SinkSpec("opensearch", "test-index", null, null),
-        new ExecutionSpec("pekko", new ExecutionSpec.ConcurrencySpec(1, 1), null, null));
+        executionMode,
+        new DeliverySemantics(true, new ConcurrencySpec(1, 1), null),
+        null);
   }
 
   private static KubernetesJobObservation pollUntilTerminal(
@@ -252,5 +270,26 @@ final class DirectIngestionLauncherTest {
   private static boolean isTerminal(KubernetesJobObservation.Phase phase) {
     return phase == KubernetesJobObservation.Phase.SUCCEEDED
         || phase == KubernetesJobObservation.Phase.FAILED;
+  }
+
+  /**
+   * A local, file-scoped stand-in for {@link AuthorizationService} - deliberately not a shared,
+   * importable-from-anywhere stub class. The shared {@code StubAuthorizationService} this class
+   * used to import was removed repo-wide 2026-09-20: it masked a real Keycloak Organizations-group
+   * authorization bug elsewhere in the product (native Role policies don't see roles granted only
+   * via Organization membership). What's under test here is real Kubernetes Job launch/observe/
+   * cancel mechanics against a real K3s cluster, not the authorization decision itself, so a
+   * permissive local fake - not a real Keycloak-backed check - is the right amount of realism.
+   */
+  private static final class PermitAllAuthorizationService implements AuthorizationService {
+    @Override
+    public AuthorizationDecision evaluate(AuthorizationRequest request) {
+      return new AuthorizationDecision(true, request.correlationId(), Map.of());
+    }
+
+    @Override
+    public List<AuthorizationDecision> evaluateBatch(List<AuthorizationRequest> requests) {
+      return requests.stream().map(this::evaluate).toList();
+    }
   }
 }

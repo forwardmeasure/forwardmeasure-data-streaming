@@ -29,9 +29,9 @@ import com.forwardmeasure.datastreaming.launcher.application.WorkflowIngestionLa
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowLaunchRequest;
 import com.forwardmeasure.jpa.tenancy.TenantDatabase;
 import com.forwardmeasure.jpa.tenancy.TenantId;
-import com.forwardmeasure.openworkflow.execution.api.model.Execution;
+import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecution;
 import com.forwardmeasure.openworkflow.execution.client.ApiClient;
-import com.forwardmeasure.openworkflow.execution.client.api.ExecutionsApi;
+import com.forwardmeasure.openworkflow.execution.client.api.WorkflowExecutionsApi;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import jakarta.ws.rs.BadRequestException;
@@ -84,7 +84,7 @@ final class WorkflowRunResourceTest {
     resource =
         new WorkflowRunResource(
             new WorkflowIngestionLauncher(
-                new ExecutionsApi(apiClient), new PermitAllAuthorizationService()),
+                new WorkflowExecutionsApi(apiClient), new PermitAllAuthorizationService()),
             () -> ACTOR);
   }
 
@@ -103,7 +103,7 @@ final class WorkflowRunResourceTest {
 
     assertEquals(202, response.getStatus());
     assertNotNull(response.getHeaderString("Location"));
-    Execution execution = (Execution) response.getEntity();
+    WorkflowExecution execution = (WorkflowExecution) response.getEntity();
     assertTrue(response.getHeaderString("Location").endsWith(execution.getId().toString()));
   }
 

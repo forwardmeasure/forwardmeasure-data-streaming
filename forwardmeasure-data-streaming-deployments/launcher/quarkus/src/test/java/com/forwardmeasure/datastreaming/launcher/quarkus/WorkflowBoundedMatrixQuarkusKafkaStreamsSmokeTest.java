@@ -96,7 +96,9 @@ class WorkflowBoundedMatrixQuarkusKafkaStreamsSmokeTest {
 
     String state = pollUntilTerminal(token, executionId);
     assertEquals(
-        "COMPLETED", state, "expected the real correlated-worker/kubernetes-job workflow to complete");
+        "COMPLETED",
+        state,
+        "expected the real correlated-worker/kubernetes-job workflow to complete");
 
     String documentUri =
         SmokeResource.opensearch.hostEndpoint() + "/worldcheck-screening-records/_doc/wc-3";
@@ -245,7 +247,10 @@ class WorkflowBoundedMatrixQuarkusKafkaStreamsSmokeTest {
           Map.entry("datastreaming.launcher.pekko.image", pekkoImage),
           Map.entry("datastreaming.launcher.pekko.command", "true #"),
           Map.entry("datastreaming.launcher.kafka-streams.image", pekkoImage),
-          Map.entry("datastreaming.launcher.kafka-streams.command", "true #"));
+          Map.entry("datastreaming.launcher.kafka-streams.command", "true #"),
+          Map.entry("datastreaming.launcher.spark.image", "unused"),
+          Map.entry("datastreaming.launcher.spark.command", "unused"),
+          Map.entry("datastreaming.launcher.kafka.bootstrap-servers", "unused"));
     }
 
     @Override
@@ -295,7 +300,8 @@ class WorkflowBoundedMatrixQuarkusKafkaStreamsSmokeTest {
                   .name("fds-quarkus-workflow-bounded-ks-worldcheck")
                   .title("FDS Quarkus workflow-bounded WorldCheck ingestion (Kafka-Streams)")
                   .description(
-                      "Real Phase G matrix cell - WorkflowBoundedMatrixQuarkusKafkaStreamsSmokeTest."));
+                      "Real Phase G matrix cell -"
+                          + " WorkflowBoundedMatrixQuarkusKafkaStreamsSmokeTest."));
 
       WorkflowDefinition created =
           definitions.createWorkflowDefinition(

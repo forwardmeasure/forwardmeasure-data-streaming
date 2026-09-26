@@ -82,7 +82,7 @@
         <configuration>
           <archive>
             <manifest>
-              <mainClass>com.forwardmeasure.datastreaming.executor.spark.SparkIngestionRunner</mainClass>
+              <mainClass>com.forwardmeasure.datastreaming.executor.spark.SparkStageRunner</mainClass>
               <addClasspath>true</addClasspath>
               <classpathPrefix>dependency/</classpathPrefix>
             </manifest>

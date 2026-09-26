@@ -1,0 +1,160 @@
+# Real, runnable IngestionSpec: customer-master CSV -> OpenSearch, via the Pekko engine - Phase H's
+# own sibling of this directory's worldcheck-to-opensearch.yaml, ported field-by-field from
+# entity-intelligence-specifications' own real customer-master mapping/schema documents (client name
+# withheld here by design - see this module's own commit history for provenance) (pipe-delimited,
+# UTF-8, 42 real columns + 4 trailing positional-duplicate/empty columns never referenced here,
+# matching the real source file's own layout).
+#
+# Three net-new-beyond-plan named transforms were needed to port this mapping faithfully against
+# FieldMappingEngine's real constraints (the plan's own text anticipated one -
+# classify_party_kind_test_customer_master): FieldMappingEngine's repeated+metadata accumulation (see its
+# own javadoc) only composes several single-valued rules that all share one fixed per-rule tag - it
+# has no way to also merge in a rule whose own transform already returns a fully-formed, variably-
+# shaped structure (Customer Master's own `locations` needs 3 structured blocks assembled from 15
+# distinct source columns; `identifiers` needs 2 fixed-scheme sources merged with
+# parse_identifier_pairs' own variably-scheme output) onto the same target field. Each of
+# build_test_customer_master_locations/build_test_customer_master_identifiers resolves its entire target list in
+# one rule instead - the same "one rule returns the whole target list" shape
+# parse_tilde_delimited_locations (worldcheck-to-opensearch.yaml's own sibling field) already uses.
+# join_labeled_fields (generic, not Customer-Master-specific) exists because `template`'s own
+# all-placeholders-or-null semantics is wrong for further_information's 7 optional
+# business-relationship fields, which the legacy mapping happily leaves partially populated.
+#
+# {{SOURCE_URI}}/{{OPENSEARCH_URL}}/{{INDEX_SETTINGS_FILE}} are substituted at test time by
+# TestCustomerMasterFixtures#boundedFileSpec, mirroring WorldCheckFixtures exactly.
+#
+# categories: the real legacy mapping declares `categories: []` - no Customer Master customer-master
+# field ever populates it, so this spec has no categories field rule at all (matching real
+# behavior, not a gap).
+sources:
+  - sourceKey: test-customer-master-customer-master
+    trustWeight: 1.0
+    source:
+      connector: file
+      uri: "{{SOURCE_URI}}"
+      format:
+        type: csv
+      options:
+        delimiter: "|"
+      schema:
+        ref: schema://test-customer-master/customer-master/1.0
+    mapper:
+      target: schema://party/1.0
+      fields:
+        - target: uid
+          source: ENTITYS_UNIQUE_ID
+        - target: source_record_id
+          source: ENTITYS_UNIQUE_ID
+        - target: names
+          source: ENTITYS_FULL_NAME
+          repeated: true
+          metadata:
+            name_type: PRIMARY
+        - target: names
+          source: TRADE_AS_NAME
+          optional: true
+          repeated: true
+          metadata:
+            name_type: ALIAS
+        - target: names
+          source: FORMER_NAME
+          optional: true
+          repeated: true
+          metadata:
+            name_type: ALIAS
+        - target: entity_kind
+          source: ENTITYS_TYPE
+          transform: classify_party_kind_test_customer_master
+        - target: identifiers
+          inputs:
+            business_entity_record_id: BUSINESS_ENTITY_RECORD_ID
+            gems_id: GEMS_ID
+            entity_public_identifier: ENTITY_PUBLIC_IDENTIFIER
+          transform: build_test_customer_master_identifiers
+          optional: true
+        - target: date_of_birth
+          source: DATE_OF_BIRTH_DATE_OF_INCORPORATION
+          transform: parse_yyyymmdd
+          optional: true
+        - target: nationalities
+          source: COUNTRY_OF_NATIONALITY
+          transform: resolve_iso2_country
+          optional: true
+          repeated: true
+        - target: nationalities
+          source: COUNTRY_OF_CITIZENSHIP_INCORPORATION
+          transform: resolve_iso2_country
+          optional: true
+          repeated: true
+        - target: countries
+          source: ENTITY_LOCATION_1_COUNTRY
+          transform: resolve_iso2_country
+          optional: true
+          repeated: true
+        - target: countries
+          source: ENTITY_LOCATION_2_COUNTRY
+          transform: resolve_iso2_country
+          optional: true
+          repeated: true
+        - target: countries
+          source: ENTITY_LOCATION_3_COUNTRY
+          transform: resolve_iso2_country
+          optional: true
+          repeated: true
+        - target: position
+          source: JOB_TITLE
+          optional: true
+        - target: further_information
+          inputs:
+            Occupation: OCCUPATION
+            Classification: ENTITY_CLASSIFICATION
+            Primary BU: PRIMARY_BUSINESS_UNIT
+            Contracting: CONTRACTING_ENTITIES_AND_LOCATIONS
+            Servicing: SERVICING_ENTITIES_AND_LOCATIONS
+            Booking: BOOKING_ENTITIES_AND_LOCATIONS
+            Additional BU: ADDITIONAL_BUSINESS_UNITS_AND_LOCATIONS
+          transform: join_labeled_fields
+          optional: true
+        - target: locations
+          inputs:
+            address_line_1_1: ENTITY_LOCATION_1_ADDRESS_LINE_1
+            address_line_2_1: ENTITY_LOCATION_1_ADDRESS_LINE_2
+            city_1: ENTITY_LOCATION_1_CITY
+            state_or_province_1: ENTITY_LOCATION_1_STATE_PROVINCE
+            country_1: ENTITY_LOCATION_1_COUNTRY
+            address_line_1_2: ENTITY_LOCATION_2_ADDRESS_LINE_1
+            address_line_2_2: ENTITY_LOCATION_2_ADDRESS_LINE_2
+            city_2: ENTITY_LOCATION_2_CITY
+            state_or_province_2: ENTITY_LOCATION_2_STATE_PROVINCE
+            country_2: ENTITY_LOCATION_2_COUNTRY
+            address_line_1_3: ENTITY_LOCATION_3_ADDRESS_LINE_1
+            address_line_2_3: ENTITY_LOCATION_3_ADDRESS_LINE_2
+            city_3: ENTITY_LOCATION_3_CITY
+            state_or_province_3: ENTITY_LOCATION_3_STATE_PROVINCE
+            country_3: ENTITY_LOCATION_3_COUNTRY
+          transform: build_test_customer_master_locations
+          optional: true
+
+sink:
+  connector: opensearch
+  uri: "{{OPENSEARCH_URL}}"
+  index: test-customer-master-screening-records
+  schema:
+    ref: schema://party/1.0
+  options:
+    idField: uid
+    indexSettingsFile: "{{INDEX_SETTINGS_FILE}}"
+
+executionMode: BOUNDED
+
+delivery:
+  exactlyOnce: true
+  concurrency:
+    preferred: 16
+    maximum: 32
+  flowControl:
+    maxInFlightRecords: 5000
+
+errors:
+  malformedRecord: dead-letter
+  sinkFailure: retry

@@ -49,4 +49,18 @@ public final class MapSourceRow implements SourceRow {
     String stringValue = String.valueOf(value);
     return stringValue.isBlank() ? null : stringValue.strip();
   }
+
+  /**
+   * Returns {@code row.get(fieldName)} exactly as stored - a JSON-deserialized {@code
+   * List<Map<String,Object>>}/{@code Map<String,Object>} value survives unchanged, unlike {@link
+   * #get}'s own lossy {@code String.valueOf(...)}. See {@link SourceRow#getRaw}'s own javadoc for
+   * why this override exists on this implementation specifically.
+   */
+  @Override
+  public Object getRaw(String fieldName) {
+    if (fieldName == null || !row.containsKey(fieldName)) {
+      return null;
+    }
+    return row.get(fieldName);
+  }
 }

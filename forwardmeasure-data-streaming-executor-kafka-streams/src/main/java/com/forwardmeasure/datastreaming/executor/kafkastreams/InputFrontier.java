@@ -21,13 +21,14 @@ import java.util.Objects;
 import org.apache.kafka.common.TopicPartition;
 
 /**
- * The precise termination contract {@link BoundedKafkaConsumerRunner} runs to - "terminate when
- * consumer lag reaches zero" is unsound (new records can arrive while checking), so this captures
- * {@code endOffsets} exactly once, at run start, via a real {@code consumer.endOffsets(partitions)}
- * call - the run processes every record up to (not including) each partition's captured offset and
- * stops there, regardless of what arrives on the topic afterward (see the repo's own gap-bridging
- * plan for why this precise contract is needed - Kafka Streams' own DSL runtime has no equivalent,
- * which is why this is a plain consumer/producer poll loop, not a {@code KafkaStreams} topology).
+ * The precise termination contract {@link BoundedKafkaStreamsConsumerRunner} runs to - "terminate
+ * when consumer lag reaches zero" is unsound (new records can arrive while checking), so this
+ * captures {@code endOffsets} exactly once, at run start, via a real {@code
+ * consumer.endOffsets(partitions)} call - the run processes every record up to (not including) each
+ * partition's captured offset and stops there, regardless of what arrives on the topic afterward
+ * (see the repo's own gap-bridging plan for why this precise contract is needed - Kafka Streams'
+ * own DSL runtime has no equivalent, which is why this is a plain consumer/producer poll loop, not
+ * a {@code KafkaStreams} topology).
  */
 record InputFrontier(Map<TopicPartition, Long> endOffsets) {
 

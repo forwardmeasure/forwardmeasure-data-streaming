@@ -73,7 +73,7 @@ import org.junit.jupiter.api.Timeout;
  * real Kafka topic, the real {@code FieldMappingEngine}, and a real OpenSearch sink.
  *
  * <p>Unlike the Pekko sibling's trivial two-field spec, this uses the real {@link
- * WorldCheckFixtures#boundedKafkaSpec} - {@code BoundedKafkaConsumerRunner}'s only sink is
+ * WorldCheckFixtures#boundedKafkaSpec} - {@code BoundedKafkaStreamsConsumerRunner}'s only sink is
  * OpenSearch (no {@code file} option exists for the Kafka Streams engine, see that class's own
  * javadoc), and a Kafka-sourced spec is the one real, non-arbitrary trigger {@code
  * ExecutionPlanCompiler} has for resolving {@code KAFKA_STREAMS} in {@code BOUNDED} mode - so this
@@ -189,8 +189,8 @@ final class DirectIngestionLauncherKafkaStreamsRealImageIntegrationTest {
 
   /**
    * Real WorldCheck row wc-1 from {@link WorldCheckFixtures#SAMPLE_TSV}, encoded as the flat JSON
-   * object {@code BoundedKafkaConsumerRunner} decodes - keys are the identical real column names
-   * {@code worldcheck-to-opensearch-kafka.yaml}'s own {@code mapper.fields} reference.
+   * object {@code BoundedKafkaStreamsConsumerRunner} decodes - keys are the identical real column
+   * names {@code worldcheck-to-opensearch-kafka.yaml}'s own {@code mapper.fields} reference.
    */
   private static void seedOneRealWorldCheckRow(String bootstrapServers) {
     Map<String, Object> row = new LinkedHashMap<>();

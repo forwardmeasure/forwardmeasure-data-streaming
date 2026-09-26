@@ -19,46 +19,40 @@ package com.forwardmeasure.datastreaming.executor.kafkastreams;
 import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.ExecutionPlan;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
-import com.forwardmeasure.datastreaming.api.KafkaConnectorUri;
-import com.forwardmeasure.datastreaming.api.SourcePlan;
-import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.core.ExecutionPlanCompiler;
 import com.forwardmeasure.datastreaming.executor.streaming.CompletedExecutionHandle;
 import com.forwardmeasure.datastreaming.executor.streaming.DeliveryEngine;
 import com.forwardmeasure.datastreaming.executor.streaming.ExecutionHandle;
 import com.forwardmeasure.datastreaming.mappers.FieldMappingEngine;
-import com.forwardmeasure.datastreaming.mappers.OpenSearchSinkRowWriter;
 import com.forwardmeasure.datastreaming.mappers.SinkRowWriter;
-import com.forwardmeasure.datastreaming.mappers.SourceRow;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
-import org.apache.kafka.common.serialization.Serdes;
-import org.apache.kafka.streams.KafkaStreams;
-import org.apache.kafka.streams.StreamsBuilder;
-import org.apache.kafka.streams.StreamsConfig;
-import org.apache.kafka.streams.Topology;
-import org.apache.kafka.streams.kstream.Consumed;
-import org.apache.kafka.streams.kstream.KStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * The real Kafka Streams {@link DeliveryEngine} - collapses the old {@code
  * KafkaStreamsStageRunnerProvider} (continuous-only, topic-in/topic-out) into an engine that
- * branches on {@link ExecutionMode}: {@code CONTINUOUS} keeps the same real Kafka Streams topology
- * (same {@link FieldMappingEngine} mapping, {@code EXACTLY_ONCE_V2} default) but now terminates in
- * a real sink write via {@link SinkRowWriter}, not just another topic; {@code BOUNDED} is genuinely
- * new - a plain consumer/producer poll loop against a real {@link InputFrontier} (see {@link
- * BoundedKafkaConsumerRunner}), since the Kafka Streams DSL runtime itself has no "stop at these
- * offsets" concept.
+ * branches on {@link ExecutionMode} and delegates to one of two named, equally-discoverable runner
+ * classes (2026-09-25, mirroring {@code PekkoStreamsDeliveryEngine}'s own bounded/continuous
+ * split): {@link ContinuousKafkaStreamsConsumerRunner} keeps the same real Kafka Streams topology
+ * (same {@link FieldMappingEngine} mapping, {@code EXACTLY_ONCE_V2} default) terminating in a real
+ * sink write via {@link SinkRowWriter}; {@link BoundedKafkaStreamsConsumerRunner} is a plain
+ * consumer/producer poll loop against a real {@link InputFrontier}, since the Kafka Streams DSL
+ * runtime itself has no "stop at these offsets" concept.
  *
- * <p>Deliberately scoped to single-source, no-Spark-stage plans for now - matches every real
- * WorldCheck/State-Street spec (see the repo's own gap-bridging plan), and correlated/Spark-staged
- * dispatch through this engine is real future work, not silently unsupported.
+ * <p><b>Correlation</b>: both modes now support {@code sources.size() > 1} - {@code BOUNDED} via
+ * {@link BoundedKafkaStreamsCorrelationRunner} (2026-09-25), {@code CONTINUOUS} via {@link
+ * ContinuousKafkaStreamsCorrelationRunner} (same day, real native {@code KTable} outer joins, not a
+ * poll loop - see that class's own javadoc for the full mechanism and why it accommodates any
+ * number of sources, not just two). Both use the same real merge semantics {@code
+ * PekkoCorrelationEngine}/{@code SparkCorrelationEngine} already use.
+ *
+ * <p>Deliberately still scoped to no-Spark-stage plans - correlated/Spark-staged dispatch through
+ * this engine remains real future work, not silently unsupported.
  */
 public final class KafkaStreamsDeliveryEngine implements DeliveryEngine {
 
@@ -76,11 +70,6 @@ public final class KafkaStreamsDeliveryEngine implements DeliveryEngine {
   public ExecutionHandle execute(ExecutionPlan plan, ExecutionMode mode) {
     Objects.requireNonNull(plan, "plan");
     Objects.requireNonNull(mode, "mode");
-    if (plan.sources().size() != 1) {
-      throw new UnsupportedOperationException(
-          "KafkaStreamsDeliveryEngine: correlated plans (sources.size() > 1) are not dispatched"
-              + " here yet");
-    }
     if (plan.sparkStage().isPresent()) {
       throw new UnsupportedOperationException(
           "KafkaStreamsDeliveryEngine: a plan with a Spark compute stage is not dispatched here"
@@ -90,55 +79,21 @@ public final class KafkaStreamsDeliveryEngine implements DeliveryEngine {
   }
 
   private ExecutionHandle executeBounded(ExecutionPlan plan) {
-    SourcePlan source = plan.sources().get(0);
     String id = "fds-kafka-streams-bounded-" + UUID.randomUUID();
-    BoundedKafkaConsumerRunner.run(source, plan.destination(), plan.errors(), mapper);
+    if (plan.sources().size() == 1) {
+      BoundedKafkaStreamsConsumerRunner.run(
+          plan.sources().get(0), plan.destination(), plan.errors(), mapper);
+    } else {
+      BoundedKafkaStreamsCorrelationRunner.run(
+          plan.sources(), plan.blockingField(), plan.destination(), plan.errors(), mapper);
+    }
     return new CompletedExecutionHandle(id);
   }
 
   private ExecutionHandle executeContinuous(ExecutionPlan plan) {
-    SourcePlan source = plan.sources().get(0);
-    KafkaConnectorUri sourceUri = KafkaConnectorUri.parse(source.source().uri());
-    String applicationId = "fds-kafka-streams-" + UUID.randomUUID();
-
-    Topology topology = buildContinuousTopology(source.mapper(), sourceUri.topic(), plan);
-
-    Properties props = new Properties();
-    props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
-    props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, sourceUri.bootstrapServers());
-    props.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.EXACTLY_ONCE_V2);
-    streamsConfigOverrides.forEach(props::put);
-
-    KafkaStreams streams = new KafkaStreams(topology, props);
-    streams.start();
-    return new KafkaStreamsExecutionHandle(applicationId, streams);
-  }
-
-  private Topology buildContinuousTopology(
-      TransformSpec mapperSpec, String inputTopic, ExecutionPlan plan) {
-    StreamsBuilder builder = new StreamsBuilder();
-    StageRecordSerde recordSerde = new StageRecordSerde();
-
-    KStream<String, Map<String, Object>> input =
-        builder.stream(inputTopic, Consumed.with(Serdes.String(), recordSerde));
-
-    KStream<String, Map<String, Object>> mapped =
-        input.mapValues(record -> mapper.map(toSourceRow(record), mapperSpec));
-
-    // One SinkRowWriter per stream-thread partition group, not per record - KafkaStreams#foreach
-    // runs on the processing thread, so a single shared writer (real HTTP client, real per-call
-    // PUT) is safe the same way OpenSearchSinkRowWriter's own single-threaded-per-partition use is
-    // in BoundedKafkaConsumerRunner.
-    SinkRowWriter sinkRowWriter = new OpenSearchSinkRowWriter(plan.destination());
-    mapped.foreach((key, record) -> sinkRowWriter.write(record));
-    return builder.build();
-  }
-
-  private static SourceRow toSourceRow(Map<String, Object> record) {
-    return field -> {
-      Object value = record.get(field);
-      return value == null ? null : value.toString();
-    };
+    return plan.sources().size() == 1
+        ? new ContinuousKafkaStreamsConsumerRunner(streamsConfigOverrides).run(plan)
+        : new ContinuousKafkaStreamsCorrelationRunner(streamsConfigOverrides).run(plan);
   }
 
   /**

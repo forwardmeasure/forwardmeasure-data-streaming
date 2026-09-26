@@ -28,9 +28,9 @@ import com.forwardmeasure.datastreaming.core.IngestionPipeline;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline.MalformedRecordPolicy;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline.SinkFailurePolicy;
 import com.forwardmeasure.datastreaming.mappers.FieldMappingEngine;
+import com.forwardmeasure.datastreaming.mappers.MapSourceRow;
 import com.forwardmeasure.datastreaming.mappers.OpenSearchSinkRowWriter;
 import com.forwardmeasure.datastreaming.mappers.SinkRowWriter;
-import com.forwardmeasure.datastreaming.mappers.SourceRow;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
@@ -66,13 +66,14 @@ import org.slf4j.LoggerFactory;
  * successful write and its offset commit) never produces a duplicate or corrupt result. No Kafka
  * transactions needed for that reason - see {@link OpenSearchSinkRowWriter}'s own javadoc.
  */
-final class BoundedKafkaConsumerRunner {
+final class BoundedKafkaStreamsConsumerRunner {
 
-  private static final Logger LOGGER = LoggerFactory.getLogger(BoundedKafkaConsumerRunner.class);
+  private static final Logger LOGGER =
+      LoggerFactory.getLogger(BoundedKafkaStreamsConsumerRunner.class);
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final TypeReference<Map<String, Object>> RECORD_TYPE = new TypeReference<>() {};
 
-  private BoundedKafkaConsumerRunner() {}
+  private BoundedKafkaStreamsConsumerRunner() {}
 
   /** Summary of one bounded run - how many records were read, mapped, and written. */
   record Result(long recordsRead, long recordsWritten) {}
@@ -104,7 +105,7 @@ final class BoundedKafkaConsumerRunner {
 
       InputFrontier frontier = new InputFrontier(consumer.endOffsets(partitions));
       LOGGER.info(
-          "BoundedKafkaConsumerRunner: topic={} partitions={} frontier={}",
+          "BoundedKafkaStreamsConsumerRunner: topic={} partitions={} frontier={}",
           sourceUri.topic(),
           partitions.size(),
           frontier.endOffsets());
@@ -134,12 +135,25 @@ final class BoundedKafkaConsumerRunner {
       }
     }
     LOGGER.info(
-        "BoundedKafkaConsumerRunner: completed recordsRead={} recordsWritten={}",
+        "BoundedKafkaStreamsConsumerRunner: completed recordsRead={} recordsWritten={}",
         recordsRead,
         recordsWritten);
     return new Result(recordsRead, recordsWritten);
   }
 
+  /**
+   * Real, live-found bug fix (2026-09-25): this used to build its own {@link
+   * com.forwardmeasure.datastreaming.mappers.SourceRow} via a bare lambda (only the abstract {@code
+   * get} method), which silently defeats {@code raw: true} field rules - a lambda can't override
+   * {@code SourceRow#getRaw}'s own default method, so every raw-mode rule (all of them, for a
+   * Spark-staged plan's delivery-stage identity mapper - see {@code
+   * SparkHandoffSpecs#identityFieldRules}) fell back to {@code get}'s lossy {@code
+   * String.valueOf(...)}. Confirmed live: a real document written through this path had {@code
+   * names}/{@code locations}/{@code screening_hits} all arrive as Java {@code toString()} text
+   * ({@code "[{reference_uid=wc-1, ...}]"}) instead of real nested JSON. {@link MapSourceRow}
+   * already correctly overrides {@code getRaw} (see its own javadoc) - using it here instead of the
+   * ad-hoc lambda is the fix, not a new capability.
+   */
   private static Map<String, Object> mapOrHandle(
       String json,
       TransformSpec mapperSpec,
@@ -147,7 +161,7 @@ final class BoundedKafkaConsumerRunner {
       MalformedRecordPolicy policy) {
     try {
       Map<String, Object> raw = JSON.readValue(json, RECORD_TYPE);
-      return mapper.map(toSourceRow(raw), mapperSpec);
+      return mapper.map(new MapSourceRow(raw), mapperSpec);
     } catch (RuntimeException | JsonProcessingException failure) {
       return switch (policy) {
         case FAIL -> {
@@ -157,21 +171,15 @@ final class BoundedKafkaConsumerRunner {
           throw new IllegalArgumentException("Unable to parse or map record", failure);
         }
         case DEAD_LETTER -> {
-          LOGGER.error("BoundedKafkaConsumerRunner: record dead-lettered: {}", json, failure);
+          LOGGER.error(
+              "BoundedKafkaStreamsConsumerRunner: record dead-lettered: {}", json, failure);
           yield null;
         }
         case SKIP -> {
-          LOGGER.warn("BoundedKafkaConsumerRunner: record skipped: {}", json, failure);
+          LOGGER.warn("BoundedKafkaStreamsConsumerRunner: record skipped: {}", json, failure);
           yield null;
         }
       };
     }
-  }
-
-  private static SourceRow toSourceRow(Map<String, Object> record) {
-    return field -> {
-      Object value = record.get(field);
-      return value == null ? null : value.toString();
-    };
   }
 }

@@ -137,6 +137,132 @@ class PekkoStreamsDeliveryEngineIntegrationTest {
     }
   }
 
+  /**
+   * Real, live proof of the continuous correlation gap closed 2026-09-25 (see {@code
+   * PekkoStreamsDeliveryEngine}'s own javadoc, {@code ContinuousPekkoStreamsCorrelationRunner}'s
+   * own mechanism javadoc) - mirrors {@code KafkaStreamsDeliveryEngineIntegrationTest}'s own
+   * identical 3-source test exactly, for real, direct engine-parity proof: three sources ({@code
+   * core} trust 1.0/{@code name}, {@code detail} trust 0.5/{@code position}, {@code extra} trust
+   * 0.25/{@code department}), {@code K1} gets all three (real N=3 merge), {@code K2} deliberately
+   * skips the *middle* source ({@code detail}).
+   */
+  @Test
+  @Timeout(60)
+  void continuousModeCorrelatesThreeSourcesAndMergesByTrustWeight(
+      KafkaTestContainer kafka, OpenSearchTestContainer opensearch) throws Exception {
+    String coreTopic = "fds-pekko-cont-correlation-core-" + UUID.randomUUID();
+    String detailTopic = "fds-pekko-cont-correlation-detail-" + UUID.randomUUID();
+    String extraTopic = "fds-pekko-cont-correlation-extra-" + UUID.randomUUID();
+    String index = "fds-pekko-cont-correlation-index";
+    createTopic(kafka, coreTopic);
+    createTopic(kafka, detailTopic);
+    createTopic(kafka, extraTopic);
+
+    ExecutionPlan plan =
+        new ExecutionPlan(
+            new com.forwardmeasure.datastreaming.api.ExecutionProfile(
+                com.forwardmeasure.datastreaming.api.SourceCardinality.CORRELATED,
+                ExecutionMode.CONTINUOUS,
+                com.forwardmeasure.datastreaming.api.DeliveryEngineKind.PEKKO_STREAMS),
+            List.of(
+                correlatedSource("core", kafka, coreTopic, "name", "name", 1.0),
+                correlatedSource("detail", kafka, detailTopic, "position", "role", 0.5),
+                correlatedSource("extra", kafka, extraTopic, "department", "dept", 0.25)),
+            "uid",
+            java.util.Optional.empty(),
+            null,
+            openSearchSink(opensearch, index),
+            new DeliverySemantics(true, new ConcurrencySpec(1, null), null),
+            null);
+
+    PekkoStreamsDeliveryEngine engine = new PekkoStreamsDeliveryEngine(system);
+    ExecutionHandle handle = engine.execute(plan, ExecutionMode.CONTINUOUS);
+    try {
+      assertTrue(handle.isRunning());
+
+      produce(kafka, coreTopic, "K1", Map.of("uid", "K1", "name", "Iris Ito"));
+      produce(kafka, detailTopic, "K1", Map.of("uid", "K1", "role", "Director"));
+      produce(kafka, extraTopic, "K1", Map.of("uid", "K1", "dept", "Engineering"));
+
+      produce(kafka, coreTopic, "K2", Map.of("uid", "K2", "name", "Jae Kim"));
+      produce(kafka, extraTopic, "K2", Map.of("uid", "K2", "dept", "Sales"));
+
+      JsonNode k1 =
+          awaitDocumentWithFields(
+              opensearch, index, "K1", Duration.ofSeconds(30), "name", "position", "department");
+      assertEquals("Iris Ito", k1.path("_source").path("name").asText(), () -> "full doc: " + k1);
+      assertEquals("Director", k1.path("_source").path("position").asText());
+      assertEquals("Engineering", k1.path("_source").path("department").asText());
+
+      JsonNode k2 =
+          awaitDocumentWithFields(
+              opensearch, index, "K2", Duration.ofSeconds(30), "name", "department");
+      assertEquals("Jae Kim", k2.path("_source").path("name").asText(), () -> "full doc: " + k2);
+      assertEquals("Sales", k2.path("_source").path("department").asText());
+      assertTrue(
+          k2.path("_source").path("position").isMissingNode(),
+          "K2 has no detail-source counterpart - must not have a position field at all: " + k2);
+    } finally {
+      handle.stop();
+    }
+  }
+
+  private static SourcePlan correlatedSource(
+      String sourceKey,
+      KafkaTestContainer kafka,
+      String topic,
+      String targetField,
+      String rawField,
+      double trustWeight) {
+    return new SourcePlan(
+        sourceKey,
+        new SourceSpec(
+            "kafka",
+            "kafka:"
+                + topic
+                + "?brokers="
+                + kafka.bootstrapServers()
+                + "&autoOffsetReset=earliest&groupId=fds-pekko-cont-correlation-test-"
+                + UUID.randomUUID(),
+            null,
+            null),
+        new TransformSpec(
+            "party",
+            List.of(
+                new TransformSpec.FieldRule("uid", "uid", null, null, null, null, null),
+                new TransformSpec.FieldRule(targetField, rawField, null, null, null, null, null))),
+        trustWeight);
+  }
+
+  private static JsonNode awaitDocumentWithFields(
+      OpenSearchTestContainer opensearch,
+      String index,
+      String id,
+      Duration timeout,
+      String... fields)
+      throws Exception {
+    Instant deadline = Instant.now().plus(timeout);
+    while (Instant.now().isBefore(deadline)) {
+      HttpResponse<String> response = getDocument(opensearch, index, id);
+      if (response.statusCode() == 200) {
+        JsonNode node = JSON.readTree(response.body());
+        boolean allPresent = true;
+        for (String field : fields) {
+          if (node.path("_source").path(field).isMissingNode()) {
+            allPresent = false;
+            break;
+          }
+        }
+        if (allPresent) {
+          return node;
+        }
+      }
+      Thread.sleep(200);
+    }
+    throw new AssertionError(
+        "document '" + id + "' never reported all of " + java.util.Arrays.toString(fields));
+  }
+
   private static ExecutionPlan plan(
       KafkaTestContainer kafka,
       String topic,

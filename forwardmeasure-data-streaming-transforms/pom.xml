@@ -6,7 +6,7 @@
   <name>ForwardMeasure Data Streaming Transforms</name>
   <description>The GENERIC named-transform function pool only (date/string/number formatting,
     country-code resolution, and similarly domain-agnostic utilities) - deliberately not a home for
-    any one consumer's domain-specific transforms (e.g. WorldCheck- or State-Street-specific parsing
+    any one consumer's domain-specific transforms (e.g. WorldCheck- or Customer-Master-specific parsing
     stays downstream, in whichever service onboards that source). Plain static methods, registered
     into a flat runtime NamedTransformRegistry (fei's own NamedTransform/NamedTransformRegistry design,
     reused as-is) and dispatched by name from a mapper.fields[] spec - not MapStruct-qualified, and not
@@ -22,10 +22,19 @@
   <dependencies>
     <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId></dependency>
     <!-- NamedTransformFunctions.java (LocaleDisplayNames/ULocale), ported from fei's own class of
-         the same name, which depends on this same artifact. No BOM here pins it yet, so the
-         version is declared directly - matches data-fabric's own real pin
-         (data-fabric/pom.xml's com.ibm.icu.version property) exactly, not chosen independently. -->
-    <dependency><groupId>com.ibm.icu</groupId><artifactId>icu4j</artifactId><version>78.3</version></dependency>
+         the same name, which depends on this same artifact. Version managed centrally in
+         forwardmeasure-platform's own dependencyManagement (icu4j.version) - added there 2026-09-25
+         when this was found still hardcoding it directly, contrary to this org's own version-
+         management discipline. -->
+    <dependency><groupId>com.ibm.icu</groupId><artifactId>icu4j</artifactId></dependency>
+    <!-- screen_against_worldcheck_reference's real entity-scoring engine - the same
+         production-validated matcher entity-intelligence-resolution uses for recall/matching, not a
+         hand-rolled comparison. Version managed centrally in forwardmeasure-platform's own
+         dependencyManagement (forwardmeasure-entity-matching.version). -->
+    <dependency>
+      <groupId>com.forwardmeasure.entitymatching</groupId>
+      <artifactId>forwardmeasure-entity-matching-core</artifactId>
+    </dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
   </dependencies>
 </project>

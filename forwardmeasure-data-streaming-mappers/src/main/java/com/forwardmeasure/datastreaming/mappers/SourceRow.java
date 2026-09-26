@@ -28,4 +28,23 @@ public interface SourceRow {
 
   /** The raw string value of {@code fieldName}, or {@code null} if absent/blank. */
   String get(String fieldName);
+
+  /**
+   * The field's real, unstringified value - {@code null}/absent if the field is missing, otherwise
+   * whatever object is actually stored there. Added 2026-09-25 for a genuinely different real need
+   * than {@link #get}: a source whose rows already carry a structured (non-scalar) value for some
+   * field - a {@code List<Map<String,Object>>}, e.g. an already-mapped {@code names}/{@code
+   * identifiers}/{@code locations} value read back off a Kafka topic a Spark stage wrote to (see
+   * {@code TransformSpec.FieldRule#raw()}'s own javadoc) - has no way to get that value back out
+   * through {@link #get} without lossy, incorrect {@code String.valueOf(...)} stringification.
+   *
+   * <p>Defaults to {@link #get} unchanged for every row implementation that never needs this (CSV
+   * rows, a plain Spark {@code Row}'s own scalar columns) - only a source that genuinely can hold
+   * structured values (today: {@link MapSourceRow}, JSON-shaped) overrides it. Not a replacement
+   * for {@link #get}; a separate, narrower escape hatch a {@code raw: true} {@code FieldRule} opts
+   * into explicitly.
+   */
+  default Object getRaw(String fieldName) {
+    return get(fieldName);
+  }
 }

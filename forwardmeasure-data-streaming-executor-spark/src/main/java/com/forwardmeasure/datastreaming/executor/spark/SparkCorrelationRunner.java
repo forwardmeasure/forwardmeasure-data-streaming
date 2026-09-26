@@ -95,7 +95,10 @@ public final class SparkCorrelationRunner {
   public static void main(String[] args) throws Exception {
     String specPath = args.length > 0 ? args[0] : requiredEnv("CORRELATION_SPEC_PATH");
     IngestionSpec spec = IngestionSpec.load(Path.of(specPath));
-    ExecutionPlan plan = ExecutionPlanCompiler.compile(spec);
+    // See SparkIngestionRunner#withHandoffTopicOverride's own javadoc for the real bug this
+    // guards against - the identical fix applies here.
+    ExecutionPlan plan =
+        SparkIngestionRunner.withHandoffTopicOverride(ExecutionPlanCompiler.compile(spec));
     String kafkaBootstrapServers = SparkIngestionRunner.kafkaBootstrapServersFromEnv();
 
     SparkSession spark =

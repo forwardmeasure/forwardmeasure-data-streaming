@@ -220,7 +220,10 @@ class WorkflowContinuousMatrixQuarkusKafkaStreamsSmokeTest {
           Map.entry("datastreaming.launcher.pekko.image", IMAGE),
           Map.entry("datastreaming.launcher.pekko.command", "true #"),
           Map.entry("datastreaming.launcher.kafka-streams.image", IMAGE),
-          Map.entry("datastreaming.launcher.kafka-streams.command", "true #"));
+          Map.entry("datastreaming.launcher.kafka-streams.command", "true #"),
+          Map.entry("datastreaming.launcher.spark.image", "unused"),
+          Map.entry("datastreaming.launcher.spark.command", "unused"),
+          Map.entry("datastreaming.launcher.kafka.bootstrap-servers", "unused"));
     }
 
     @Override

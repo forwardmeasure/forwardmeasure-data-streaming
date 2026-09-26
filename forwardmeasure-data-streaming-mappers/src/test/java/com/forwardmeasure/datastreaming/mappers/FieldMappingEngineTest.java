@@ -220,4 +220,36 @@ class FieldMappingEngineTest {
 
     assertTrue(mapped.isEmpty());
   }
+
+  /**
+   * The real case {@code raw} exists for (2026-09-25): a Spark-handoff Kafka row whose {@code
+   * names} field is already a fully-mapped {@code List<Map<String,Object>>}, not a scalar string -
+   * {@link MapSourceRow#get} would mangle it via {@code String.valueOf(...)}; {@code raw: true}
+   * reads it via {@link SourceRow#getRaw} untouched.
+   */
+  @Test
+  void rawFieldRulePassesAStructuredValueThroughUntouchedNoTransform() {
+    TransformSpec spec =
+        new TransformSpec(
+            "schema://party/2.0",
+            List.of(new FieldRule("names", "names", null, null, null, null, null, Map.of(), true)));
+    List<Map<String, Object>> alreadyMappedNames =
+        List.of(Map.of("value", "Steven DOSHAY", "name_type", "PRIMARY"));
+    SourceRow row = new MapSourceRow(Map.of("names", alreadyMappedNames));
+
+    Map<String, Object> mapped = engine.map(row, spec);
+
+    assertEquals(alreadyMappedNames, mapped.get("names"));
+  }
+
+  @Test
+  void rawFieldRuleWithoutSourceThrows() {
+    TransformSpec spec =
+        new TransformSpec(
+            "schema://party/2.0",
+            List.of(new FieldRule("names", null, null, null, null, null, null, Map.of(), true)));
+
+    org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalArgumentException.class, () -> engine.map(rowOf(Map.of()), spec));
+  }
 }

@@ -16,6 +16,11 @@
  */
 package com.forwardmeasure.datastreaming.transforms;
 
+import com.forwardmeasure.entitymatching.EntityEvidence;
+import com.forwardmeasure.entitymatching.EntityKind;
+import com.forwardmeasure.entitymatching.EntityMatchResult;
+import com.forwardmeasure.entitymatching.EntityMatcher;
+import com.forwardmeasure.entitymatching.MatchRequest;
 import com.ibm.icu.text.LocaleDisplayNames;
 import com.ibm.icu.util.ULocale;
 import java.time.LocalDate;
@@ -615,9 +620,9 @@ public final class NamedTransformFunctions {
    * locations.properties} are {@code country_code}/{@code country_name}/{@code
    * state_or_province}/{@code location_type} - confirmed as the org's real, consistent convention
    * against {@code resolved-entity-opensearch-indexing-spec.json} and {@code
-   * mapping-state-street-customer-master.yaml} too, not this one spec's own quirk), a camelCase key
-   * would be rejected outright rather than silently dropped. This function's output keys are
-   * snake_case for exactly that reason - the parsing/matching logic itself is unchanged.
+   * mapping-test-customer-master-customer-master.yaml} too, not this one spec's own quirk), a
+   * camelCase key would be rejected outright rather than silently dropped. This function's output
+   * keys are snake_case for exactly that reason - the parsing/matching logic itself is unchanged.
    */
   public static List<Map<String, Object>> parse_tilde_delimited_locations(String raw) {
     List<Map<String, Object>> result = new ArrayList<>();
@@ -654,5 +659,311 @@ public final class NamedTransformFunctions {
       result.add(location);
     }
     return result;
+  }
+
+  /**
+   * Classifies a Customer Master customer-master row's own {@code ENTITYS_TYPE} value into the
+   * shared person/organization party-kind taxonomy (see {@link #classify_party_kind}'s own javadoc
+   * for that taxonomy's cross-provider reasoning). Genuinely Customer-Master-specific, unlike
+   * {@code classify_party_kind}/{@code classify_party_category}: {@code ENTITYS_TYPE}'s own literal
+   * values ({@code "Mutual Fund"}, {@code "Hedge Fund & Private Equity"}, {@code "Trust (Corp &
+   * Ind)"}, ...) are this source's own KYC entity-type vocabulary, not a shared cross-provider
+   * convention - the real distinct values (confirmed against the real POV data, not the schema
+   * doc's own incomplete comment) are exactly one person-shaped value ({@code "Individual"}) plus a
+   * fixed set of organization-shaped ones. No Customer Master customer-master row is a {@code
+   * physical_asset}.
+   */
+  public static String classify_party_kind_test_customer_master(Map<String, String> inputs) {
+    String entityType = inputs.get("value");
+    if (isBlank(entityType)) {
+      return "unknown";
+    }
+    return "individual".equalsIgnoreCase(entityType.trim()) ? "person" : "organization";
+  }
+
+  /**
+   * Combines a Customer Master customer-master row's own 3 structured location blocks ({@code
+   * address_line_1}/{@code _2}, {@code city}, {@code state_or_province}, {@code country} per
+   * position, keyed {@code <field>_1}/{@code _2}/{@code _3}) into the real target {@code locations}
+   * nested shape ({@code address}/{@code city}/{@code state_or_province}/{@code country_code}/
+   * {@code country_name}/{@code location_type}) in one call. Unlike {@link
+   * #parse_tilde_delimited_locations}, Customer Master's own source already has structured location
+   * columns rather than one free-text field to parse, so this transform's own job is assembly, not
+   * parsing. Location 1/2/3 map to {@code REGISTERED}/{@code MAILING}/{@code OTHER} respectively,
+   * mirroring {@code entity-intelligence-specifications}' own {@code
+   * mapping-test-customer-master-customer-master.yaml}. A position whose own 5 source columns are
+   * all blank contributes no element (not an all-null placeholder object).
+   */
+  public static List<Map<String, Object>> build_test_customer_master_locations(
+      Map<String, String> inputs) {
+    List<Map<String, Object>> result = new ArrayList<>();
+    addTestCustomerMasterLocationIfPresent(result, inputs, 1, "REGISTERED");
+    addTestCustomerMasterLocationIfPresent(result, inputs, 2, "MAILING");
+    addTestCustomerMasterLocationIfPresent(result, inputs, 3, "OTHER");
+    return result;
+  }
+
+  private static void addTestCustomerMasterLocationIfPresent(
+      List<Map<String, Object>> result,
+      Map<String, String> inputs,
+      int position,
+      String locationType) {
+    String addressLine1 = inputs.get("address_line_1_" + position);
+    String addressLine2 = inputs.get("address_line_2_" + position);
+    String city = inputs.get("city_" + position);
+    String stateOrProvince = inputs.get("state_or_province_" + position);
+    String country = inputs.get("country_" + position);
+    if (isBlank(addressLine1)
+        && isBlank(addressLine2)
+        && isBlank(city)
+        && isBlank(stateOrProvince)
+        && isBlank(country)) {
+      return;
+    }
+    String address =
+        java.util.stream.Stream.of(addressLine1, addressLine2)
+            .filter(part -> !isBlank(part))
+            .collect(java.util.stream.Collectors.joining(", "));
+    Map<String, Object> location = new LinkedHashMap<>();
+    location.put("address", address.isBlank() ? null : address);
+    location.put("city", isBlank(city) ? null : city);
+    location.put("state_or_province", isBlank(stateOrProvince) ? null : stateOrProvince);
+    location.put("country_name", isBlank(country) ? null : country);
+    location.put("country_code", resolve_iso2_country(country));
+    location.put("location_type", locationType);
+    result.add(location);
+  }
+
+  /**
+   * Combines Customer Master's own 3 identifier sources - {@code business_entity_record_id} (fixed
+   * scheme {@code TEST_CUSTOMER_MASTER_BUSINESS_ENTITY_RECORD_ID}), {@code gems_id} (fixed scheme
+   * {@code TEST_CUSTOMER_MASTER_KYC_ID}), and {@code entity_public_identifier} (semicolon-separated
+   * {@code {SCHEME}value} pairs, parsed via {@link #parse_identifier_pairs}) - into one target
+   * {@code identifiers} list in a single call. Needed because {@code FieldMappingEngine}'s own
+   * {@code repeated}+{@code metadata} accumulation (see its own javadoc) only composes several
+   * single-valued rules that all share one fixed per-rule tag; it has no way to also merge in a
+   * rule whose own transform already returns a fully-formed, variably-tagged list (each {@link
+   * #parse_identifier_pairs} result carries its own scheme, not a fixed one) onto the same target
+   * without either silently overwriting or double-wrapping it - so this one call produces the whole
+   * list directly instead, the same "one rule returns the whole target list" shape {@link
+   * #parse_tilde_delimited_locations}/{@link #build_test_customer_master_locations} already use.
+   */
+  public static List<Map<String, Object>> build_test_customer_master_identifiers(
+      Map<String, String> inputs) {
+    List<Map<String, Object>> result = new ArrayList<>();
+    String businessEntityRecordId = inputs.get("business_entity_record_id");
+    if (!isBlank(businessEntityRecordId)) {
+      result.add(
+          customerMasterIdentifier(
+              "TEST_CUSTOMER_MASTER_BUSINESS_ENTITY_RECORD_ID", businessEntityRecordId, null));
+    }
+    String gemsId = inputs.get("gems_id");
+    if (!isBlank(gemsId)) {
+      result.add(customerMasterIdentifier("TEST_CUSTOMER_MASTER_KYC_ID", gemsId, null));
+    }
+    for (ParsedIdentifier parsed : parse_identifier_pairs(inputs.get("entity_public_identifier"))) {
+      result.add(customerMasterIdentifier(parsed.scheme(), parsed.valueRaw(), parsed.valueNorm()));
+    }
+    return result;
+  }
+
+  private static Map<String, Object> customerMasterIdentifier(
+      String scheme, String value, String valueNorm) {
+    Map<String, Object> identifier = new LinkedHashMap<>();
+    identifier.put("scheme", scheme);
+    identifier.put("value", value);
+    if (valueNorm != null) {
+      identifier.put("value_norm", valueNorm);
+    }
+    return identifier;
+  }
+
+  /**
+   * Joins several optional, labeled source values into one free-text string, skipping any that are
+   * blank, in the order {@code inputs} itself declares (preserving {@code
+   * TransformSpec.FieldRule}'s own YAML {@code inputs:} key order) - e.g. {@code "Occupation:
+   * Banker | Classification: Customer"}. Generic multi-labeled-field concatenation, not tied to any
+   * one source; each {@code inputs} key is used verbatim as the label. Distinct from {@code
+   * template} (also available on {@code FieldRule}) because {@code template} resolves to null if
+   * ANY one placeholder is blank - the right behavior for a single combined value like a name,
+   * wrong for a "keep whichever of several optional fields happen to be populated" free-text
+   * summary, which this exists for - needed by Customer Master's own {@code further_information} (7
+   * optional business-relationship fields, legacy-mapped with a template that assumes partial
+   * fill), not itself Customer-Master-specific.
+   */
+  public static String join_labeled_fields(Map<String, String> inputs) {
+    StringBuilder joined = new StringBuilder();
+    for (Map.Entry<String, String> entry : inputs.entrySet()) {
+      if (isBlank(entry.getValue())) {
+        continue;
+      }
+      if (!joined.isEmpty()) {
+        joined.append(" | ");
+      }
+      joined.append(entry.getKey()).append(": ").append(entry.getValue());
+    }
+    return joined.isEmpty() ? null : joined.toString();
+  }
+
+  private static final EntityMatcher WORLDCHECK_ENTITY_MATCHER = new EntityMatcher();
+
+  /**
+   * The real sanctions/PEP screening step every onboarded Customer Master customer row goes through
+   * in this org's actual business use case: score the row's own name(s) against a WorldCheck-shaped
+   * reference population using {@code forwardmeasure-entity-matching-core}'s real,
+   * production-validated {@link EntityMatcher} - the same scorer {@code
+   * entity-intelligence-resolution} uses for real recall/matching, not a hand-rolled comparison
+   * built for this transform alone.
+   *
+   * <p>Genuinely {@code HEAVY}, not just labeled that way: every candidate row must be compared
+   * against every reference entity (a real broadcast-join shape - the reference population is the
+   * "small" side, the ingested dataset the "large" side), and each comparison itself runs {@link
+   * EntityMatcher}'s own real fuzzy name/date/geography/identifier scoring, not a cheap equality
+   * check. At this fixture's own reference-population size that cost is trivial; at a real
+   * WorldCheck population's real size (tens to hundreds of thousands of entities) it is exactly the
+   * kind of bulk, CPU-bound, per-row-times-reference-population work {@code
+   * TransformCharacteristics.ExecutionCost#HEAVY}'s own javadoc describes - the mechanism's shape
+   * is what earns the classification, not this particular reference list's row count (matching how
+   * {@code WorldCheckFixtures}/{@code TestCustomerMasterFixtures} throughout this codebase are
+   * already small, deterministic stand-ins for a much larger real dataset).
+   *
+   * <p>{@code WORLDCHECK_REFERENCE_POPULATION} below is a real, structurally-faithful stand-in, not
+   * a placeholder in the "TODO, fill in later" sense: fictional names/geographies in the exact
+   * WorldCheck row shape, deliberately reusing this repo's own already-reviewed fictional fixture
+   * identities (Jos&#233; Smith, Petr Ivanov, Acme Holdings, MV Example Star - see {@code
+   * WorldCheckFixtures#SAMPLE_TSV} in {@code forwardmeasure-data-streaming-test-fixtures}) rather
+   * than inventing new ones or naming any real sanctioned individual/entity in source code. A real
+   * deployment replaces this static list with a real, bulk-loaded WorldCheck population read inside
+   * the Spark stage this transform's own {@code HEAVY} classification triggers - that data-sourcing
+   * question is deliberately out of scope here; this transform's job is proving the real scoring
+   * mechanism and the real dispatch path it requires, not sourcing production reference data.
+   *
+   * @param inputs {@code full_name}/{@code first_name}/{@code last_name}/{@code alias} (subject
+   *     name candidates - at least one non-blank value required), {@code entity_type} ({@code
+   *     "Individual"} maps to {@link EntityKind#PERSON}, anything else non-blank to {@link
+   *     EntityKind#ORGANIZATION}, blank to {@link EntityKind#UNKNOWN} - same rule as {@link
+   *     #classify_party_kind_test_customer_master}), {@code country}/{@code nationality} (ISO
+   *     country names, geography evidence), {@code dob} ({@code yyyyMMdd}, parsed via {@link
+   *     #parse_yyyymmdd}).
+   * @return one entry per reference entity {@link EntityMatcher} judged a real match ({@code
+   *     reference_uid}/{@code matched_subject_name}/{@code matched_reference_name}/{@code
+   *     composite_score}/{@code decision_rule}) - empty (never null) when no name candidate is
+   *     usable or nothing matched.
+   */
+  public static List<Map<String, Object>> screen_against_worldcheck_reference(
+      Map<String, String> inputs) {
+    EntityEvidence subject = subjectEvidenceFor(inputs);
+    if (subject.names().isEmpty()) {
+      return List.of();
+    }
+    List<Map<String, Object>> hits = new ArrayList<>();
+    for (ReferenceEntity reference : WORLDCHECK_REFERENCE_POPULATION) {
+      EntityMatchResult result =
+          WORLDCHECK_ENTITY_MATCHER.match(
+              new MatchRequest(subject, reference.evidence(), null, null));
+      if (result.matched()) {
+        Map<String, Object> hit = new LinkedHashMap<>();
+        hit.put("reference_uid", reference.uid());
+        hit.put("matched_subject_name", result.matchedSubjectName());
+        hit.put("matched_reference_name", result.matchedReferenceName());
+        hit.put("composite_score", result.compositeScore());
+        hit.put("decision_rule", result.decisionRule());
+        hits.add(hit);
+      }
+    }
+    return hits;
+  }
+
+  private static EntityEvidence subjectEvidenceFor(Map<String, String> inputs) {
+    List<String> names = new ArrayList<>();
+    addIfPresent(names, inputs.get("full_name"));
+    String combinedGivenFamily =
+        java.util.stream.Stream.of(inputs.get("first_name"), inputs.get("last_name"))
+            .filter(part -> !isBlank(part))
+            .collect(java.util.stream.Collectors.joining(" "));
+    addIfPresent(names, combinedGivenFamily.isBlank() ? null : combinedGivenFamily);
+    addIfPresent(names, inputs.get("alias"));
+
+    String entityType = inputs.get("entity_type");
+    EntityKind entityKind =
+        isBlank(entityType)
+            ? EntityKind.UNKNOWN
+            : "individual".equalsIgnoreCase(entityType.trim())
+                ? EntityKind.PERSON
+                : EntityKind.ORGANIZATION;
+
+    List<LocalDate> dates = new ArrayList<>();
+    String isoDob = parse_yyyymmdd(inputs.get("dob"));
+    if (isoDob != null) {
+      dates.add(LocalDate.parse(isoDob));
+    }
+
+    List<String> countries = new ArrayList<>();
+    addIfPresent(countries, inputs.get("country"));
+    List<String> nationalities = new ArrayList<>();
+    addIfPresent(nationalities, inputs.get("nationality"));
+
+    return new EntityEvidence(
+        entityKind, names, dates, nationalities, countries, List.of(), List.of());
+  }
+
+  private static void addIfPresent(List<String> values, String value) {
+    if (!isBlank(value)) {
+      values.add(value.trim());
+    }
+  }
+
+  private record ReferenceEntity(String uid, EntityEvidence evidence) {}
+
+  /**
+   * A real, structurally-faithful WorldCheck-shaped reference population stand-in - see {@link
+   * #screen_against_worldcheck_reference}'s own javadoc for why these specific fictional identities
+   * were reused rather than invented fresh or drawn from any real sanctioned individual/entity.
+   */
+  private static final List<ReferenceEntity> WORLDCHECK_REFERENCE_POPULATION =
+      List.of(
+          new ReferenceEntity(
+              "wc-1",
+              new EntityEvidence(
+                  EntityKind.PERSON,
+                  List.of("José Smith", "Johnny Smith", "J. Smith"),
+                  List.of(LocalDate.of(1975, 3, 15)),
+                  List.of(),
+                  List.of("UNITED STATES", "RUSSIA"),
+                  List.of(),
+                  List.of())),
+          new ReferenceEntity(
+              "wc-2",
+              new EntityEvidence(
+                  EntityKind.PERSON,
+                  List.of("Petr Ivanov"),
+                  List.of(LocalDate.of(1982, 7, 22)),
+                  List.of(),
+                  List.of("RUSSIA"),
+                  List.of(),
+                  List.of())),
+          new ReferenceEntity(
+              "wc-3",
+              new EntityEvidence(
+                  EntityKind.ORGANIZATION,
+                  List.of("Acme Holdings"),
+                  List.of(),
+                  List.of(),
+                  List.of("UNITED KINGDOM"),
+                  List.of(),
+                  List.of())),
+          new ReferenceEntity(
+              "wc-4",
+              new EntityEvidence(
+                  EntityKind.UNKNOWN,
+                  List.of("MV Example Star"),
+                  List.of(),
+                  List.of(),
+                  List.of("IRAN"),
+                  List.of(),
+                  List.of())));
+
+  private static boolean isBlank(String value) {
+    return value == null || value.isBlank();
   }
 }

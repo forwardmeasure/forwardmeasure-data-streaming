@@ -224,4 +224,143 @@ class NamedTransformFunctionsTest {
     assertEquals(List.of(), NamedTransformFunctions.parse_tilde_delimited_locations(null));
     assertEquals(List.of(), NamedTransformFunctions.parse_tilde_delimited_locations(""));
   }
+
+  @Test
+  void classifyPartyKindTestCustomerMaster() {
+    assertEquals(
+        "person",
+        NamedTransformFunctions.classify_party_kind_test_customer_master(
+            Map.of("value", "Individual")));
+    assertEquals(
+        "person",
+        NamedTransformFunctions.classify_party_kind_test_customer_master(
+            Map.of("value", "individual")));
+    assertEquals(
+        "organization",
+        NamedTransformFunctions.classify_party_kind_test_customer_master(
+            Map.of("value", "Mutual Fund")));
+    assertEquals(
+        "organization",
+        NamedTransformFunctions.classify_party_kind_test_customer_master(
+            Map.of("value", "Trust (Corp & Ind)")));
+    assertEquals(
+        "unknown", NamedTransformFunctions.classify_party_kind_test_customer_master(Map.of()));
+  }
+
+  @Test
+  void buildTestCustomerMasterLocations() {
+    Map<String, String> inputs = new java.util.HashMap<>();
+    inputs.put("address_line_1_1", "440 West Nyack Road");
+    inputs.put("city_1", "West Nyack Road");
+    inputs.put("country_1", "United States (the)");
+    inputs.put("address_line_1_2", "2 Church Street");
+    inputs.put("address_line_2_2", "Clarendon House");
+    inputs.put("city_2", "Hamilton");
+    inputs.put("country_2", "Bermuda");
+    // Location 3 fully blank - contributes nothing.
+
+    List<Map<String, Object>> locations =
+        NamedTransformFunctions.build_test_customer_master_locations(inputs);
+    assertEquals(2, locations.size());
+
+    Map<String, Object> registered = locations.get(0);
+    assertEquals("440 West Nyack Road", registered.get("address"));
+    assertEquals("West Nyack Road", registered.get("city"));
+    assertEquals("United States (the)", registered.get("country_name"));
+    assertEquals("REGISTERED", registered.get("location_type"));
+
+    Map<String, Object> mailing = locations.get(1);
+    assertEquals("2 Church Street, Clarendon House", mailing.get("address"));
+    assertEquals("Hamilton", mailing.get("city"));
+    assertEquals("MAILING", mailing.get("location_type"));
+
+    assertEquals(List.of(), NamedTransformFunctions.build_test_customer_master_locations(Map.of()));
+  }
+
+  @Test
+  void buildTestCustomerMasterIdentifiers() {
+    List<Map<String, Object>> identifiers =
+        NamedTransformFunctions.build_test_customer_master_identifiers(
+            Map.of(
+                "business_entity_record_id",
+                "0134e358-9af0-4150-a210-90761b91143e",
+                "gems_id",
+                "202238556",
+                "entity_public_identifier",
+                "{LEI}549300Y4ZFSCU6XVGF08"));
+
+    assertEquals(3, identifiers.size());
+    assertEquals(
+        "TEST_CUSTOMER_MASTER_BUSINESS_ENTITY_RECORD_ID", identifiers.get(0).get("scheme"));
+    assertEquals("0134e358-9af0-4150-a210-90761b91143e", identifiers.get(0).get("value"));
+    assertEquals("TEST_CUSTOMER_MASTER_KYC_ID", identifiers.get(1).get("scheme"));
+    assertEquals("202238556", identifiers.get(1).get("value"));
+    assertEquals("LEI", identifiers.get(2).get("scheme"));
+    assertEquals("549300Y4ZFSCU6XVGF08", identifiers.get(2).get("value"));
+
+    assertEquals(
+        List.of(), NamedTransformFunctions.build_test_customer_master_identifiers(Map.of()));
+  }
+
+  @Test
+  void joinLabeledFields() {
+    Map<String, String> inputs = new java.util.LinkedHashMap<>();
+    inputs.put("Occupation", "");
+    inputs.put("Classification", "Customer (Contracting Party)");
+    inputs.put("Primary BU", null);
+    inputs.put("Servicing", "Customer Master Bank and Trust Company");
+
+    assertEquals(
+        "Classification: Customer (Contracting Party) | Servicing: Customer Master Bank and Trust"
+            + " Company",
+        NamedTransformFunctions.join_labeled_fields(inputs));
+
+    Map<String, String> allBlank = new java.util.LinkedHashMap<>();
+    allBlank.put("Occupation", "");
+    allBlank.put("Classification", null);
+    assertNull(NamedTransformFunctions.join_labeled_fields(allBlank));
+  }
+
+  /**
+   * A real match against the fixture reference population, via the real {@code EntityMatcher} - not
+   * a hand-rolled string comparison. Same name, matching nationality, exact date of birth against
+   * wc-1 ("José Smith", 1975-03-15, US/RUSSIA) - a composite score high enough to clear the
+   * matcher's own default precision gate.
+   */
+  @Test
+  void screenAgainstWorldcheckReferenceFindsARealMatch() {
+    Map<String, String> inputs =
+        Map.of(
+            "full_name", "Jose Smith",
+            "entity_type", "Individual",
+            "country", "RUSSIA",
+            "dob", "19750315");
+
+    List<Map<String, Object>> hits =
+        NamedTransformFunctions.screen_against_worldcheck_reference(inputs);
+
+    assertEquals(1, hits.size());
+    assertEquals("wc-1", hits.get(0).get("reference_uid"));
+    assertTrue((double) hits.get(0).get("composite_score") > 0.0);
+    assertEquals("Jose Smith", hits.get(0).get("matched_subject_name"));
+  }
+
+  @Test
+  void screenAgainstWorldcheckReferenceFindsNoMatchForAnUnrelatedName() {
+    Map<String, String> inputs =
+        Map.of(
+            "full_name", "Completely Unrelated Person",
+            "entity_type", "Individual",
+            "country", "JAPAN");
+
+    assertEquals(List.of(), NamedTransformFunctions.screen_against_worldcheck_reference(inputs));
+  }
+
+  @Test
+  void screenAgainstWorldcheckReferenceReturnsEmptyWithNoUsableName() {
+    assertEquals(
+        List.of(),
+        NamedTransformFunctions.screen_against_worldcheck_reference(
+            Map.of("entity_type", "Individual")));
+  }
 }

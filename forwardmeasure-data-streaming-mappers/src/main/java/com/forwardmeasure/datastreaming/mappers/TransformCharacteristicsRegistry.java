@@ -60,7 +60,22 @@ public final class TransformCharacteristicsRegistry {
           Map.entry("classify_party_kind", PURE_ROW_FUNCTION),
           Map.entry("parse_partial_date_ymd", PURE_ROW_FUNCTION),
           Map.entry("classify_party_categories", PURE_ROW_FUNCTION),
-          Map.entry("parse_tilde_delimited_locations", PURE_ROW_FUNCTION));
+          Map.entry("parse_tilde_delimited_locations", PURE_ROW_FUNCTION),
+          Map.entry("classify_party_kind_test_customer_master", PURE_ROW_FUNCTION),
+          Map.entry("build_test_customer_master_locations", PURE_ROW_FUNCTION),
+          Map.entry("build_test_customer_master_identifiers", PURE_ROW_FUNCTION),
+          Map.entry("join_labeled_fields", PURE_ROW_FUNCTION),
+          // The one genuinely HEAVY transform in this registry - see its own javadoc in
+          // NamedTransformFunctions for why (a real per-row broadcast comparison against a
+          // reference population using EntityMatcher's own fuzzy scoring, not a cheap lookup).
+          // This is what lets ExecutionPlanCompiler.resolveSparkStage ever produce a real
+          // SparkStagePlan - deliberately not marking anything else HEAVY just to exercise that
+          // path (see the repo's own "ask before deferring" discipline: this is the real, business-
+          // grounded transform the user asked for instead of a synthetic placeholder).
+          Map.entry(
+              "screen_against_worldcheck_reference",
+              new TransformCharacteristics(
+                  Cardinality.ONE, StateRequirement.STATELESS, ExecutionCost.HEAVY, false, true)));
 
   private TransformCharacteristicsRegistry() {}
 

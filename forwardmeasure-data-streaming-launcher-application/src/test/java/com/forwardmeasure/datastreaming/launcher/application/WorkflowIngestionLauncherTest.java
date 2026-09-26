@@ -26,10 +26,10 @@ import com.forwardmeasure.authzen.AuthorizationRequest;
 import com.forwardmeasure.authzen.AuthorizationService;
 import com.forwardmeasure.jpa.tenancy.TenantDatabase;
 import com.forwardmeasure.jpa.tenancy.TenantId;
-import com.forwardmeasure.openworkflow.execution.api.model.Execution;
-import com.forwardmeasure.openworkflow.execution.api.model.ExecutionState;
+import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecution;
+import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecutionState;
 import com.forwardmeasure.openworkflow.execution.client.ApiClient;
-import com.forwardmeasure.openworkflow.execution.client.api.ExecutionsApi;
+import com.forwardmeasure.openworkflow.execution.client.api.WorkflowExecutionsApi;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -48,13 +48,13 @@ import org.junit.jupiter.api.Test;
 /**
  * Real, no-mocking-framework proof at the actual HTTP protocol level: a plain JDK {@link
  * HttpServer} stands in for fowf's own execution-management service, and {@link
- * WorkflowIngestionLauncher} is exercised against fowf's own generated {@link ExecutionsApi} client
- * hitting it over a real socket - proving this class sends the right method/path/headers/ body and
- * correctly parses fowf's own {@link Execution} response shape, not a hand-mocked substitute for
- * either. Not a live fowf deployment (that's a materially bigger ask than this class's own real
- * dependency, deliberately not attempted here) - the actual Job-lifecycle mechanics fowf's side of
- * this contract runs on are already proven for real elsewhere (see {@code
- * RealKubernetesJobOperationExecutorTest} in fowf itself).
+ * WorkflowIngestionLauncher} is exercised against fowf's own generated {@link
+ * WorkflowExecutionsApi} client hitting it over a real socket - proving this class sends the right
+ * method/path/headers/ body and correctly parses fowf's own {@link WorkflowExecution} response
+ * shape, not a hand-mocked substitute for either. Not a live fowf deployment (that's a materially
+ * bigger ask than this class's own real dependency, deliberately not attempted here) - the actual
+ * Job-lifecycle mechanics fowf's side of this contract runs on are already proven for real
+ * elsewhere (see {@code RealKubernetesJobOperationExecutorTest} in fowf itself).
  */
 final class WorkflowIngestionLauncherTest {
 
@@ -86,7 +86,7 @@ final class WorkflowIngestionLauncherTest {
     apiClient.setBearerToken("test-token");
     launcher =
         new WorkflowIngestionLauncher(
-            new ExecutionsApi(apiClient), new PermitAllAuthorizationService());
+            new WorkflowExecutionsApi(apiClient), new PermitAllAuthorizationService());
   }
 
   @AfterEach
@@ -101,7 +101,7 @@ final class WorkflowIngestionLauncherTest {
         new WorkflowLaunchRequest(
             revisionId, Map.of("sourceUri", "file:///test.csv"), "idem-1", "corr-1");
 
-    Execution execution = launcher.launch(request, ACTOR);
+    WorkflowExecution execution = launcher.launch(request, ACTOR);
 
     assertEquals("POST", lastMethod.get());
     assertTrue(
@@ -115,25 +115,25 @@ final class WorkflowIngestionLauncherTest {
     assertTrue(lastBody.get().contains("file:///test.csv"), "request body should carry the input");
 
     assertNotNull(execution);
-    assertEquals(ExecutionState.RUNNING, execution.getState());
+    assertEquals(WorkflowExecutionState.RUNNING, execution.getState());
   }
 
   @Test
   void observeSendsAGetAndParsesTheResponse() throws Exception {
     UUID executionId = UUID.randomUUID();
 
-    Execution execution = launcher.observe(executionId, ACTOR);
+    WorkflowExecution execution = launcher.observe(executionId, ACTOR);
 
     assertEquals("GET", lastMethod.get());
     assertTrue(lastPath.get().contains(executionId.toString()));
-    assertEquals(ExecutionState.RUNNING, execution.getState());
+    assertEquals(WorkflowExecutionState.RUNNING, execution.getState());
   }
 
   @Test
   void cancelSendsAPostToTheCancelSubResource() throws Exception {
     UUID executionId = UUID.randomUUID();
 
-    Execution execution =
+    WorkflowExecution execution =
         launcher.cancel(executionId, "\"1\"", "corr-2", "no longer needed", ACTOR);
 
     assertEquals("POST", lastMethod.get());

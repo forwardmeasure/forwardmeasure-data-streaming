@@ -84,7 +84,20 @@ public final class NamedTransformRegistry {
           Map.entry(
               "parse_tilde_delimited_locations",
               inputs ->
-                  NamedTransformFunctions.parse_tilde_delimited_locations(inputs.get("value"))));
+                  NamedTransformFunctions.parse_tilde_delimited_locations(inputs.get("value"))),
+          Map.entry(
+              "classify_party_kind_test_customer_master",
+              NamedTransformFunctions::classify_party_kind_test_customer_master),
+          Map.entry(
+              "build_test_customer_master_locations",
+              NamedTransformFunctions::build_test_customer_master_locations),
+          Map.entry(
+              "build_test_customer_master_identifiers",
+              NamedTransformFunctions::build_test_customer_master_identifiers),
+          Map.entry("join_labeled_fields", NamedTransformFunctions::join_labeled_fields),
+          Map.entry(
+              "screen_against_worldcheck_reference",
+              NamedTransformFunctions::screen_against_worldcheck_reference));
 
   private NamedTransformRegistry() {}
 

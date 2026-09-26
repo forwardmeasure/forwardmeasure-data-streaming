@@ -38,9 +38,9 @@ import com.forwardmeasure.openworkflow.definition.management.api.model.WorkflowD
 import com.forwardmeasure.openworkflow.definition.management.client.api.WorkflowDefinitionGovernanceApi;
 import com.forwardmeasure.openworkflow.definition.management.client.api.WorkflowDefinitionsApi;
 import com.forwardmeasure.openworkflow.definition.management.client.api.WorkflowsApi;
-import com.forwardmeasure.openworkflow.execution.api.model.Execution;
-import com.forwardmeasure.openworkflow.execution.api.model.ExecutionState;
-import com.forwardmeasure.openworkflow.execution.client.api.ExecutionsApi;
+import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecution;
+import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecutionState;
+import com.forwardmeasure.openworkflow.execution.client.api.WorkflowExecutionsApi;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import java.time.Duration;
@@ -157,20 +157,20 @@ class RealFowfWorkflowFixtureEndToEndTest {
       var executionApiClient = new com.forwardmeasure.openworkflow.execution.client.ApiClient();
       executionApiClient.setBasePath(executionManagementBaseUrl);
       executionApiClient.setBearerToken(accessToken);
-      ExecutionsApi executionsApi = new ExecutionsApi(executionApiClient);
+      WorkflowExecutionsApi executionsApi = new WorkflowExecutionsApi(executionApiClient);
 
       WorkflowIngestionLauncher launcher =
           new WorkflowIngestionLauncher(executionsApi, authorization);
 
       String correlationId = "fds-e2e-" + UUID.randomUUID();
-      Execution started =
+      WorkflowExecution started =
           launcher.launch(
               new WorkflowLaunchRequest(
                   published.getId(), Map.of(), "idempotency-" + correlationId, correlationId),
               actor);
       assertNotNull(started.getId(), "a real fowf execution must have been admitted");
 
-      Execution finalState;
+      WorkflowExecution finalState;
       try {
         finalState = awaitTerminal(fixture, executionApiClient, launcher, started.getId(), actor);
       } catch (AssertionError neverTerminal) {
@@ -187,7 +187,7 @@ class RealFowfWorkflowFixtureEndToEndTest {
         throw neverTerminal;
       }
       assertEquals(
-          ExecutionState.COMPLETED,
+          WorkflowExecutionState.COMPLETED,
           finalState.getState(),
           "expected the real 2-step apply+watch workflow to complete - got "
               + finalState.getState()
@@ -248,7 +248,7 @@ class RealFowfWorkflowFixtureEndToEndTest {
    * of polling and hit exactly that). Re-minting on every poll keeps this loop testing the real
    * execution state, not Keycloak's own token lifetime.
    */
-  private static Execution awaitTerminal(
+  private static WorkflowExecution awaitTerminal(
       RealFowfWorkflowFixture fixture,
       com.forwardmeasure.openworkflow.execution.client.ApiClient executionApiClient,
       WorkflowIngestionLauncher launcher,
@@ -256,19 +256,23 @@ class RealFowfWorkflowFixtureEndToEndTest {
       ActiveOrganization actor)
       throws Exception {
     long deadline = System.nanoTime() + Duration.ofMinutes(5).toNanos();
-    Execution last = null;
+    WorkflowExecution last = null;
     while (System.nanoTime() < deadline) {
       executionApiClient.setBearerToken(fixture.keycloak().mintUserToken());
       last = launcher.observe(executionId, actor);
       System.out.println(
           "RealFowfWorkflowFixtureEndToEndTest: execution state = " + last.getState());
-      if (last.getState() == ExecutionState.COMPLETED || last.getState() == ExecutionState.FAILED) {
+      if (last.getState() == WorkflowExecutionState.COMPLETED
+          || last.getState() == WorkflowExecutionState.FAILED) {
         return last;
       }
       Thread.sleep(1000);
     }
     throw new AssertionError(
-        "Execution " + executionId + " never reached a terminal state - last seen: " + last);
+        "WorkflowExecution "
+            + executionId
+            + " never reached a terminal state - last seen: "
+            + last);
   }
 
   private static WorkflowDefinition publish(

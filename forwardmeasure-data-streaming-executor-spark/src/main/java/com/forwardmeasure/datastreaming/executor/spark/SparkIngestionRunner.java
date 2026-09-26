@@ -20,6 +20,7 @@ import com.forwardmeasure.datastreaming.api.ExecutionPlan;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
 import com.forwardmeasure.datastreaming.api.SourcePlan;
+import com.forwardmeasure.datastreaming.api.SparkStagePlan;
 import com.forwardmeasure.datastreaming.core.ExecutionPlanCompiler;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline;
 import java.nio.file.Path;
@@ -94,10 +95,47 @@ public final class SparkIngestionRunner {
         Map.of());
   }
 
+  /**
+   * Real, live-found bug fix (2026-09-25): {@code ExecutionPlanCompiler.resolveSparkStage} derives
+   * {@code handoffTopic} from {@code spec.hashCode()} - a value {@link DirectIngestionLauncher}
+   * (fowf-free direct mode) computes twice, independently, in two different processes: once from
+   * the in-memory {@code IngestionSpec} object when building the delivery Job's own handoff
+   * ConfigMap, and again here, from the same spec after a base64/YAML round-trip. Nothing
+   * guarantees those two {@code hashCode()} calls agree (a YAML round-trip is not contractually
+   * required to be hashCode-preserving), and a live run confirmed they genuinely can disagree:
+   * Spark wrote 5 real rows to its own (correctly, locally re-derived) topic while the delivery
+   * Job's consumer, reading the launcher's independently-derived topic name, saw {@code
+   * recordsRead=0} - a real, silent data loss, not a hypothetical one. The launcher is the one
+   * process that must actually agree with itself (it derives the topic once, for the ConfigMap, and
+   * needs the dispatched pod to write to that exact same topic) - so it now passes its own
+   * already-computed topic explicitly via {@code SPARK_HANDOFF_TOPIC}, and this override always
+   * wins over any value {@code ExecutionPlanCompiler} would derive fresh inside the pod.
+   * Package-visible so {@link SparkCorrelationRunner#main} applies the identical override.
+   */
+  static final String SPARK_HANDOFF_TOPIC_ENV_VAR = "SPARK_HANDOFF_TOPIC";
+
+  static ExecutionPlan withHandoffTopicOverride(ExecutionPlan plan) {
+    String override = System.getenv(SPARK_HANDOFF_TOPIC_ENV_VAR);
+    if (override == null || override.isBlank() || plan.sparkStage().isEmpty()) {
+      return plan;
+    }
+    SparkStagePlan overridden =
+        new SparkStagePlan(plan.sparkStage().get().transformNames(), override.trim());
+    return new ExecutionPlan(
+        plan.profile(),
+        plan.sources(),
+        plan.blockingField(),
+        java.util.Optional.of(overridden),
+        plan.transforms(),
+        plan.destination(),
+        plan.delivery(),
+        plan.errors());
+  }
+
   public static void main(String[] args) throws Exception {
     String specPath = args.length > 0 ? args[0] : requiredEnv("INGESTION_SPEC_PATH");
     IngestionSpec spec = IngestionSpec.load(Path.of(specPath));
-    ExecutionPlan plan = ExecutionPlanCompiler.compile(spec);
+    ExecutionPlan plan = withHandoffTopicOverride(ExecutionPlanCompiler.compile(spec));
     String kafkaBootstrapServers = kafkaBootstrapServersFromEnv();
 
     SparkSession spark =

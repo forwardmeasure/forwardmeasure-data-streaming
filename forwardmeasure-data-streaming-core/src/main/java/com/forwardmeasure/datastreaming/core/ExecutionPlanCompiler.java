@@ -100,8 +100,8 @@ public final class ExecutionPlanCompiler {
    * TransformCharacteristics.Cardinality#CORRELATED}-at-scale trigger from {@code SparkStagePlan}'s
    * own javadoc is deliberately not implemented: no real correlated-at-scale spec exists anywhere
    * in this org's data to build that heuristic against honestly (see the repo's own gap-bridging
-   * plan). Not reachable by any WorldCheck/State-Street spec today - every registered transform is
-   * {@code LIGHT} - so {@code handoffTopic}'s deterministic-from-spec-content naming below is
+   * plan). Not reachable by any WorldCheck/Customer-Master spec today - every registered transform
+   * is {@code LIGHT} - so {@code handoffTopic}'s deterministic-from-spec-content naming below is
    * genuinely untested against real data; revisit once a real {@code HEAVY} transform exists to
    * exercise it.
    */

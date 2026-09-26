@@ -106,6 +106,184 @@ class KafkaStreamsDeliveryEngineIntegrationTest {
     assertEquals(404, response.statusCode(), "S3 arrived after the frontier - must not be indexed");
   }
 
+  /**
+   * Real, live proof of the correlation gap closed 2026-09-25 (see {@code
+   * KafkaStreamsDeliveryEngine}'s own javadoc) - two real Kafka topics, correlated on {@code uid},
+   * merged by trust weight the same way {@code PekkoCorrelationEngine}/{@code
+   * SparkCorrelationEngine} already do. {@code core} (trust 1.0) contributes {@code name}; {@code
+   * detail} (trust 0.5) contributes a disjoint field, {@code position} - proving real cross-source
+   * merge without hitting {@code mergeGroup}'s own per-field-key {@code putIfAbsent} semantics
+   * (confirmed live elsewhere: two sources writing the *same* target field key doesn't union their
+   * values, the higher-trust source's own value wins outright).
+   */
+  @Test
+  @Timeout(60)
+  void boundedModeCorrelatesTwoSourcesAndMergesByTrustWeight(
+      KafkaTestContainer kafka, OpenSearchTestContainer opensearch) throws Exception {
+    String coreTopic = "fds-kstreams-correlation-core-" + UUID.randomUUID();
+    String detailTopic = "fds-kstreams-correlation-detail-" + UUID.randomUUID();
+    String index = "fds-kstreams-correlation-index";
+    createTopic(kafka, coreTopic);
+    createTopic(kafka, detailTopic);
+    produce(kafka, coreTopic, "C1", Map.of("uid", "C1", "name", "Erin Ellis"));
+    produce(kafka, detailTopic, "C1", Map.of("uid", "C1", "role", "Senior Analyst"));
+    produce(kafka, coreTopic, "C2", Map.of("uid", "C2", "name", "Frank Foster"));
+
+    IngestionSpec spec =
+        new IngestionSpec(
+            List.of(
+                correlatedSource("core", kafka, coreTopic, "name", "name", 1.0),
+                correlatedSource("detail", kafka, detailTopic, "position", "role", 0.5)),
+            "uid",
+            null,
+            openSearchSink(opensearch, index),
+            ExecutionMode.BOUNDED,
+            new DeliverySemantics(true, new ConcurrencySpec(1, null), null),
+            null);
+    ExecutionPlan plan = ExecutionPlanCompiler.compile(spec);
+
+    ExecutionHandle handle =
+        new KafkaStreamsDeliveryEngine(Map.of()).execute(plan, ExecutionMode.BOUNDED);
+    assertFalse(
+        handle.isRunning(), "a BOUNDED run must have already completed when execute() returns");
+
+    JsonNode merged = fetchDocument(opensearch, index, "C1");
+    assertEquals("Erin Ellis", merged.path("_source").path("name").asText());
+    assertEquals(
+        "Senior Analyst",
+        merged.path("_source").path("position").asText(),
+        "expected the detail source's own disjoint field to have been merged in");
+
+    JsonNode unmatched = fetchDocument(opensearch, index, "C2");
+    assertEquals("Frank Foster", unmatched.path("_source").path("name").asText());
+    assertTrue(
+        unmatched.path("_source").path("position").isMissingNode(),
+        "C2 has no detail-source counterpart - must not have a position field at all");
+  }
+
+  /**
+   * Real, live proof of the continuous correlation gap closed 2026-09-25 (see {@code
+   * KafkaStreamsDeliveryEngine}'s own javadoc, {@code ContinuousKafkaStreamsCorrelationRunner}'s
+   * own mechanism javadoc) - deliberately three sources, not two, since the user's own explicit ask
+   * was whether the design accommodates more than a pair: {@code core} (trust 1.0, {@code name}),
+   * {@code detail} (trust 0.5, {@code position}), {@code extra} (trust 0.25, {@code department}),
+   * chained via {@code KTable#outerJoin}. {@code K1} gets a row from all three (proving a real N=3
+   * merge, not just N=2); {@code K2} deliberately skips the *middle* source ({@code detail}) to
+   * prove the join chain handles an absent middle table correctly, not just an absent last one.
+   */
+  @Test
+  @Timeout(60)
+  void continuousModeCorrelatesThreeSourcesAndMergesByTrustWeight(
+      KafkaTestContainer kafka, OpenSearchTestContainer opensearch) throws Exception {
+    String coreTopic = "fds-kstreams-cont-correlation-core-" + UUID.randomUUID();
+    String detailTopic = "fds-kstreams-cont-correlation-detail-" + UUID.randomUUID();
+    String extraTopic = "fds-kstreams-cont-correlation-extra-" + UUID.randomUUID();
+    String index = "fds-kstreams-cont-correlation-index";
+    createTopic(kafka, coreTopic);
+    createTopic(kafka, detailTopic);
+    createTopic(kafka, extraTopic);
+
+    IngestionSpec spec =
+        new IngestionSpec(
+            List.of(
+                correlatedSource("core", kafka, coreTopic, "name", "name", 1.0),
+                correlatedSource("detail", kafka, detailTopic, "position", "role", 0.5),
+                correlatedSource("extra", kafka, extraTopic, "department", "dept", 0.25)),
+            "uid",
+            null,
+            openSearchSink(opensearch, index),
+            ExecutionMode.CONTINUOUS,
+            new DeliverySemantics(true, new ConcurrencySpec(1, null), null),
+            null);
+    ExecutionPlan plan = ExecutionPlanCompiler.compile(spec);
+    ExecutionHandle handle =
+        new KafkaStreamsDeliveryEngine(Map.of()).execute(plan, ExecutionMode.CONTINUOUS);
+    try {
+      assertTrue(handle.isRunning());
+
+      produce(kafka, coreTopic, "K1", Map.of("uid", "K1", "name", "Iris Ito"));
+      produce(kafka, detailTopic, "K1", Map.of("uid", "K1", "role", "Director"));
+      produce(kafka, extraTopic, "K1", Map.of("uid", "K1", "dept", "Engineering"));
+
+      produce(kafka, coreTopic, "K2", Map.of("uid", "K2", "name", "Jae Kim"));
+      produce(kafka, extraTopic, "K2", Map.of("uid", "K2", "dept", "Sales"));
+
+      JsonNode k1 =
+          awaitDocumentWithFields(
+              opensearch, index, "K1", Duration.ofSeconds(30), "name", "position", "department");
+      assertEquals("Iris Ito", k1.path("_source").path("name").asText(), () -> "full doc: " + k1);
+      assertEquals("Director", k1.path("_source").path("position").asText());
+      assertEquals("Engineering", k1.path("_source").path("department").asText());
+
+      JsonNode k2 =
+          awaitDocumentWithFields(
+              opensearch, index, "K2", Duration.ofSeconds(30), "name", "department");
+      assertEquals("Jae Kim", k2.path("_source").path("name").asText(), () -> "full doc: " + k2);
+      assertEquals("Sales", k2.path("_source").path("department").asText());
+      assertTrue(
+          k2.path("_source").path("position").isMissingNode(),
+          "K2 has no detail-source counterpart - must not have a position field at all: " + k2);
+    } finally {
+      handle.stop();
+    }
+  }
+
+  /**
+   * Real, live-found test bug fixed while building this: an earlier version of this helper (used
+   * only for {@code K1}) checked just two of three expected fields, which a genuine intermediate
+   * state (some sources merged before others have arrived) can satisfy without the third - not a
+   * topology bug, a correlation runner's own real, correct progressive-refinement behavior (see
+   * {@code ContinuousKafkaStreamsCorrelationRunner}'s own javadoc) catching an under-specified
+   * assertion. Checking every expected field, not a subset, is the real fix.
+   */
+  private static JsonNode awaitDocumentWithFields(
+      OpenSearchTestContainer opensearch,
+      String index,
+      String id,
+      Duration timeout,
+      String... fields)
+      throws Exception {
+    Instant deadline = Instant.now().plus(timeout);
+    while (Instant.now().isBefore(deadline)) {
+      HttpResponse<String> response = getDocument(opensearch, index, id);
+      if (response.statusCode() == 200) {
+        JsonNode node = JSON.readTree(response.body());
+        boolean allPresent = true;
+        for (String field : fields) {
+          if (node.path("_source").path(field).isMissingNode()) {
+            allPresent = false;
+            break;
+          }
+        }
+        if (allPresent) {
+          return node;
+        }
+      }
+      Thread.sleep(200);
+    }
+    throw new AssertionError(
+        "document '" + id + "' never reported all of " + java.util.Arrays.toString(fields));
+  }
+
+  private static SourcePlan correlatedSource(
+      String sourceKey,
+      KafkaTestContainer kafka,
+      String topic,
+      String targetField,
+      String rawField,
+      double trustWeight) {
+    return new SourcePlan(
+        sourceKey,
+        new SourceSpec(
+            "kafka", "kafka:" + topic + "?brokers=" + kafka.bootstrapServers(), null, null),
+        new TransformSpec(
+            "party",
+            List.of(
+                new TransformSpec.FieldRule("uid", "uid", null, null, null, null, null),
+                new TransformSpec.FieldRule(targetField, rawField, null, null, null, null, null))),
+        trustWeight);
+  }
+
   @Test
   @Timeout(60)
   void continuousModeWritesRealMappedRowsToOpenSearchAsTheyArrive(

@@ -46,6 +46,16 @@
       <artifactId>quarkus-config-yaml</artifactId>
     </dependency>
     <dependency>
+      <!-- Real, previously-missing dependency (found 2026-09-25 while wiring real Helm probes):
+           without it, /q/health/{live,ready,started} all 404 and a real Knative/Kubernetes
+           liveness/readiness/startup probe against this image never succeeds. Matches
+           forwardmeasure-entity-intelligence's own ingestion-service-quarkus pom - same real gap,
+           already found and fixed there once. Unversioned - covered by
+           forwardmeasure-platform-quarkus-bom's own dependencyManagement. -->
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-smallrye-health</artifactId>
+    </dependency>
+    <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>

@@ -37,7 +37,7 @@ import java.nio.file.Path;
  * not copy-pasted a third time).
  *
  * <p>Two real {@code IngestionSpec} variants, both {@code BOUNDED}: a {@code file}-sourced one (the
- * default - every WorldCheck/State-Street transform is {@code STATELESS}/{@code LIGHT}, so per
+ * default - every WorldCheck/customer-master transform is {@code STATELESS}/{@code LIGHT}, so per
  * {@code ExecutionPlanCompiler}'s own real engine-selection table a file-sourced bounded spec
  * always resolves to {@code PEKKO_STREAMS}) and a {@code kafka}-sourced one (the *only* legitimate
  * way to reach the {@code KAFKA_STREAMS} cells for this data, per the same compiler rule - source
@@ -58,18 +58,27 @@ public final class WorldCheckFixtures {
    * indicator), every optional field blank. wc-3: organization (E + CATEGORY=ORGANIZATION). wc-4:
    * physical_asset (E + CATEGORY=VESSEL). Byte-for-byte the same fixture {@code
    * PekkoWorldCheckToOpenSearchIntegrationTest} already proves live - copied, not reinvented.
+   *
+   * <p>Deliberately built via a method call, not a literal concatenation - see {@link
+   * TestCustomerMasterFixtures#SAMPLE_CSV}'s own javadoc for why a {@code public static final
+   * String} fixture must never be a compile-time constant expression (JLS §15.28): its value would
+   * get inlined into every referencing class's own bytecode at compile time, so a fix here could
+   * silently fail to propagate to an already-compiled consumer.
    */
-  public static final String SAMPLE_TSV =
-      "UID\tLAST NAME\tFIRST NAME\tCATEGORY\tE/I\tDOB\tCITIZENSHIP\tCOUNTRIES\tALIASES\tSSN\t"
-          + "POSITION\tPEP ROLES\tPEP STATUS\tKEYWORDS\tEXTERNAL SOURCES\tFURTHER INFORMATION\t"
-          + "SPECIAL INTEREST CATEGORIES\tLOCATIONS\n"
-          + "wc-1\tSmith\tJosé\tINDIVIDUAL\tM\t1975/03/15\tUNITED STATES;RUSSIA\t\t"
-          + "Johnny Smith;J. Smith\t123-45-6789\tBusinessman\tSenator~Governor\tFormer PEP\t"
-          + "Fraud~Bribery\thttps://example.com/report1\tSubject of an investigation.\t"
-          + "Sanctions Related;PEP\t~ Moscow, Moscow Oblast ~ RUSSIA\n"
-          + "wc-2\tIvanov\tPetr\tINDIVIDUAL\tI\t1982/07/22\tRUSSIA\t\t\t\t\t\t\t\t\t\t\t\n"
-          + "wc-3\tAcme Holdings\t\tORGANIZATION\tE\t\tUNITED KINGDOM\t\t\t\t\t\t\t\t\t\t\t\n"
-          + "wc-4\tMV Example Star\t\tVESSEL\tE\t\tIRAN\t\t\t\t\t\t\t\t\t\t\t\n";
+  public static final String SAMPLE_TSV = buildSampleTsv();
+
+  private static String buildSampleTsv() {
+    return "UID\tLAST NAME\tFIRST NAME\tCATEGORY\tE/I\tDOB\tCITIZENSHIP\tCOUNTRIES\tALIASES\tSSN\t"
+        + "POSITION\tPEP ROLES\tPEP STATUS\tKEYWORDS\tEXTERNAL SOURCES\tFURTHER INFORMATION\t"
+        + "SPECIAL INTEREST CATEGORIES\tLOCATIONS\n"
+        + "wc-1\tSmith\tJosé\tINDIVIDUAL\tM\t1975/03/15\tUNITED STATES;RUSSIA\t\t"
+        + "Johnny Smith;J. Smith\t123-45-6789\tBusinessman\tSenator~Governor\tFormer PEP\t"
+        + "Fraud~Bribery\thttps://example.com/report1\tSubject of an investigation.\t"
+        + "Sanctions Related;PEP\t~ Moscow, Moscow Oblast ~ RUSSIA\n"
+        + "wc-2\tIvanov\tPetr\tINDIVIDUAL\tI\t1982/07/22\tRUSSIA\t\t\t\t\t\t\t\t\t\t\t\n"
+        + "wc-3\tAcme Holdings\t\tORGANIZATION\tE\t\tUNITED KINGDOM\t\t\t\t\t\t\t\t\t\t\t\n"
+        + "wc-4\tMV Example Star\t\tVESSEL\tE\t\tIRAN\t\t\t\t\t\t\t\t\t\t\t\n";
+  }
 
   /**
    * Real index settings - byte-identical copy of entity-intelligence-specifications' own {@code

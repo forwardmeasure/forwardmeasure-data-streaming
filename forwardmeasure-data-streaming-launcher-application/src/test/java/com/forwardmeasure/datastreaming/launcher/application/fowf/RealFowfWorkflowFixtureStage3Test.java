@@ -18,10 +18,10 @@ package com.forwardmeasure.datastreaming.launcher.application.fowf;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import com.forwardmeasure.openworkflow.execution.api.model.ExecutionPage;
+import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecutionPage;
 import com.forwardmeasure.openworkflow.execution.client.ApiClient;
 import com.forwardmeasure.openworkflow.execution.client.ApiException;
-import com.forwardmeasure.openworkflow.execution.client.api.ExecutionsApi;
+import com.forwardmeasure.openworkflow.execution.client.api.WorkflowExecutionsApi;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.testcontainers.containers.GenericContainer;
@@ -49,9 +49,10 @@ class RealFowfWorkflowFixtureStage3Test {
       ApiClient apiClient = new ApiClient();
       apiClient.setBasePath(baseUrl);
       apiClient.setBearerToken(fixture.keycloak().mintUserToken());
-      ExecutionsApi executionsApi = new ExecutionsApi(apiClient);
+      WorkflowExecutionsApi executionsApi = new WorkflowExecutionsApi(apiClient);
 
-      ExecutionPage page = executionsApi.listExecutions(null, null, null, null, null, null, null);
+      WorkflowExecutionPage page =
+          executionsApi.listWorkflowExecutions(null, null, null, null, null, null, null);
       assertEquals(
           0,
           page.getItems().size(),
@@ -70,11 +71,12 @@ class RealFowfWorkflowFixtureStage3Test {
       ApiClient apiClient = new ApiClient();
       apiClient.setBasePath(baseUrl);
       apiClient.setBearerToken(fixture.keycloak().mintUserToken());
-      ExecutionsApi executionsApi = new ExecutionsApi(apiClient);
+      WorkflowExecutionsApi executionsApi = new WorkflowExecutionsApi(apiClient);
 
       ApiException notFound =
           org.junit.jupiter.api.Assertions.assertThrows(
-              ApiException.class, () -> executionsApi.getExecution(java.util.UUID.randomUUID()));
+              ApiException.class,
+              () -> executionsApi.getWorkflowExecution(java.util.UUID.randomUUID()));
       assertEquals(404, notFound.getCode());
     }
   }

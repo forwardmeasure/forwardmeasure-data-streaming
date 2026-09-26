@@ -5,10 +5,11 @@
   <artifactId>forwardmeasure-data-streaming-test-fixtures</artifactId>
   <name>ForwardMeasure Data Streaming Test Fixtures</name>
   <description>Shared, real (never fictional/simplified) source-data and IngestionSpec fixtures for
-    integration tests that need them - WorldCheck today, State Street following the identical
-    pattern. A real `main`-scope dependency (not a test-jar), deliberately: Phase G/H's 18/36-cell
-    integration-test matrix needs the exact same fixture reachable from three separate framework-
-    binding test suites (Quarkus/Spring/Micronaut), so it has to be a real compile-time dependency
+    integration tests that need them - WorldCheck today, a real customer-master shape following the
+    identical pattern. A real `main`-scope dependency (not a test-jar), deliberately: Phase G/H's
+    18/36-cell integration-test matrix needs the exact same fixture reachable from three separate
+    framework-binding test suites (Quarkus/Spring/Micronaut), so it has to be a real compile-time
+    dependency
     each of those can add, not something copy-pasted three times or reachable only from one
     module's own test classpath. Each real fixture (e.g. WorldCheckFixtures) mirrors the shape
     already proven in forwardmeasure-data-streaming-executor-pekko's own
@@ -21,6 +22,11 @@
   </properties>
   <dependencies>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-mappers</artifactId><scope>test</scope></dependency>
+    <!-- Test-scope only, to verify boundedFileSpecWithScreening actually compiles to a plan with a
+         real sparkStage - a real acceptance check on this fixture's own reason for existing, not
+         needed by any main-scope code here. -->
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-core</artifactId><scope>test</scope></dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
   </dependencies>
 </project>

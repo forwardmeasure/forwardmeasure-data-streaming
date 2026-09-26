@@ -126,6 +126,15 @@ public final class FieldMappingEngine {
 
   private Object resolveValue(
       SourceRow row, FieldRule rule, Map<String, NamedTransform> supplementalTransforms) {
+    if (rule.isRaw()) {
+      if (rule.source() == null) {
+        throw new IllegalArgumentException(
+            "FieldMappingEngine: raw field rule for target '"
+                + rule.target()
+                + "' must set 'source' - raw mode has no template/inputs form");
+      }
+      return row.getRaw(rule.source());
+    }
     if (rule.template() != null) {
       String resolved = resolveTemplate(row, rule.template());
       // Map.of rejects a null value outright; every ported transform already treats "" the same

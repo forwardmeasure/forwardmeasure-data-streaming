@@ -19,7 +19,7 @@ package com.forwardmeasure.datastreaming.launcher.jaxrs;
 import com.forwardmeasure.authzen.ActiveOrganizationProvider;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowLaunchRequest;
-import com.forwardmeasure.openworkflow.execution.api.model.Execution;
+import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecution;
 import com.forwardmeasure.openworkflow.execution.client.ApiException;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.Consumes;
@@ -37,10 +37,11 @@ import java.util.UUID;
 
 /**
  * Workflow mode's REST surface over {@link WorkflowIngestionLauncher} - the through-fowf form,
- * {@code POST /workflow-runs} (202 Accepted + {@code Location} + fowf's own {@link Execution}
- * body), {@code GET /workflow-runs/{executionId}} (fowf's current {@link Execution}), {@code POST
- * /workflow-runs/{executionId}/cancel} (requires the real {@code If-Match} header - fowf's own
- * optimistic-concurrency contract, not something this resource works around).
+ * {@code POST /workflow-runs} (202 Accepted + {@code Location} + fowf's own {@link
+ * WorkflowExecution} body), {@code GET /workflow-runs/{executionId}} (fowf's current {@link
+ * WorkflowExecution}), {@code POST /workflow-runs/{executionId}/cancel} (requires the real {@code
+ * If-Match} header - fowf's own optimistic-concurrency contract, not something this resource works
+ * around).
  *
  * <p>{@code reason} on cancel is an optional query parameter rather than a request body, since it's
  * the only field a caller might send and a body felt like unwarranted ceremony for one optional
@@ -65,7 +66,7 @@ public class WorkflowRunResource {
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   public Response create(WorkflowLaunchRequest request) throws ApiException {
-    Execution execution = launcher.launch(request, organizations.current());
+    WorkflowExecution execution = launcher.launch(request, organizations.current());
     return Response.accepted()
         .header("Location", "/workflow-runs/" + execution.getId())
         .entity(execution)

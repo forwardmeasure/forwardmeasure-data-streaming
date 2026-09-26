@@ -19,10 +19,10 @@ package com.forwardmeasure.datastreaming.launcher.application.fowf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.forwardmeasure.openworkflow.execution.api.model.ExecutionStart;
+import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecutionStart;
 import com.forwardmeasure.openworkflow.execution.client.ApiClient;
 import com.forwardmeasure.openworkflow.execution.client.ApiException;
-import com.forwardmeasure.openworkflow.execution.client.api.ExecutionsApi;
+import com.forwardmeasure.openworkflow.execution.client.api.WorkflowExecutionsApi;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -52,17 +52,17 @@ class RealFowfWorkflowFixtureStage4Test {
       ApiClient apiClient = new ApiClient();
       apiClient.setBasePath(baseUrl);
       apiClient.setBearerToken(fixture.keycloak().mintUserToken());
-      ExecutionsApi executionsApi = new ExecutionsApi(apiClient);
+      WorkflowExecutionsApi executionsApi = new WorkflowExecutionsApi(apiClient);
 
       UUID unknownRevisionId = UUID.randomUUID();
-      ExecutionStart start =
-          new ExecutionStart().revisionId(unknownRevisionId).input(java.util.Map.of());
+      WorkflowExecutionStart start =
+          new WorkflowExecutionStart().revisionId(unknownRevisionId).input(java.util.Map.of());
 
       ApiException failure =
           assertThrows(
               ApiException.class,
               () ->
-                  executionsApi.startExecution(
+                  executionsApi.startWorkflowExecution(
                       "stage4-idempotency-key", "stage4-correlation-id", start));
       // A genuinely unreachable engine would surface as a 500/502/504 (or this call would just
       // hang until the OPENWORKFLOW_ENGINES_TIMEOUT elapses) - a real 4xx this fast means

@@ -37,10 +37,10 @@ import com.forwardmeasure.datastreaming.launcher.application.WorkflowLaunchReque
 import com.forwardmeasure.datastreaming.launcher.application.auth.KeycloakClientCredentialsTokenSupplier;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.ErrorResponse;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.RunAccepted;
-import com.forwardmeasure.openworkflow.execution.api.model.Execution;
-import com.forwardmeasure.openworkflow.execution.api.model.ExecutionState;
+import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecution;
+import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecutionState;
 import com.forwardmeasure.openworkflow.execution.client.ApiClient;
-import com.forwardmeasure.openworkflow.execution.client.api.ExecutionsApi;
+import com.forwardmeasure.openworkflow.execution.client.api.WorkflowExecutionsApi;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
@@ -58,7 +58,7 @@ import java.util.stream.Collectors;
 
 /**
  * Micronaut composition for the ingestion launcher's own non-REST beans - real {@link
- * KubernetesClient}/{@link ExecutionsApi} construction and real config, matching {@link
+ * KubernetesClient}/{@link WorkflowExecutionsApi} construction and real config, matching {@link
  * com.forwardmeasure.datastreaming.launcher.quarkus.LauncherQuarkusBinding}/{@link
  * com.forwardmeasure.datastreaming.launcher.spring.LauncherSpringBinding} exactly. The JAX-RS
  * resources and exception mappers themselves are NOT produced here - a {@code @Factory} method
@@ -116,8 +116,8 @@ import java.util.stream.Collectors;
       RunAccepted.class,
       ErrorResponse.class,
       KubernetesJobObservation.class,
-      Execution.class,
-      ExecutionState.class
+      WorkflowExecution.class,
+      WorkflowExecutionState.class
     })
 @SerdeImport(DirectLaunchRequest.class)
 @SerdeImport(WorkflowLaunchRequest.class)
@@ -141,15 +141,18 @@ import java.util.stream.Collectors;
 @SerdeImport(ErrorResponse.class)
 @SerdeImport(KubernetesJobObservation.class)
 // Real, live-caught gap (2026-09-24, WorkflowBoundedMatrixMicronautPekkoSmokeTest): fowf's own
-// generated Execution model - returned directly by WorkflowRunResource's create()/get() - had no
+// generated WorkflowExecution model - returned directly by WorkflowRunResource's create()/get() -
+// had no
 // Micronaut Serde introspection registered at all, so encoding the real response body failed with
-// a real 500 ("No serializable introspection present for type Execution") the moment a workflow-
-// mode test tried to dispatch through this binding for the first time. Every field on Execution
+// a real 500 ("No serializable introspection present for type WorkflowExecution") the moment a
+// workflow-
+// mode test tried to dispatch through this binding for the first time. Every field on
+// WorkflowExecution
 // itself is a plain UUID/String/Long/Date/Object (confirmed via javap on the real installed jar -
 // error/output/effects/timers are all just Object/List<Object>, no further concrete nested type to
-// register), so this and ExecutionState are the only two additions needed.
-@SerdeImport(Execution.class)
-@SerdeImport(ExecutionState.class)
+// register), so this and WorkflowExecutionState are the only two additions needed.
+@SerdeImport(WorkflowExecution.class)
+@SerdeImport(WorkflowExecutionState.class)
 public class LauncherMicronautBinding {
 
   @Singleton
@@ -158,7 +161,7 @@ public class LauncherMicronautBinding {
   }
 
   @Singleton
-  ExecutionsApi executionsApi(
+  WorkflowExecutionsApi executionsApi(
       @Value("${datastreaming.launcher.fowf.base-url}") String baseUrl,
       @Value("${datastreaming.launcher.fowf.keycloak.token-url}") String tokenUrl,
       @Value("${datastreaming.launcher.fowf.keycloak.client-id}") String clientId,
@@ -167,7 +170,7 @@ public class LauncherMicronautBinding {
     apiClient.setBasePath(baseUrl);
     apiClient.setBearerToken(
         new KeycloakClientCredentialsTokenSupplier(URI.create(tokenUrl), clientId, clientSecret));
-    return new ExecutionsApi(apiClient);
+    return new WorkflowExecutionsApi(apiClient);
   }
 
   /**
@@ -226,7 +229,10 @@ public class LauncherMicronautBinding {
       @Value("${datastreaming.launcher.kafka-streams.image}") String kafkaStreamsImage,
       @Value("${datastreaming.launcher.kafka-streams.command}") String kafkaStreamsCommand,
       @Value("${datastreaming.launcher.k8s.image-pull-secrets}") String pullSecrets,
-      @Value("${datastreaming.launcher.k8s.host-aliases}") String hostAliases) {
+      @Value("${datastreaming.launcher.k8s.host-aliases}") String hostAliases,
+      @Value("${datastreaming.launcher.spark.image:}") String sparkImage,
+      @Value("${datastreaming.launcher.spark.command:}") String sparkCommand,
+      @Value("${datastreaming.launcher.kafka.bootstrap-servers:}") String kafkaBootstrapServers) {
     return new DirectIngestionLauncher(
         policy,
         authorization,
@@ -235,12 +241,15 @@ public class LauncherMicronautBinding {
         kafkaStreamsImage,
         kafkaStreamsCommand,
         commaSeparatedList(pullSecrets),
-        commaSeparatedMap(hostAliases));
+        commaSeparatedMap(hostAliases),
+        blankToNull(sparkImage),
+        blankToNull(sparkCommand),
+        blankToNull(kafkaBootstrapServers));
   }
 
   @Singleton
   WorkflowIngestionLauncher workflowIngestionLauncher(
-      ExecutionsApi executionsApi, AuthorizationService authorization) {
+      WorkflowExecutionsApi executionsApi, AuthorizationService authorization) {
     return new WorkflowIngestionLauncher(executionsApi, authorization);
   }
 
@@ -275,5 +284,15 @@ public class LauncherMicronautBinding {
       }
     }
     return result;
+  }
+
+  /**
+   * A real deployment that never needs the Spark two-Job pipeline leaves {@code
+   * datastreaming.launcher.spark.*}/{@code datastreaming.launcher.kafka.bootstrap-servers} unset -
+   * {@link DirectIngestionLauncher}'s own fullest constructor requires {@code null}, not an empty
+   * string, to correctly report "not configured for Spark" (see its own javadoc).
+   */
+  private static String blankToNull(String value) {
+    return value == null || value.isBlank() ? null : value;
   }
 }

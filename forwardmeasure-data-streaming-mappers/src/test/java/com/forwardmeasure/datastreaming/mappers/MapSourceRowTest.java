@@ -52,4 +52,30 @@ class MapSourceRowTest {
     assertNull(row.get("NAME"));
     assertNull(row.get("NOTES"));
   }
+
+  /**
+   * {@code getRaw} exists precisely because {@code get}'s own {@code String.valueOf(...)} mangles a
+   * structured value - contrasted directly here so the difference is unmistakable.
+   */
+  @Test
+  void getRawReturnsAStructuredValueUnchangedWhileGetStringifiesIt() {
+    java.util.List<Map<String, Object>> names =
+        java.util.List.of(Map.of("value", "Steven DOSHAY", "name_type", "PRIMARY"));
+    SourceRow row = new MapSourceRow(Map.of("names", names));
+
+    assertEquals(names, row.getRaw("names"));
+    assertEquals(names.toString(), row.get("names"));
+  }
+
+  @Test
+  void getRawReturnsNullForAMissingOrNullFieldName() {
+    Map<String, Object> underlying = new HashMap<>();
+    underlying.put("ID", "S1");
+    underlying.put("NAME", null);
+    SourceRow row = new MapSourceRow(underlying);
+
+    assertNull(row.getRaw(null));
+    assertNull(row.getRaw("MISSING"));
+    assertNull(row.getRaw("NAME"));
+  }
 }

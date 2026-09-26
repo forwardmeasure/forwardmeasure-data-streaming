@@ -68,6 +68,19 @@ public record TransformSpec(
    * Map<String,Object>} - {@code metadata}'s own entries plus {@code "value"} set to the rule's
    * resolved value - instead of the bare resolved value. {@code metadata} absent/empty preserves
    * the original bare-value behavior exactly, so no existing spec's output shape changes.
+   *
+   * <p>{@code raw} (added 2026-09-25): when {@code true}, {@code source} is read via {@code
+   * SourceRow#getRaw} (forwardmeasure-data-streaming-mappers - not linked here to avoid a circular
+   * module dependency) instead of {@code SourceRow#get}, and used as the target value exactly as
+   * returned - no {@code transform}, no string coercion. For a row whose field is a real structured
+   * value (a {@code List<Map<String,Object>>}, e.g. an already-fully-mapped {@code names}/{@code
+   * identifiers}/{@code locations} value read back off a Kafka topic a Spark stage wrote to),
+   * {@code SourceRow#get}'s own {@code String.valueOf(...)} would mangle it - this is the escape
+   * hatch for that one real case, not a general-purpose feature every mapping should reach for.
+   * Requires {@code source} (not {@code template}/{@code inputs}) and ignores {@code transform} if
+   * also set (raw mode's whole point is skipping transformation) - always paired with {@code
+   * repeated: false} in practice, since a raw value is already in its own final, complete target
+   * shape, not one element to accumulate into a list.
    */
   @JsonIgnoreProperties(ignoreUnknown = true)
   public record FieldRule(
@@ -78,11 +91,25 @@ public record TransformSpec(
       @JsonProperty("transform") String transform,
       @JsonProperty("optional") Boolean optional,
       @JsonProperty("repeated") Boolean repeated,
-      @JsonProperty("metadata") Map<String, String> metadata)
+      @JsonProperty("metadata") Map<String, String> metadata,
+      @JsonProperty("raw") Boolean raw)
       implements Serializable {
 
     public FieldRule {
       metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
+    }
+
+    /** Pre-{@code raw} shape, kept working unchanged for every existing caller. */
+    public FieldRule(
+        String target,
+        String source,
+        String template,
+        Map<String, String> inputs,
+        String transform,
+        Boolean optional,
+        Boolean repeated,
+        Map<String, String> metadata) {
+      this(target, source, template, inputs, transform, optional, repeated, metadata, null);
     }
 
     /** Pre-{@code metadata} shape, kept working unchanged for every existing caller. */
@@ -94,7 +121,7 @@ public record TransformSpec(
         String transform,
         Boolean optional,
         Boolean repeated) {
-      this(target, source, template, inputs, transform, optional, repeated, Map.of());
+      this(target, source, template, inputs, transform, optional, repeated, Map.of(), null);
     }
 
     public boolean isOptional() {
@@ -103,6 +130,10 @@ public record TransformSpec(
 
     public boolean isRepeated() {
       return Boolean.TRUE.equals(repeated);
+    }
+
+    public boolean isRaw() {
+      return Boolean.TRUE.equals(raw);
     }
 
     /** Named inputs this rule actually reads, normalizing the {@code source} shorthand. */

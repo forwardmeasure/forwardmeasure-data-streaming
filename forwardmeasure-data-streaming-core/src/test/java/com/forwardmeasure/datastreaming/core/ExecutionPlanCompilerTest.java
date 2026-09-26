@@ -36,7 +36,7 @@ import org.junit.jupiter.api.Test;
  * genuinely reachable today. The {@code STATEFUL}/{@code HEAVY}-triggered branches (forcing {@code
  * KAFKA_STREAMS} regardless of mode, inserting a {@code SparkStagePlan}) are deliberately not
  * exercised here - no transform registered in {@code TransformCharacteristicsRegistry} is {@code
- * STATEFUL} or {@code HEAVY} yet (every real WorldCheck/State-Street transform is {@code
+ * STATEFUL} or {@code HEAVY} yet (every real WorldCheck/Customer-Master transform is {@code
  * LIGHT}/{@code STATELESS}), so there is no real spec that can reach them without fabricating a
  * transform name the registry would reject. Revisit once a real one exists.
  */

@@ -27,7 +27,7 @@ import com.forwardmeasure.datastreaming.launcher.application.auth.KeycloakClient
 import com.forwardmeasure.datastreaming.launcher.jaxrs.IngestionRunResource;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.WorkflowRunResource;
 import com.forwardmeasure.openworkflow.execution.client.ApiClient;
-import com.forwardmeasure.openworkflow.execution.client.api.ExecutionsApi;
+import com.forwardmeasure.openworkflow.execution.client.api.WorkflowExecutionsApi;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.quarkus.arc.profile.UnlessBuildProfile;
@@ -43,7 +43,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 /**
  * Quarkus CDI composition for the ingestion launcher - real {@link KubernetesClient}/{@link
- * ExecutionsApi} construction and real config, the environment-specific decisions {@code
+ * WorkflowExecutionsApi} construction and real config, the environment-specific decisions {@code
  * launcher-application}'s own javadoc explicitly leaves to whichever framework binding assembles
  * it. Mirrors {@code IngestionServiceQuarkusBinding} (forwardmeasure-entity-intelligence) exactly:
  * plain {@code @Produces} factory methods, no REST resource classes of its own (those live in
@@ -62,7 +62,7 @@ public class LauncherQuarkusBinding {
 
   @Produces
   @ApplicationScoped
-  ExecutionsApi executionsApi(
+  WorkflowExecutionsApi executionsApi(
       @ConfigProperty(name = "datastreaming.launcher.fowf.base-url") String baseUrl,
       @ConfigProperty(name = "datastreaming.launcher.fowf.keycloak.token-url") String tokenUrl,
       @ConfigProperty(name = "datastreaming.launcher.fowf.keycloak.client-id") String clientId,
@@ -72,7 +72,7 @@ public class LauncherQuarkusBinding {
     apiClient.setBasePath(baseUrl);
     apiClient.setBearerToken(
         new KeycloakClientCredentialsTokenSupplier(URI.create(tokenUrl), clientId, clientSecret));
-    return new ExecutionsApi(apiClient);
+    return new WorkflowExecutionsApi(apiClient);
   }
 
   /**
@@ -149,7 +149,13 @@ public class LauncherQuarkusBinding {
           String kafkaStreamsCommand,
       @ConfigProperty(name = "datastreaming.launcher.k8s.image-pull-secrets") String pullSecrets,
       @ConfigProperty(name = "datastreaming.launcher.k8s.host-aliases", defaultValue = "")
-          String hostAliases) {
+          String hostAliases,
+      @ConfigProperty(name = "datastreaming.launcher.spark.image", defaultValue = "")
+          String sparkImage,
+      @ConfigProperty(name = "datastreaming.launcher.spark.command", defaultValue = "")
+          String sparkCommand,
+      @ConfigProperty(name = "datastreaming.launcher.kafka.bootstrap-servers", defaultValue = "")
+          String kafkaBootstrapServers) {
     return new DirectIngestionLauncher(
         policy,
         authorization,
@@ -158,13 +164,16 @@ public class LauncherQuarkusBinding {
         kafkaStreamsImage,
         kafkaStreamsCommand,
         commaSeparatedList(pullSecrets),
-        commaSeparatedMap(hostAliases));
+        commaSeparatedMap(hostAliases),
+        blankToNull(sparkImage),
+        blankToNull(sparkCommand),
+        blankToNull(kafkaBootstrapServers));
   }
 
   @Produces
   @ApplicationScoped
   WorkflowIngestionLauncher workflowIngestionLauncher(
-      ExecutionsApi executionsApi, AuthorizationService authorization) {
+      WorkflowExecutionsApi executionsApi, AuthorizationService authorization) {
     return new WorkflowIngestionLauncher(executionsApi, authorization);
   }
 
@@ -213,5 +222,15 @@ public class LauncherQuarkusBinding {
       }
     }
     return result;
+  }
+
+  /**
+   * A real deployment that never needs the Spark two-Job pipeline leaves {@code
+   * datastreaming.launcher.spark.*}/{@code datastreaming.launcher.kafka.bootstrap-servers} unset -
+   * {@link DirectIngestionLauncher}'s own fullest constructor requires {@code null}, not an empty
+   * string, to correctly report "not configured for Spark" (see its own javadoc).
+   */
+  private static String blankToNull(String value) {
+    return value == null || value.isBlank() ? null : value;
   }
 }

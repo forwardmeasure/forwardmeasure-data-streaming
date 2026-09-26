@@ -307,7 +307,12 @@ class DirectIngestionMatrixQuarkusPekkoSmokeTest {
           Map.entry("datastreaming.launcher.pekko.image", pekkoImage),
           Map.entry("datastreaming.launcher.pekko.command", pekkoCommand),
           Map.entry("datastreaming.launcher.kafka-streams.image", CURL_IMAGE),
-          Map.entry("datastreaming.launcher.kafka-streams.command", "true #"));
+          Map.entry("datastreaming.launcher.kafka-streams.command", "true #"),
+          // Same blank-default-fails-startup-validation reason - this cell never dispatches a
+          // Spark-staged plan, so any non-blank value is sufficient.
+          Map.entry("datastreaming.launcher.spark.image", "unused"),
+          Map.entry("datastreaming.launcher.spark.command", "unused"),
+          Map.entry("datastreaming.launcher.kafka.bootstrap-servers", "unused"));
     }
 
     @Override

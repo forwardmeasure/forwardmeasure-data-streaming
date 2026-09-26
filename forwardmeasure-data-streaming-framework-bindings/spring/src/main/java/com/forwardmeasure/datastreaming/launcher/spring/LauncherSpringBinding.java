@@ -34,7 +34,7 @@ import com.forwardmeasure.datastreaming.launcher.jaxrs.mapper.NullPointerExcepti
 import com.forwardmeasure.datastreaming.launcher.jaxrs.mapper.SecurityExceptionMapper;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.mapper.UnsupportedOperationExceptionMapper;
 import com.forwardmeasure.openworkflow.execution.client.ApiClient;
-import com.forwardmeasure.openworkflow.execution.client.api.ExecutionsApi;
+import com.forwardmeasure.openworkflow.execution.client.api.WorkflowExecutionsApi;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import java.net.URI;
@@ -56,12 +56,12 @@ import org.springframework.security.web.SecurityFilterChain;
 
 /**
  * Spring composition for the ingestion launcher - real {@link KubernetesClient}/{@link
- * ExecutionsApi} construction and real config. Registers the shared JAX-RS resources and mappers
- * into the single Jersey {@code ResourceConfig} via {@link ResourceConfigCustomizer}, ported from
- * forwardmeasure-entity-intelligence's own {@code IngestionServiceSpringBinding} (itself ported
- * from fowf's real {@code OpenWorkflowDefinitionManagementSpringBinding}) - Jersey needs every
- * {@code @Provider} exception mapper registered explicitly here, unlike Quarkus's build-time Jandex
- * auto-discovery.
+ * WorkflowExecutionsApi} construction and real config. Registers the shared JAX-RS resources and
+ * mappers into the single Jersey {@code ResourceConfig} via {@link ResourceConfigCustomizer},
+ * ported from forwardmeasure-entity-intelligence's own {@code IngestionServiceSpringBinding}
+ * (itself ported from fowf's real {@code OpenWorkflowDefinitionManagementSpringBinding}) - Jersey
+ * needs every {@code @Provider} exception mapper registered explicitly here, unlike Quarkus's
+ * build-time Jandex auto-discovery.
  */
 @Configuration(proxyBeanMethods = false)
 public class LauncherSpringBinding {
@@ -90,7 +90,7 @@ public class LauncherSpringBinding {
   }
 
   @Bean
-  ExecutionsApi executionsApi(
+  WorkflowExecutionsApi executionsApi(
       @Value("${datastreaming.launcher.fowf.base-url}") String baseUrl,
       @Value("${datastreaming.launcher.fowf.keycloak.token-url}") String tokenUrl,
       @Value("${datastreaming.launcher.fowf.keycloak.client-id}") String clientId,
@@ -99,7 +99,7 @@ public class LauncherSpringBinding {
     apiClient.setBasePath(baseUrl);
     apiClient.setBearerToken(
         new KeycloakClientCredentialsTokenSupplier(URI.create(tokenUrl), clientId, clientSecret));
-    return new ExecutionsApi(apiClient);
+    return new WorkflowExecutionsApi(apiClient);
   }
 
   /**
@@ -157,7 +157,10 @@ public class LauncherSpringBinding {
       @Value("${datastreaming.launcher.kafka-streams.image}") String kafkaStreamsImage,
       @Value("${datastreaming.launcher.kafka-streams.command}") String kafkaStreamsCommand,
       @Value("${datastreaming.launcher.k8s.image-pull-secrets}") String pullSecrets,
-      @Value("${datastreaming.launcher.k8s.host-aliases}") String hostAliases) {
+      @Value("${datastreaming.launcher.k8s.host-aliases}") String hostAliases,
+      @Value("${datastreaming.launcher.spark.image:}") String sparkImage,
+      @Value("${datastreaming.launcher.spark.command:}") String sparkCommand,
+      @Value("${datastreaming.launcher.kafka.bootstrap-servers:}") String kafkaBootstrapServers) {
     return new DirectIngestionLauncher(
         policy,
         authorization,
@@ -166,12 +169,15 @@ public class LauncherSpringBinding {
         kafkaStreamsImage,
         kafkaStreamsCommand,
         commaSeparatedList(pullSecrets),
-        commaSeparatedMap(hostAliases));
+        commaSeparatedMap(hostAliases),
+        blankToNull(sparkImage),
+        blankToNull(sparkCommand),
+        blankToNull(kafkaBootstrapServers));
   }
 
   @Bean
   WorkflowIngestionLauncher workflowIngestionLauncher(
-      ExecutionsApi executionsApi, AuthorizationService authorization) {
+      WorkflowExecutionsApi executionsApi, AuthorizationService authorization) {
     return new WorkflowIngestionLauncher(executionsApi, authorization);
   }
 
@@ -236,5 +242,15 @@ public class LauncherSpringBinding {
       }
     }
     return result;
+  }
+
+  /**
+   * A real deployment that never needs the Spark two-Job pipeline leaves {@code
+   * datastreaming.launcher.spark.*}/{@code datastreaming.launcher.kafka.bootstrap-servers} unset -
+   * {@link DirectIngestionLauncher}'s own fullest constructor requires {@code null}, not an empty
+   * string, to correctly report "not configured for Spark" (see its own javadoc).
+   */
+  private static String blankToNull(String value) {
+    return value == null || value.isBlank() ? null : value;
   }
 }

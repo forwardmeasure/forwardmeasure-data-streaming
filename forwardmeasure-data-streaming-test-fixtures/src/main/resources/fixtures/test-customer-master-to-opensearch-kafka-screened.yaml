@@ -1,0 +1,160 @@
+# The kafka-sourced, screened sibling of test-customer-master-to-opensearch-kafka.yaml - adds the one
+# screening_hits field rule test-customer-master-to-opensearch-screened.yaml adds (see that YAML's own
+# comment for why it's a real, separate spec/index rather than an edit to the base one), on a
+# kafka-sourced spec instead of a file-sourced one - sidesteps having to inject a real CSV file into a
+# dispatched Spark pod's own filesystem entirely: SparkIngestionRunner's real Kafka source support
+# reads real rows seeded onto a real topic the same way TestCustomerMasterFixtures#boundedKafkaSpec's
+# own seeding contract already documents.
+#
+# Deliberately options-based, not uri-based like test-customer-master-to-opensearch-kafka.yaml's own
+# source: this spec is read by Spark (SparkIngestionRunner, once the HEAVY screening transform below
+# triggers a real SparkStagePlan), not by BoundedKafkaConsumerRunner/KafkaConnectorUri - Spark's own
+# native kafka source (SparkCorrelationEngine#readSource) reads kafka.bootstrap.servers/subscribe/
+# startingOffsets/endingOffsets straight off source.options(), never parsing source.uri() at all (a
+# real, confirmed difference from the URI-based convention BoundedKafkaConsumerRunner/
+# KafkaStreamsDeliveryEngine use - see SparkKafkaConnectorIntegrationTest for the same options shape).
+sources:
+  - sourceKey: test-customer-master-customer-master
+    trustWeight: 1.0
+    source:
+      connector: kafka
+      uri: "n/a"
+      options:
+        kafka.bootstrap.servers: "{{KAFKA_BROKERS}}"
+        subscribe: "{{KAFKA_TOPIC}}"
+        startingOffsets: earliest
+        endingOffsets: latest
+      schema:
+        ref: schema://test-customer-master/customer-master/1.0
+    mapper:
+      target: schema://party/1.0
+      fields:
+        - target: uid
+          source: ENTITYS_UNIQUE_ID
+        - target: source_record_id
+          source: ENTITYS_UNIQUE_ID
+        - target: names
+          source: ENTITYS_FULL_NAME
+          repeated: true
+          metadata:
+            name_type: PRIMARY
+        - target: names
+          source: TRADE_AS_NAME
+          optional: true
+          repeated: true
+          metadata:
+            name_type: ALIAS
+        - target: names
+          source: FORMER_NAME
+          optional: true
+          repeated: true
+          metadata:
+            name_type: ALIAS
+        - target: entity_kind
+          source: ENTITYS_TYPE
+          transform: classify_party_kind_test_customer_master
+        - target: identifiers
+          inputs:
+            business_entity_record_id: BUSINESS_ENTITY_RECORD_ID
+            gems_id: GEMS_ID
+            entity_public_identifier: ENTITY_PUBLIC_IDENTIFIER
+          transform: build_test_customer_master_identifiers
+          optional: true
+        - target: date_of_birth
+          source: DATE_OF_BIRTH_DATE_OF_INCORPORATION
+          transform: parse_yyyymmdd
+          optional: true
+        - target: nationalities
+          source: COUNTRY_OF_NATIONALITY
+          transform: resolve_iso2_country
+          optional: true
+          repeated: true
+        - target: nationalities
+          source: COUNTRY_OF_CITIZENSHIP_INCORPORATION
+          transform: resolve_iso2_country
+          optional: true
+          repeated: true
+        - target: countries
+          source: ENTITY_LOCATION_1_COUNTRY
+          transform: resolve_iso2_country
+          optional: true
+          repeated: true
+        - target: countries
+          source: ENTITY_LOCATION_2_COUNTRY
+          transform: resolve_iso2_country
+          optional: true
+          repeated: true
+        - target: countries
+          source: ENTITY_LOCATION_3_COUNTRY
+          transform: resolve_iso2_country
+          optional: true
+          repeated: true
+        - target: position
+          source: JOB_TITLE
+          optional: true
+        - target: further_information
+          inputs:
+            Occupation: OCCUPATION
+            Classification: ENTITY_CLASSIFICATION
+            Primary BU: PRIMARY_BUSINESS_UNIT
+            Contracting: CONTRACTING_ENTITIES_AND_LOCATIONS
+            Servicing: SERVICING_ENTITIES_AND_LOCATIONS
+            Booking: BOOKING_ENTITIES_AND_LOCATIONS
+            Additional BU: ADDITIONAL_BUSINESS_UNITS_AND_LOCATIONS
+          transform: join_labeled_fields
+          optional: true
+        - target: locations
+          inputs:
+            address_line_1_1: ENTITY_LOCATION_1_ADDRESS_LINE_1
+            address_line_2_1: ENTITY_LOCATION_1_ADDRESS_LINE_2
+            city_1: ENTITY_LOCATION_1_CITY
+            state_or_province_1: ENTITY_LOCATION_1_STATE_PROVINCE
+            country_1: ENTITY_LOCATION_1_COUNTRY
+            address_line_1_2: ENTITY_LOCATION_2_ADDRESS_LINE_1
+            address_line_2_2: ENTITY_LOCATION_2_ADDRESS_LINE_2
+            city_2: ENTITY_LOCATION_2_CITY
+            state_or_province_2: ENTITY_LOCATION_2_STATE_PROVINCE
+            country_2: ENTITY_LOCATION_2_COUNTRY
+            address_line_1_3: ENTITY_LOCATION_3_ADDRESS_LINE_1
+            address_line_2_3: ENTITY_LOCATION_3_ADDRESS_LINE_2
+            city_3: ENTITY_LOCATION_3_CITY
+            state_or_province_3: ENTITY_LOCATION_3_STATE_PROVINCE
+            country_3: ENTITY_LOCATION_3_COUNTRY
+          transform: build_test_customer_master_locations
+          optional: true
+        - target: screening_hits
+          inputs:
+            full_name: ENTITYS_FULL_NAME
+            first_name: ENTITY_FIRST_NAME
+            last_name: ENTITY_LAST_NAME
+            alias: TRADE_AS_NAME
+            entity_type: ENTITYS_TYPE
+            country: ENTITY_LOCATION_1_COUNTRY
+            nationality: COUNTRY_OF_NATIONALITY
+            dob: DATE_OF_BIRTH_DATE_OF_INCORPORATION
+          transform: screen_against_worldcheck_reference
+          optional: true
+
+sink:
+  connector: opensearch
+  uri: "{{OPENSEARCH_URL}}"
+  index: test-customer-master-screening-records-screened
+  schema:
+    ref: schema://party/1.0
+  options:
+    idField: uid
+    indexSettingsFile: "{{INDEX_SETTINGS_FILE}}"
+
+executionMode: BOUNDED
+
+delivery:
+  exactlyOnce: true
+  concurrency:
+    preferred: 16
+    maximum: 32
+  flowControl:
+    maxInFlightRecords: 5000
+
+errors:
+  malformedRecord: dead-letter
+  sinkFailure: retry

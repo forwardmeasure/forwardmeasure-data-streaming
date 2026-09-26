@@ -320,14 +320,16 @@ class WorkflowBoundedMatrixSpringKafkaStreamsSmokeTest {
                 .name("fds-spring-workflow-bounded-ks-worldcheck")
                 .title("FDS Spring workflow-bounded WorldCheck ingestion (Kafka-Streams)")
                 .description(
-                    "Real Phase G matrix cell - WorkflowBoundedMatrixSpringKafkaStreamsSmokeTest."));
+                    "Real Phase G matrix cell -"
+                        + " WorkflowBoundedMatrixSpringKafkaStreamsSmokeTest."));
 
     WorkflowDefinition created =
         definitions.createWorkflowDefinition(
             workflow.getId(),
             new CreateWorkflowDefinitionRequest()
                 .version("1.0.0")
-                .source(workflowSource(asyncApiUrl, specBase64, seedTsvBase64, gatewayIp, pekkoImage)));
+                .source(
+                    workflowSource(asyncApiUrl, specBase64, seedTsvBase64, gatewayIp, pekkoImage)));
 
     WorkflowDefinitionValidation validation =
         governance.validateWorkflowDefinition(

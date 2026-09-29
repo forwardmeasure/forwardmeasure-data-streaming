@@ -21,7 +21,7 @@ helmDefaults:
   atomic: true
 
 releases:
-  # Real precondition this release closes (environments/gcp-openworkflow-prod.yaml.gotmpl's own
+  # Real precondition this release closes (environments/gcp-platform-cluster.yaml.gotmpl's own
   # comment on authorizationClientId/credentialsSecretName): before this Job runs, nothing creates
   # the "datastreaming" Keycloak client or data-streaming-launcher-credentials - the launcher pod
   # below would come up but every fowf call it makes would fail authorization/auth closed. A

@@ -31,7 +31,7 @@ keycloak:
   datastreamingClientId: datastreaming
   datastreamingRole: workflow-execution-controller
   # lux is the one real tenant on this cluster (matches forwardmeasure-openworkflow's own
-  # gcp-openworkflow-prod.yaml.gotmpl tenants: [{alias: lux}]) - not requiredEnv, since this repo
+  # gcp-platform-cluster.yaml.gotmpl tenants: [{alias: lux}]) - not requiredEnv, since this repo
   # has exactly one real environment today.
   tenantAlias: lux
 # The Keycloak realm-admin credential (KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD only - never the full

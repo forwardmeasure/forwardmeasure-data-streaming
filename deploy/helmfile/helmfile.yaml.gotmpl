@@ -31,17 +31,27 @@ environments:
   gcp-openworkflow-prod:
     values:
       - environments/base.yaml
-      - environments/gcp-openworkflow-prod.yaml.gotmpl
+      - environments/gcp-platform-cluster.yaml.gotmpl
       - ../../../forwardmeasure-platform/deploy/helmfile/shared/common.yaml.gotmpl
       - ../../../forwardmeasure-platform/deploy/helmfile/shared/chart-versions.yaml
       - ../../../forwardmeasure-platform/deploy/helmfile/shared/image-versions.yaml
       - ../../../forwardmeasure-platform/deploy/helmfile/shared/clusters/gcp-openworkflow-prod.yaml.gotmpl
+  # Worked example of a second platform cluster - same profile, different shared cluster file.
+  gcp-greenfield-example:
+    values:
+      - environments/base.yaml
+      - environments/gcp-platform-cluster.yaml.gotmpl
+      - ../../../forwardmeasure-platform/deploy/helmfile/shared/common.yaml.gotmpl
+      - ../../../forwardmeasure-platform/deploy/helmfile/shared/chart-versions.yaml
+      - ../../../forwardmeasure-platform/deploy/helmfile/shared/image-versions.yaml
+      - ../../../forwardmeasure-platform/deploy/helmfile/shared/clusters/gcp-greenfield-example.yaml.gotmpl
 
 {{- /* Same pattern forwardmeasure-openworkflow's own top-level helmfile.yaml.gotmpl uses: a
 list of file paths per environment, passed through to each sub-helmfile explicitly, not
 .Environment.Values (which isn't the real mechanism helmfile uses here). */}}
 {{- $envLayers := dict
-  "gcp-openworkflow-prod" (list "environments/base.yaml" "environments/gcp-openworkflow-prod.yaml.gotmpl" "../../../forwardmeasure-platform/deploy/helmfile/shared/common.yaml.gotmpl" "../../../forwardmeasure-platform/deploy/helmfile/shared/chart-versions.yaml" "../../../forwardmeasure-platform/deploy/helmfile/shared/image-versions.yaml" "../../../forwardmeasure-platform/deploy/helmfile/shared/clusters/gcp-openworkflow-prod.yaml.gotmpl")
+  "gcp-openworkflow-prod" (list "environments/base.yaml" "environments/gcp-platform-cluster.yaml.gotmpl" "../../../forwardmeasure-platform/deploy/helmfile/shared/common.yaml.gotmpl" "../../../forwardmeasure-platform/deploy/helmfile/shared/chart-versions.yaml" "../../../forwardmeasure-platform/deploy/helmfile/shared/image-versions.yaml" "../../../forwardmeasure-platform/deploy/helmfile/shared/clusters/gcp-openworkflow-prod.yaml.gotmpl")
+  "gcp-greenfield-example" (list "environments/base.yaml" "environments/gcp-platform-cluster.yaml.gotmpl" "../../../forwardmeasure-platform/deploy/helmfile/shared/common.yaml.gotmpl" "../../../forwardmeasure-platform/deploy/helmfile/shared/chart-versions.yaml" "../../../forwardmeasure-platform/deploy/helmfile/shared/image-versions.yaml" "../../../forwardmeasure-platform/deploy/helmfile/shared/clusters/gcp-greenfield-example.yaml.gotmpl")
 }}
 {{- $envFiles := index $envLayers .Environment.Name | default (list) }}
 

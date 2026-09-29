@@ -19,7 +19,7 @@
 # forwardmeasure-openworkflow's own deploy/helmfile/install.sh shape, scaled down to this
 # repo's one real release (no migrations/engines/multi-stage sequence to run).
 #
-# Real preconditions this script does NOT provision (see environments/gcp-openworkflow-prod.yaml.gotmpl's
+# Real preconditions this script does NOT provision (see environments/gcp-platform-cluster.yaml.gotmpl's
 # own comments for exactly which): the data-streaming-launcher-credentials Secret (via
 # forwardmeasure-platform's own platform-secrets convention), the docker-io-credentials
 # imagePullSecret, and confirming the "datastreaming" AuthZEN client exists in this cluster's own

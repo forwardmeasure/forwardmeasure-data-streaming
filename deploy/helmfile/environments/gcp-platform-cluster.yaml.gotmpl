@@ -14,13 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# The real target cluster (2026-09-26, per direct user correction): FDS's launcher deploys into
-# the SAME cluster forwardmeasure-openworkflow already runs in -
-# gke_genai-llm-393115_us-central1_openworkflow-prod - not a separate "data-fabric-prod" cluster.
-# Every value below is either a fixed, confirmed fact of that one real cluster (cross-checked
-# directly against forwardmeasure-openworkflow's own deploy/helmfile/environments/
-# gcp-openworkflow-prod.yaml.gotmpl and helmfiles/execution-services.yaml.gotmpl - not guessed) or
-# explicitly flagged as needing real provisioning before this can actually be applied.
+# Profile for the data-streaming launcher on a GCP cluster running the shared
+# forwardmeasure-platform, used by the gcp-openworkflow-prod and gcp-greenfield-example
+# environments (was gcp-openworkflow-prod.yaml.gotmpl).
+# Nothing here is specific to one cluster: cluster facts (domain, tenants, endpoints, GCP project,
+# Cloud SQL instance) come from that environment's forwardmeasure-platform shared cluster file
+# (shared/clusters/<env>.yaml.gotmpl), loaded after this one.
 
 # Which framework's image this cluster actually runs - matches data-fabric-devops's own real,
 # already-deployed choice (only quarkus has a real, pushed launcher image today; spring/micronaut
@@ -31,7 +30,7 @@ imagePullPolicy: Always
 
 # Cluster facts, Kafka/fowf/Keycloak endpoints, the organization client (forwardmeasure-public) and
 # the image-pull Secret come from forwardmeasure-platform/deploy/helmfile/shared/ (common.yaml.gotmpl
-# and clusters/gcp-openworkflow-prod.yaml.gotmpl) - read by helmfiles/launcher.yaml.gotmpl as
+# and clusters/<env>.yaml.gotmpl) - read by helmfiles/launcher.yaml.gotmpl as
 # .Values.platform.*.
 
 # datastreaming is this launcher's own AuthZEN resource-authorization client id (same id

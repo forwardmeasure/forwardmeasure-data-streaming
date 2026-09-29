@@ -197,7 +197,7 @@ class DirectIngestionMatrixQuarkusKafkaStreamsTestCustomerMasterSmokeTest {
 
     static final String KAFKA_STREAMS_IMAGE =
         "docker.io/forwardmeasure/data-streaming-executor-kafka-streams@sha256:"
-            + "eadb112eccae14b5f098118f46916d240d53c6e9a9fcd4262752d51c436ed827";
+            + "8d60d48814d13200fe75af38eb00d9034d15468d83f0a4a5c53a111439a3df8e";
 
     static final String PULL_SECRET_NAME = "dockerhub-pull-secret";
 

@@ -104,7 +104,13 @@ releases:
               requests: {cpu: "250m", memory: "512Mi"}
               limits: {cpu: "1000m", memory: "1Gi"}
             image:
-              repository: {{ printf "docker.io/forwardmeasure/data-streaming-launcher-%s" .Values.launcherFramework | quote }}
+              # No registry prefix here - java-microservice-helm-chart's own imageRef helper
+              # (_helpers.tpl) always prepends .image.registry (defaults to "docker.io") to
+              # .image.repository. A previous version of this file included "docker.io/" in
+              # repository too, which rendered as the literal, unpullable
+              # "docker.io/docker.io/forwardmeasure/..." - found by actually reading the rendered
+              # `helmfile template` output, not assumed.
+              repository: {{ printf "forwardmeasure/data-streaming-launcher-%s" .Values.launcherFramework | quote }}
               tag: "1.1.0"
               pullPolicy: {{ .Values.imagePullPolicy }}
             env:

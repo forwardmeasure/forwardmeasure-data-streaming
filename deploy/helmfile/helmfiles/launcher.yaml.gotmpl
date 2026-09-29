@@ -55,7 +55,8 @@ releases:
           clientUuid: {{ dig "keycloak" "clientUuid" "00000000-0000-0000-0000-000000000001" .Values | quote }}
           clientId: {{ dig "keycloak" "clientId" "openworkflow" .Values | quote }}
           datastreamingClientId: {{ .Values.authorizationClientId | quote }}
-          tenantAlias: {{ dig "tenantAlias" "lux" .Values | quote }}
+          # This cluster's tenant, from forwardmeasure-platform's shared cluster file.
+          tenantAlias: {{ (index .Values.platform.tenants 0).alias | quote }}
         credentialsSecretName: {{ .Values.platform.secrets.dataStreamingKeycloakAdmin | quote }}
         targetSecretName: {{ .Values.credentialsSecretName | quote }}
     labels: {stage: credentials, capability: data-streaming-credentials}

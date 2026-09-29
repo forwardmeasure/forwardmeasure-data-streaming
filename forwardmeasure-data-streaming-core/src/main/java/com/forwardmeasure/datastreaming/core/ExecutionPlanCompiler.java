@@ -33,6 +33,8 @@ import com.forwardmeasure.datastreaming.mappers.TransformCharacteristicsRegistry
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The planner: compiles one author-facing {@link IngestionSpec} into the {@link ExecutionPlan} a
@@ -54,6 +56,7 @@ import java.util.Optional;
  */
 public final class ExecutionPlanCompiler {
 
+  private static final Logger LOGGER = LoggerFactory.getLogger(ExecutionPlanCompiler.class);
   private static final String KAFKA_CONNECTOR = "kafka";
 
   private ExecutionPlanCompiler() {}
@@ -64,15 +67,27 @@ public final class ExecutionPlanCompiler {
     ExecutionProfile profile =
         new ExecutionProfile(spec.sourceCardinality(), spec.executionMode(), engine);
     Optional<SparkStagePlan> sparkStage = resolveSparkStage(spec, folded);
-    return new ExecutionPlan(
-        profile,
-        spec.sources(),
-        spec.blockingField(),
-        sparkStage,
-        spec.transforms(),
-        spec.sink(),
-        spec.delivery(),
-        spec.errors());
+    ExecutionPlan plan =
+        new ExecutionPlan(
+            profile,
+            spec.sources(),
+            spec.blockingField(),
+            sparkStage,
+            spec.transforms(),
+            spec.sink(),
+            spec.delivery(),
+            spec.errors());
+    if (LOGGER.isInfoEnabled()) {
+      LOGGER.info(
+          "plan.compiled engine={} cardinality={} mode={} sparkStage={} cost={} state={}",
+          engine,
+          profile.sourceCardinality(),
+          profile.executionMode(),
+          sparkStage.map(SparkStagePlan::handoffTopic).orElse("absent"),
+          folded.cost(),
+          folded.state());
+    }
+    return plan;
   }
 
   private static DeliveryEngineKind resolveEngine(

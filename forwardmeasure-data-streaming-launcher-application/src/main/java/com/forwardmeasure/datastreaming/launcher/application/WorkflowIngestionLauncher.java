@@ -48,11 +48,45 @@ public final class WorkflowIngestionLauncher {
 
   private final WorkflowExecutionsApi executionsApi;
   private final AuthorizationService authorization;
+  private final boolean assertSubjectActor;
 
+  /**
+   * Defaults {@code assertSubjectActor} to {@code false} - see the 3-arg constructor's own javadoc
+   * for why {@code false} is the only safe default today. Every one of this class's own 9 real
+   * production call sites (fei's/FDS's own Quarkus/Spring/Micronaut framework bindings) uses this
+   * constructor - none of them need to change to pick up the 2026-09-26 fix below.
+   */
   public WorkflowIngestionLauncher(
       WorkflowExecutionsApi executionsApi, AuthorizationService authorization) {
+    this(executionsApi, authorization, false);
+  }
+
+  /**
+   * {@code assertSubjectActor} - added 2026-09-26 as a genuine, real bug fix, not a speculative
+   * safeguard: this class used to attach {@code subjectActor} to every real {@link #launch}/{@link
+   * #cancel} call unconditionally, on the documented (but, confirmed by direct read, WRONG)
+   * assumption that fowf silently drops the field when the caller's identity lacks {@code
+   * execution:assert-subject}. It does not. {@code
+   * WorkflowExecutionManagementService.resolveSubjectActor} calls {@code authorizer.authorize(...,
+   * ASSERT_SUBJECT, ...)} the moment a caller supplies ANY {@code subjectActor} at all, and that
+   * call is fail-closed ({@code AuthorizationService.requireAuthorized} throws) - so a caller
+   * lacking the grant gets the WHOLE {@code launch}/{@code cancel} call rejected (fowf surfaces
+   * this as a 500 {@code AuthorizationDeniedException}), not a silently-ignored field. Every real
+   * fei/FDS service-account identity lacks this grant today (see
+   * docs/subject-actor-fei-adoption-handoff-2026-09-25.md's own "real, separate infrastructure
+   * step" callout in forwardmeasure-openworkflow) - so unconditional assertion would break every
+   * real {@code launch}/{@code cancel} call, not leave {@code subjectActor} merely inert. Defaults
+   * to {@code false} for exactly that reason; pass {@code true} only once a caller's own deployment
+   * has confirmed {@code execution:assert-subject} is actually granted to its own service-account
+   * identity.
+   */
+  public WorkflowIngestionLauncher(
+      WorkflowExecutionsApi executionsApi,
+      AuthorizationService authorization,
+      boolean assertSubjectActor) {
     this.executionsApi = Objects.requireNonNull(executionsApi, "executionsApi");
     this.authorization = Objects.requireNonNull(authorization, "authorization");
+    this.assertSubjectActor = assertSubjectActor;
   }
 
   /**
@@ -67,9 +101,9 @@ public final class WorkflowIngestionLauncher {
    * authorization check above, but previously dropped after that, never reaching fowf itself. fowf
    * attributes every {@code GET .../history} event to the real authenticated caller (this
    * launcher's own service-account identity) automatically regardless; {@code subjectActor} is the
-   * *additional*, opt-in assertion of the human on whose behalf that service account is acting -
-   * fowf checks the caller holds {@code execution:assert-subject} before honoring it, fail-closed;
-   * omitting it (or a caller lacking that grant) changes nothing about the call itself. {@link
+   * *additional* assertion of the human on whose behalf that service account is acting - real,
+   * confirmed fail-closed at the point of assertion (see the {@code assertSubjectActor}
+   * constructor's own javadoc for why this is opt-in, not unconditional). {@link
    * ActiveOrganization} has no display-name field, so only {@code actorId} is ever populated -
    * {@code SubjectActor .displayName} stays unset, matching its own documented optionality.
    */
@@ -86,7 +120,7 @@ public final class WorkflowIngestionLauncher {
         new WorkflowExecutionStart()
             .revisionId(request.revisionId())
             .input(request.input())
-            .subjectActor(subjectActorFor(actor));
+            .subjectActor(assertSubjectActor ? subjectActorFor(actor) : null);
     return executionsApi.startWorkflowExecution(
         request.idempotencyKey(), request.correlationId(), start);
   }
@@ -107,9 +141,10 @@ public final class WorkflowIngestionLauncher {
   /**
    * Cancels the execution. {@code ifMatch} must be the execution's current {@code ETag}/version
    * (from a prior {@link #launch}/{@link #observe} call) - fowf's own optimistic-concurrency
-   * contract, not something this class works around. {@code subjectActor} is always attached (see
-   * {@link #launch} javadoc) - previously {@code control} was built only when {@code reason} was
-   * non-null, which silently dropped subjectActor on a reasonless cancel.
+   * contract, not something this class works around. {@code subjectActor} is attached whenever
+   * {@code assertSubjectActor} is enabled (see {@link #launch} javadoc), regardless of whether
+   * {@code reason} is set - {@code control} is always built (not only when {@code reason} is
+   * non-null), so a reasonless cancel doesn't silently drop it either.
    */
   public WorkflowExecution cancel(
       UUID executionId,
@@ -126,7 +161,9 @@ public final class WorkflowIngestionLauncher {
             correlationId,
             Map.of()));
     WorkflowExecutionControl control =
-        new WorkflowExecutionControl().reason(reason).subjectActor(subjectActorFor(actor));
+        new WorkflowExecutionControl()
+            .reason(reason)
+            .subjectActor(assertSubjectActor ? subjectActorFor(actor) : null);
     return executionsApi.cancelWorkflowExecution(ifMatch, correlationId, executionId, control);
   }
 

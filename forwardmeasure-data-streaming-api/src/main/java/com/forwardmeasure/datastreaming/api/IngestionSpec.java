@@ -26,8 +26,13 @@ import java.io.InputStream;
 import java.io.Serializable;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The single, author-facing declarative ingestion spec - replaces the old {@code IngestionSpec}/
@@ -58,6 +63,8 @@ public record IngestionSpec(
     @JsonProperty("errors") ErrorPolicy errors)
     implements Serializable {
 
+  private static final Logger LOGGER = LoggerFactory.getLogger(IngestionSpec.class);
+
   public IngestionSpec {
     sources = sources == null ? List.of() : List.copyOf(sources);
     if (sources.isEmpty()) {
@@ -66,6 +73,39 @@ public record IngestionSpec(
     Objects.requireNonNull(sink, "sink");
     Objects.requireNonNull(executionMode, "executionMode");
     delivery = delivery == null ? DeliverySemantics.defaults() : delivery;
+  }
+
+  /**
+   * Logs one real, greppable {@code spec.loaded} milestone at INFO - a human reading real
+   * production logs (a launcher's own log, or a dispatched pod's) should be able to see exactly
+   * which spec ran without cross-referencing the request body. {@code digest} is a short SHA-256
+   * prefix of this spec's own canonical YAML - stable across re-loads of byte-identical content,
+   * cheap to compute once at load time, deliberately not the whole hash (16 hex chars is enough to
+   * disambiguate in a log line without wrapping it).
+   */
+  private void logLoaded() {
+    if (!LOGGER.isInfoEnabled()) {
+      return;
+    }
+    LOGGER.info(
+        "spec.loaded digest={} cardinality={} mode={} sink={}",
+        digest(),
+        sourceCardinality(),
+        executionMode,
+        sink == null ? "null" : sink.connector());
+  }
+
+  private String digest() {
+    try {
+      MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+      String canonical = sources + "|" + blockingField + "|" + sink + "|" + executionMode;
+      byte[] hash = sha256.digest(canonical.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      return HexFormat.of().formatHex(hash, 0, 8);
+    } catch (NoSuchAlgorithmException e) {
+      // SHA-256 is a JDK-guaranteed algorithm (every conforming JVM provides it) - this is
+      // unreachable in practice, not a real failure mode to design around.
+      throw new IllegalStateException("SHA-256 unavailable", e);
+    }
   }
 
   /** {@code sources.size() > 1} - a correlated spec needs a real {@code blockingField}. */
@@ -83,12 +123,16 @@ public record IngestionSpec(
   }
 
   public static IngestionSpec load(InputStream in) throws IOException {
-    return YAML.readValue(in, IngestionSpec.class);
+    IngestionSpec spec = YAML.readValue(in, IngestionSpec.class);
+    spec.logLoaded();
+    return spec;
   }
 
   public static IngestionSpec parseYaml(String yaml) {
     try {
-      return YAML.readValue(yaml, IngestionSpec.class);
+      IngestionSpec spec = YAML.readValue(yaml, IngestionSpec.class);
+      spec.logLoaded();
+      return spec;
     } catch (IOException e) {
       throw new IllegalArgumentException("invalid IngestionSpec YAML", e);
     }

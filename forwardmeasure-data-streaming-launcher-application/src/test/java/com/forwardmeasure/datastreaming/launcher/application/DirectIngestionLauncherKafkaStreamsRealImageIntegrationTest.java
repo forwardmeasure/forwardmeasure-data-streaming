@@ -99,7 +99,7 @@ final class DirectIngestionLauncherKafkaStreamsRealImageIntegrationTest {
   private static final String KAFKA_TOPIC = "worldcheck-rows";
   private static final String KAFKA_STREAMS_IMAGE =
       "docker.io/forwardmeasure/data-streaming-executor-kafka-streams@sha256:"
-          + "fa7235432b6991a2d717d0e8cb5f6b5a39786023782d9834e681afb41ea001fd";
+          + "eadb112eccae14b5f098118f46916d240d53c6e9a9fcd4262752d51c436ed827";
   private static final String PULL_SECRET_NAME = "dockerhub-pull-secret";
   private static final String RUN_COMMAND = "java -jar /deployments/application.jar";
   private static final ActiveOrganization ACTOR =

@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -65,6 +66,13 @@ public final class FieldMappingEngine {
   private static final Logger LOGGER = LoggerFactory.getLogger(FieldMappingEngine.class);
 
   private static final Pattern TEMPLATE_PLACEHOLDER = Pattern.compile("\\{([^}]+)}");
+
+  /** First-N-then-every-Mth sampling for {@code record.transformed} - see {@link #map} below. */
+  private static final long SAMPLE_FIRST_N = 5;
+
+  private static final long SAMPLE_EVERY_M = 1000;
+
+  private final AtomicLong callCount = new AtomicLong();
 
   public Map<String, Object> map(SourceRow row, TransformSpec spec) {
     return map(row, spec, Map.of());
@@ -110,7 +118,48 @@ public final class FieldMappingEngine {
       }
     }
 
+    logSampledTransform(row, spec, result);
     return result;
+  }
+
+  /**
+   * Real, greppable {@code record.transformed} milestone at INFO - sampled (the first {@link
+   * #SAMPLE_FIRST_N} rows, then every {@link #SAMPLE_EVERY_M}th) rather than every row, since a
+   * production dataset can be hundreds of thousands of rows and logging every one would drown the
+   * log stream for no added visibility. Logs the before/after side by side so a human reading real
+   * production logs can visually diff a real transform's actual behavior, not just its output.
+   * {@code before} is reconstructed from exactly the source fields {@code spec}'s own rules
+   * reference (raw {@code source()}, template placeholders, named {@code inputs()}) - a targeted
+   * snapshot of what this transform actually read, not an arbitrary full-row dump this engine has
+   * no generic way to produce (see {@link SourceRow}'s own single-field-accessor shape).
+   */
+  private void logSampledTransform(SourceRow row, TransformSpec spec, Map<String, Object> after) {
+    if (!LOGGER.isInfoEnabled()) {
+      return;
+    }
+    long n = callCount.incrementAndGet();
+    if (n > SAMPLE_FIRST_N && n % SAMPLE_EVERY_M != 0) {
+      return;
+    }
+    LOGGER.info("record.transformed n={} before={} after={}", n, inputSnapshot(row, spec), after);
+  }
+
+  private Map<String, String> inputSnapshot(SourceRow row, TransformSpec spec) {
+    Map<String, String> snapshot = new LinkedHashMap<>();
+    for (FieldRule rule : spec.fields()) {
+      if (rule.source() != null) {
+        snapshot.put(rule.source(), row.get(rule.source()));
+      }
+      if (rule.template() != null) {
+        Matcher matcher = TEMPLATE_PLACEHOLDER.matcher(rule.template());
+        while (matcher.find()) {
+          String columnName = matcher.group(1);
+          snapshot.put(columnName, row.get(columnName));
+        }
+      }
+      rule.effectiveInputs().values().forEach(field -> snapshot.put(field, row.get(field)));
+    }
+    return snapshot;
   }
 
   /**

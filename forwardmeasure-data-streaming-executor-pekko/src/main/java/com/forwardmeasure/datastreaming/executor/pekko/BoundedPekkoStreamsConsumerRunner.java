@@ -24,6 +24,8 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.UUID;
 import org.apache.pekko.actor.ActorSystem;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Runs one {@code BOUNDED} ingestion via Pekko - named the same way {@link
@@ -44,6 +46,9 @@ import org.apache.pekko.actor.ActorSystem;
  */
 final class BoundedPekkoStreamsConsumerRunner {
 
+  private static final Logger LOGGER =
+      LoggerFactory.getLogger(BoundedPekkoStreamsConsumerRunner.class);
+
   private BoundedPekkoStreamsConsumerRunner() {}
 
   static CompletedExecutionHandle run(ExecutionPlan plan, ExecutionMode mode, ActorSystem system) {
@@ -57,11 +62,23 @@ final class BoundedPekkoStreamsConsumerRunner {
             plan.delivery(),
             plan.errors());
     String id = "fds-pekko-bounded-" + UUID.randomUUID();
+    long startMillis = System.currentTimeMillis();
     try {
       if (spec.sources().size() == 1) {
-        new PekkoIngestionRunner().run(spec, system);
+        PekkoIngestionRunner.IngestionResult result = new PekkoIngestionRunner().run(spec, system);
+        LOGGER.info(
+            "run.completed engine=PEKKO_STREAMS mode=BOUNDED cardinality=SINGLE"
+                + " recordsProcessed={} elapsedMs={}",
+            result.recordsProcessed(),
+            System.currentTimeMillis() - startMillis);
       } else {
-        PekkoCorrelationRunner.run(spec, system);
+        PekkoCorrelationRunner.CorrelationResult result = PekkoCorrelationRunner.run(spec, system);
+        LOGGER.info(
+            "run.completed engine=PEKKO_STREAMS mode=BOUNDED cardinality=CORRELATED"
+                + " sourceCount={} groupCount={} elapsedMs={}",
+            result.sourceCount(),
+            result.groupCount(),
+            System.currentTimeMillis() - startMillis);
       }
     } catch (IOException e) {
       throw new UncheckedIOException("BoundedPekkoStreamsConsumerRunner: run failed", e);

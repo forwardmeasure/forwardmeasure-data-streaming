@@ -70,7 +70,7 @@ class DirectIngestionMatrixMicronautPekkoTestCustomerMasterSmokeTest
 
   private static final String PEKKO_IMAGE =
       "docker.io/forwardmeasure/data-streaming-executor-pekko@sha256:"
-          + "1b3d5e60475535643db17ce9038c293252eba3f0be1a48e2e982ad09c96f36af";
+          + "a1eab0f12073b4b2f0215fd350061522ffa01aca08ab259a81e8053ee04a90e3";
 
   private static final String PULL_SECRET_NAME = "dockerhub-pull-secret";
   private static final ObjectMapper MAPPER = new ObjectMapper();

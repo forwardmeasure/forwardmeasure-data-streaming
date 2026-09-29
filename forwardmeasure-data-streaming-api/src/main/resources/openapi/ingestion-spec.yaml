@@ -1,0 +1,335 @@
+openapi: 3.1.0
+info:
+  title: FDS IngestionSpec
+  version: "1.0.0"
+  description: >
+    Real OpenAPI schema for com.forwardmeasure.datastreaming.api.IngestionSpec and its own nested
+    types (forwardmeasure-data-streaming-api) - describes the EXISTING wire shape those hand-written
+    Java records already serialize/deserialize via Jackson (@JsonProperty-annotated, parsed via
+    IngestionSpec.parseYaml/.load). This document does not generate Java code and does not replace
+    those records - it exists purely so fowf's own real, already-working external-$ref admission
+    validation (WorkflowResourceResolver/DataSchemaValidator/AllowlistedHttpWorkflowResourceLoader)
+    has a real schema to validate a real IngestionSpec document against, instead of each consumer
+    hand-flattening its own ad hoc field list. Added 2026-09-26 as Item 1 of the
+    "stop flattening" plan (see forwardmeasure-entity-intelligence's own plan history).
+
+    Every field below was verified against the current, real Java source before being written here -
+    not guessed from the type names. Real, non-obvious details worth calling out for anyone
+    maintaining this alongside the Java records:
+      - This is real OpenAPI 3.1, which aligns fully with JSON Schema 2020-12 - "nullable: true"
+        (an OpenAPI 3.0-ism) is deliberately NOT used anywhere here, since a 2020-12 validator
+        (fowf's own DataSchemaValidator uses networknt/json-schema-validator against
+        SpecificationVersion.DRAFT_2020_12) silently ignores unknown keywords rather than erroring -
+        every optional/nullable field below uses the real 2020-12 idiom instead (`type: [X, "null"]`
+        for scalars, `oneOf: [{type: "null"}, {$ref: ...}]` for nullable object refs).
+      - SinkSpec.BatchingSpec.maxWait (a java.time.Duration) serializes as a plain NUMBER (seconds,
+        with fractional nanos), not an ISO-8601 duration string - IngestionSpec's own YAML
+        ObjectMapper registers JavaTimeModule but never disables its default
+        WRITE_DURATIONS_AS_TIMESTAMPS behavior. Confirmed by reading that ObjectMapper's own
+        construction, not assumed from JavaTimeModule's docs.
+      - TransformSpec.FieldRule's own "exactly one of source/template/inputs" rule (and raw's own
+        "requires source, not template/inputs" rule) are DOCUMENTATION ONLY in the real Java code
+        today - FieldMappingEngine enforces neither at runtime. Modeling the first as a real oneOf
+        here is a deliberate tightening this schema introduces, not a transcription of an
+        already-enforced constraint - flagged so a future maintainer doesn't assume runtime parity.
+
+components:
+  schemas:
+    IngestionSpec:
+      type: object
+      description: >
+        The single, author-facing declarative ingestion spec. sources.size()==1 means SINGLE
+        cardinality (blockingField should be absent); >1 means CORRELATED (blockingField required as
+        a real, enforced runtime constraint - IngestionSpec.sourceCardinality() derives this from
+        sources alone, so a validated document is already self-describing on this axis).
+      required: [sources, sink, executionMode]
+      additionalProperties: false
+      properties:
+        sources:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/SourcePlan"
+        blockingField:
+          type: [string, "null"]
+          description: Required (by real runtime convention, not enforced in this schema) when sources.size() > 1.
+        transforms:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/TransformGraph"
+        sink:
+          $ref: "#/components/schemas/SinkSpec"
+        executionMode:
+          $ref: "#/components/schemas/ExecutionMode"
+        delivery:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/DeliverySemantics"
+          description: Optional - IngestionSpec's own compact constructor defaults to DeliverySemantics.defaults() when absent/null.
+        errors:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/ErrorPolicy"
+
+    SourcePlan:
+      type: object
+      description: >
+        One source in an IngestionSpec's own sources list - same shape as the old
+        CorrelationSpec.SourceEntry, field-for-field. No @JsonProperty annotations on this record;
+        Jackson uses the record's own component names directly (sourceKey/source/mapper/trustWeight).
+      required: [sourceKey, source, mapper, trustWeight]
+      additionalProperties: false
+      properties:
+        sourceKey:
+          type: string
+        source:
+          $ref: "#/components/schemas/SourceSpec"
+        mapper:
+          $ref: "#/components/schemas/TransformSpec"
+        trustWeight:
+          type: number
+
+    SourceSpec:
+      type: object
+      description: >
+        Where and how to read a source. `query` is JDBC-style connectors only (null otherwise).
+        `options` is a deliberately open, connector-specific string-to-string bag - never a place
+        for a literal secret (a reference/vault-path only, per the real Java field's own javadoc).
+      required: [connector, uri]
+      additionalProperties: false
+      properties:
+        connector:
+          type: string
+          description: "e.g. file, jdbc, kafka, opensearch, grpc, object-storage - see D5 for the real connector-module mapping."
+        uri:
+          type: string
+        format:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/FormatSpec"
+        schema:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/SchemaRef"
+        query:
+          type: [string, "null"]
+        options:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+
+    FormatSpec:
+      type: object
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          description: "e.g. csv, json"
+
+    SchemaRef:
+      type: object
+      additionalProperties: false
+      properties:
+        ref:
+          type: string
+
+    TransformSpec:
+      type: object
+      description: >
+        A runtime-interpreted field-mapping spec: target field <- named input(s) [+ transform
+        name]. `target` at the top level names the destination schema this spec produces fields
+        for (e.g. schema://party/1.0) - informational today, not validated against a generated
+        model class.
+      required: [fields]
+      additionalProperties: false
+      properties:
+        target:
+          type: [string, "null"]
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldRule"
+
+    FieldRule:
+      type: object
+      description: >
+        One mapping rule. Exactly one of source/template/inputs should be set - modeled here as a
+        real oneOf, a deliberate tightening beyond today's real (unenforced) runtime behavior; see
+        this document's own top-level description for why. `raw:true` additionally requires
+        `source` and forbids `template`/`inputs` (also unenforced at runtime today, not separately
+        modeled here to avoid over-constraining a still-evolving field).
+      required: [target]
+      additionalProperties: false
+      properties:
+        target:
+          type: string
+        source:
+          type: [string, "null"]
+        template:
+          type: [string, "null"]
+          description: "Combine multiple columns via {ColumnName} placeholders, e.g. \"{LAST NAME}, {FIRST NAME}\"."
+        inputs:
+          type: [object, "null"]
+          additionalProperties:
+            type: string
+        transform:
+          type: [string, "null"]
+          description: A named transform (FDS's shared NamedTransformRegistry, or a caller's own supplementalTransforms map).
+        optional:
+          type: [boolean, "null"]
+          default: false
+        repeated:
+          type: [boolean, "null"]
+          default: false
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+        raw:
+          type: [boolean, "null"]
+          default: false
+          description: "Added 2026-09-25. When true: reads `source` as-is, with no template/inputs/transform resolution."
+      oneOf:
+        - required: [source]
+        - required: [template]
+        - required: [inputs]
+
+    TransformGraph:
+      type: object
+      description: >
+        The transform side of an ExecutionPlan as a real node/edge graph - not yet exercised by any
+        real fei pipeline (both WorldCheck and Customer Master use SourcePlan.mapper directly);
+        included here for completeness since it is a real, real top-level IngestionSpec field.
+      required: [entryNode, nodes]
+      additionalProperties: false
+      properties:
+        entryNode:
+          type: string
+        nodes:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/TransformNode"
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/TransformEdge"
+          default: []
+
+    TransformNode:
+      type: object
+      required: [mapper]
+      additionalProperties: false
+      properties:
+        mapper:
+          $ref: "#/components/schemas/TransformSpec"
+
+    TransformEdge:
+      type: object
+      required: [from, to]
+      additionalProperties: false
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        condition:
+          type: [string, "null"]
+          description: "null means unconditional (always follow); non-null matches an upstream node's own output tag."
+
+    SinkSpec:
+      type: object
+      description: >
+        Where and how to write mapped records. `index` is a single target identifier
+        (index/topic/table/path) - a kafka sink fanning out to several topics expresses that via
+        `options` (e.g. additionalTopics), not by overloading this field.
+      required: [connector, index]
+      additionalProperties: false
+      properties:
+        connector:
+          type: string
+          description: "e.g. opensearch, kafka, jdbc, file, object-storage - see D5 for the real connector-module mapping."
+        uri:
+          type: [string, "null"]
+        index:
+          type: string
+        schema:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/SchemaRef"
+        batching:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/BatchingSpec"
+        options:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+
+    BatchingSpec:
+      type: object
+      additionalProperties: false
+      properties:
+        maxRecords:
+          type: [integer, "null"]
+        maxWait:
+          type: [number, "null"]
+          description: >
+            A java.time.Duration, serialized as a plain number of seconds (with fractional nanos) -
+            NOT an ISO-8601 duration string. See this document's own top-level description for why.
+
+    ExecutionMode:
+      type: string
+      enum: [BOUNDED, CONTINUOUS]
+      description: "BOUNDED dispatches as a Kubernetes Job; CONTINUOUS dispatches as a Kubernetes Deployment."
+
+    DeliverySemantics:
+      type: object
+      description: >
+        Delivery-engine-agnostic execution tuning. No @JsonProperty annotations on this record;
+        Jackson uses the record's own component names directly.
+      required: [exactlyOnce]
+      additionalProperties: false
+      properties:
+        exactlyOnce:
+          type: boolean
+        concurrency:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/ConcurrencySpec"
+        flowControl:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/FlowControlSpec"
+
+    ConcurrencySpec:
+      type: object
+      additionalProperties: false
+      properties:
+        preferred:
+          type: [integer, "null"]
+        maximum:
+          type: [integer, "null"]
+
+    FlowControlSpec:
+      type: object
+      additionalProperties: false
+      properties:
+        maxInFlightRecords:
+          type: [integer, "null"]
+
+    ErrorPolicy:
+      type: object
+      description: >
+        No @JsonProperty annotations on this record; Jackson uses the record's own component names
+        directly (malformedRecord/sinkFailure).
+      additionalProperties: false
+      properties:
+        malformedRecord:
+          type: [string, "null"]
+          description: "e.g. dead-letter"
+        sinkFailure:
+          type: [string, "null"]
+          description: "e.g. retry"

@@ -218,7 +218,13 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             AuthorizationAction.EXECUTION_LIST.scope(),
             AuthorizationAction.EXECUTION_PAUSE.scope(),
             AuthorizationAction.EXECUTION_RESUME.scope(),
-            AuthorizationAction.EXECUTION_CANCEL.scope()));
+            AuthorizationAction.EXECUTION_CANCEL.scope(),
+            // WorkflowIngestionLauncher (wired 2026-09-26) attaches subjectActor to every real
+            // Start/Control call - fowf's server-side WorkflowExecutionManagementService.
+            // resolveSubjectActor gates this on execution:assert-subject, fail-closed, regardless
+            // of whether the caller already holds EXECUTION_START/etc. Without this grant every
+            // real launch()/observe()/cancel() call 500s with AuthorizationDeniedException.
+            AuthorizationAction.EXECUTION_ASSERT_SUBJECT.scope()));
     keycloak.grantResourceAuthorization(
         organizationId,
         "openworkflow-definition",

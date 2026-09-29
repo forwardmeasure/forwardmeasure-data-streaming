@@ -62,14 +62,24 @@ import org.apache.spark.sql.types.StructType;
  * sinkFailure: retry}, fail-fast otherwise) - the retry *mechanism* itself is proven generically by
  * {@code IngestionPipelineTest} in {@code forwardmeasure-data-streaming-core}, not re-proven per
  * connector here.
+ *
+ * <p><b>Widened to public 2026-09-28</b>: {@link #write} was package-private until now, reachable
+ * only by {@link SparkIngestionRunner}/{@link SparkCorrelationRunner} in this same package. A real
+ * external caller with its own already-correct, non-{@code IngestionSpec}-driven read/map/correlate
+ * pipeline (FEI's own {@code CorrelatedSourceIngestionWorker}, adopting this project's own "Spark:
+ * an optional distributed compute stage, never a delivery engine" rule for its own merged RDD)
+ * needs exactly this method - the terminal Kafka handoff write - without adopting this module's
+ * entire {@code IngestionSpec}/{@code ExecutionPlanCompiler} planner subsystem just to reach it.
+ * {@link SinkSpec}/{@link ErrorPolicy} were already public; only this method's own visibility was
+ * the real blocker.
  */
-final class SparkSinks {
+public final class SparkSinks {
 
   private static final String KAFKA_CONNECTOR = "kafka";
 
   private SparkSinks() {}
 
-  static void write(
+  public static void write(
       SparkSession spark, JavaRDD<Map<String, Object>> mapped, SinkSpec sink, ErrorPolicy errors) {
     if (!KAFKA_CONNECTOR.equals(sink.connector())) {
       throw new IllegalArgumentException(

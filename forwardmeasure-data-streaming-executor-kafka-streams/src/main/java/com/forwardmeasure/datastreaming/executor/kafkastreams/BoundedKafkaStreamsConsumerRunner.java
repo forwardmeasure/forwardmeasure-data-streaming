@@ -91,6 +91,7 @@ final class BoundedKafkaStreamsConsumerRunner {
     consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
     consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
 
+    long startMillis = System.currentTimeMillis();
     long recordsRead = 0;
     long recordsWritten = 0;
     try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProps);
@@ -135,9 +136,11 @@ final class BoundedKafkaStreamsConsumerRunner {
       }
     }
     LOGGER.info(
-        "BoundedKafkaStreamsConsumerRunner: completed recordsRead={} recordsWritten={}",
+        "run.completed engine=KAFKA_STREAMS mode=BOUNDED recordsRead={} recordsWritten={}"
+            + " elapsedMs={}",
         recordsRead,
-        recordsWritten);
+        recordsWritten,
+        System.currentTimeMillis() - startMillis);
     return new Result(recordsRead, recordsWritten);
   }
 

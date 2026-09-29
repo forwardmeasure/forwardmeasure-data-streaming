@@ -1,0 +1,55 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# The real target cluster (2026-09-26, per direct user correction): FDS's launcher deploys into
+# the SAME cluster forwardmeasure-openworkflow already runs in -
+# gke_genai-llm-393115_us-central1_openworkflow-prod - not a separate "data-fabric-prod" cluster.
+# Every value below is either a fixed, confirmed fact of that one real cluster (cross-checked
+# directly against forwardmeasure-openworkflow's own deploy/helmfile/environments/
+# gcp-openworkflow-prod.yaml.gotmpl and helmfiles/execution-services.yaml.gotmpl - not guessed) or
+# explicitly flagged as needing real provisioning before this can actually be applied.
+
+# Which framework's image this cluster actually runs - matches data-fabric-devops's own real,
+# already-deployed choice (only quarkus has a real, pushed launcher image today; spring/micronaut
+# exist for the test matrix's own parity proof, not as a second real deployment).
+launcherFramework: quarkus
+
+imagePullPolicy: Always
+
+# Cluster facts, Kafka/fowf/Keycloak endpoints, the organization client (forwardmeasure-public) and
+# the image-pull Secret come from forwardmeasure-platform/deploy/helmfile/shared/ (common.yaml.gotmpl
+# and clusters/gcp-openworkflow-prod.yaml.gotmpl) - read by helmfiles/launcher.yaml.gotmpl as
+# .Values.platform.*.
+
+# datastreaming is this launcher's own AuthZEN resource-authorization client id (same id
+# data-fabric-devops's own release already assumes exists) - NOT YET CONFIRMED to be registered in
+# THIS cluster's own Keycloak realm (forwardmeasure-openworkflow's Keycloak is a genuinely separate
+# instance from data-fabric-prod's - a client registered in one does not exist in the other).
+# Real, unresolved precondition: confirm or provision this client in the forwardmeasure realm here
+# before applying.
+authorizationClientId: datastreaming
+
+# Real, unresolved precondition: the shared image-pull Secret (platform.secrets.imagePull,
+# docker-io-credentials) is not yet provisioned in this namespace specifically.
+
+# ExternalSecret-synced, mirroring forwardmeasure-platform's own platform-secrets convention
+# (openworkflow-identity-credentials's own precedent) rather than a manually-created Secret -
+# real, unresolved precondition: forwardmeasure-platform's platform-secrets release needs a new
+# entry for this (see deploy/helmfile/data-streaming-launcher-credentials.yaml.gotmpl in this same
+# directory for the exact keys it must carry), backed by real GCP Secret Manager entries that don't
+# exist yet. Nothing here invents a value for it.
+credentialsSecretName: data-streaming-launcher-credentials
+

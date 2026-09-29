@@ -1,0 +1,192 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: data-streaming-credentials
+data:
+  bootstrap.sh: |
+    #!/bin/sh
+    set -eu
+    apk add --no-cache curl jq >/dev/null
+    base={{ .Values.keycloak.url }}
+    realm={{ .Values.keycloak.realm }}
+    client={{ .Values.keycloak.clientUuid }}
+    role={{ .Values.keycloak.datastreamingRole }}
+    tenant={{ .Values.keycloak.tenantAlias }}
+    k8s_token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+    k8s_ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    k8s_ns=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+    k8s_api=https://kubernetes.default.svc
+    token=$(curl -fsS -X POST "$base/realms/master/protocol/openid-connect/token" -d client_id=admin-cli -d "username=$ADMIN_USERNAME" -d "password=$ADMIN_PASSWORD" -d grant_type=password | jq -r .access_token)
+    auth="Authorization: Bearer $token"
+    json="Content-Type: application/json"
+    get() { curl -fsS -H "$auth" "$base/admin/realms/$realm/$1"; }
+    post() { curl -sS -o /tmp/response -w '%{http_code}' -X POST -H "$auth" -H "$json" "$base/admin/realms/$realm/$1" --data "$2"; }
+
+    # Same idempotent create-if-absent pattern as openworkflow-platform-clients' own bootstrap.sh
+    # (forwardmeasure-openworkflow/deploy/helmfile/releases/openworkflow-platform-clients) - creates
+    # a confidential, service-account-enabled client (client-credentials grant, no human login) if
+    # absent, returns its Keycloak-internal UUID either way.
+    ensure_client() {
+      client_id=$1
+      uuid=$(get "clients?clientId=$client_id" | jq -r '.[0].id // empty')
+      if [ -z "$uuid" ]; then
+        code=$(post clients '{"clientId":"'"$client_id"'","protocol":"openid-connect","publicClient":false,"serviceAccountsEnabled":true,"standardFlowEnabled":false,"directAccessGrantsEnabled":false,"implicitFlowEnabled":false}')
+        if [ "$code" != 201 ] && [ "$code" != 409 ]; then cat /tmp/response >&2; exit 1; fi
+        uuid=$(get "clients?clientId=$client_id" | jq -r '.[0].id')
+      fi
+      printf '%s' "$uuid"
+    }
+
+    service_account_user_id() {
+      get "clients/$1/service-account-user" | jq -r '.id'
+    }
+
+    # GET, not POST - returns the client's CURRENT secret without rotating it, so a later re-run of
+    # this Job (helm upgrade, pod restart) reads back the same value instead of invalidating
+    # whatever the launcher already picked up.
+    client_secret() {
+      get "clients/$1/client-secret" | jq -r .value
+    }
+
+    # Organization membership + the CLIENT role openworkflow-k2-security's own bootstrap.sh already
+    # creates (this Job does not recreate that role/AuthZEN policy - see this repo's own values.yaml
+    # comment on the same field). Mirrors openworkflow-platform-clients' own
+    # grant_organization_client_role helper exactly, since this is the identical shape (a service
+    # account becoming an Organization member with a granted client role) - just for this
+    # launcher's own identity instead of fei's author/publisher ones.
+    organization=$(get organizations | jq -r '.[]|select(.alias=="'"$tenant"'")|.id')
+    uuid=$(ensure_client {{ .Values.keycloak.datastreamingClientId }})
+    user=$(service_account_user_id "$uuid")
+    code=$(post "organizations/$organization/members" "\"$user\"")
+    if [ "$code" != 201 ] && [ "$code" != 409 ]; then cat /tmp/response >&2; exit 1; fi
+    group=$(get "organizations/$organization/groups?search=$role&exact=true" | jq -r '.[]|select(.name=="'"$role"'")|.id' | head -1)
+    if [ -z "$group" ]; then
+      code=$(post "organizations/$organization/groups" '{"name":"'"$role"'"}')
+      if [ "$code" != 201 ] && [ "$code" != 409 ]; then cat /tmp/response >&2; exit 1; fi
+      group=$(get "organizations/$organization/groups?search=$role&exact=true" | jq -r '.[]|select(.name=="'"$role"'")|.id' | head -1)
+    fi
+    role_json=$(get "clients/$client/roles/$role")
+    code=$(post "organizations/$organization/groups/$group/role-mappings/clients/$client" "[$role_json]")
+    if [ "$code" != 204 ] && [ "$code" != 409 ]; then cat /tmp/response >&2; exit 1; fi
+    code=$(curl -sS -o /tmp/response -w '%{http_code}' -X PUT -H "$auth" "$base/admin/realms/$realm/organizations/$organization/groups/$group/members/$user")
+    if [ "$code" != 204 ] && [ "$code" != 409 ]; then cat /tmp/response >&2; exit 1; fi
+    datastreaming_secret=$(client_secret "$uuid")
+
+    # Write into the target Kubernetes Secret via the pod's own in-cluster credentials - unlike
+    # openworkflow-platform-clients' own PATCH-only write (its target Secret already exists via a
+    # sibling chart resource), this Secret is created fresh by THIS Job the first time it runs, so
+    # this checks existence first: GET 404 -> POST create; GET 200 -> PATCH (strategic-merge,
+    # touches only the 3 keys below - every other key already in the Secret is left untouched).
+    b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
+    secret_data=$(cat <<EOF
+    {
+      "authorization-client-secret":"$(b64 "$datastreaming_secret")",
+      "fowf-keycloak-client-id":"$(b64 "{{ .Values.keycloak.datastreamingClientId }}")",
+      "fowf-keycloak-client-secret":"$(b64 "$datastreaming_secret")"
+    }
+    EOF
+    )
+    get_status=$(curl -sS -o /tmp/get-response -w '%{http_code}' \
+      --cacert "$k8s_ca" -H "Authorization: Bearer $k8s_token" \
+      "$k8s_api/api/v1/namespaces/$k8s_ns/secrets/{{ .Values.targetSecretName }}")
+    if [ "$get_status" = 404 ]; then
+      body=$(cat <<EOF
+      {"apiVersion":"v1","kind":"Secret","type":"Opaque","metadata":{"name":"{{ .Values.targetSecretName }}"},"data":$secret_data}
+    EOF
+      )
+      code=$(curl -sS -o /tmp/response -w '%{http_code}' -X POST \
+        --cacert "$k8s_ca" -H "Authorization: Bearer $k8s_token" \
+        -H "Content-Type: application/json" --data "$body" \
+        "$k8s_api/api/v1/namespaces/$k8s_ns/secrets")
+      if [ "$code" != 201 ]; then cat /tmp/response >&2; exit 1; fi
+      echo "data-streaming-credentials: created Secret/{{ .Values.targetSecretName }} with 3 keys"
+    else
+      patch_body=$(cat <<EOF
+      {"data":$secret_data}
+    EOF
+      )
+      code=$(curl -sS -o /tmp/response -w '%{http_code}' -X PATCH \
+        --cacert "$k8s_ca" -H "Authorization: Bearer $k8s_token" \
+        -H "Content-Type: application/strategic-merge-patch+json" \
+        --data "$patch_body" \
+        "$k8s_api/api/v1/namespaces/$k8s_ns/secrets/{{ .Values.targetSecretName }}")
+      if [ "$code" != 200 ]; then cat /tmp/response >&2; exit 1; fi
+      echo "data-streaming-credentials: patched Secret/{{ .Values.targetSecretName }} with 3 keys"
+    fi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: data-streaming-credentials
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: data-streaming-credentials-secret-writer
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ .Values.targetSecretName | quote }}]
+    verbs: ["get", "patch"]
+  # Also needs bare "create" (unscoped by resourceNames - Kubernetes RBAC cannot scope create by
+  # name, since the object doesn't exist yet) for the very first run, before the Secret exists at
+  # all. Real, small, deliberate privilege widening over openworkflow-platform-clients' own
+  # PATCH-only Role - that release's own target Secret always pre-exists via a sibling chart
+  # resource; this one doesn't.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: data-streaming-credentials-secret-writer
+subjects:
+  - kind: ServiceAccount
+    name: data-streaming-credentials
+roleRef:
+  kind: Role
+  name: data-streaming-credentials-secret-writer
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-streaming-credentials
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 5
+  template:
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: data-streaming-credentials
+      containers:
+        - name: bootstrap
+          image: {{ .Values.image.repository }}{{ if .Values.image.digest }}@{{ .Values.image.digest }}{{ else }}:{{ .Values.image.tag }}{{ end }}
+          command: ["sh", "/bootstrap/bootstrap.sh"]
+          env:
+            - {name: ADMIN_USERNAME, valueFrom: {secretKeyRef: {name: {{ .Values.credentialsSecretName | quote }}, key: KC_BOOTSTRAP_ADMIN_USERNAME}}}
+            - {name: ADMIN_PASSWORD, valueFrom: {secretKeyRef: {name: {{ .Values.credentialsSecretName | quote }}, key: KC_BOOTSTRAP_ADMIN_PASSWORD}}}
+          volumeMounts:
+            - {name: bootstrap, mountPath: /bootstrap}
+      volumes:
+        - name: bootstrap
+          configMap: {name: data-streaming-credentials, defaultMode: 0555}

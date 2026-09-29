@@ -1,0 +1,42 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# The namespace (data-streaming), shared endpoints, identity client, image-pull Secret and the
+# kafka-streams executor image (also launched by forwardmeasure-entity-intelligence) come from
+# forwardmeasure-platform/deploy/helmfile/shared/, loaded last by helmfile.yaml.gotmpl.
+
+imagePullPolicy: IfNotPresent
+
+# Real, sha256-pinned executor images - org policy requires a pinned digest, not a floating tag
+# (AsyncApiKubernetesJobOperationExecutor's own real check). Digests below are current as of
+# 2026-09-26 (rebuilt/repushed the same day the stale-digest "unknown named transform" bug for
+# Customer Master was found and fixed) - see forwardmeasure-data-streaming's own session history,
+# not hardcoded on a whim.
+#
+# Named imageVersions (was executorImages until 2026-09-29) and carrying a tag, so
+# forwardmeasure-platform's install-platform.sh -> sync-image-digests.sh re-resolves each pinned
+# digest against the registry on every install - that script only walks .imageVersions entries
+# that have both a tag and an already-pinned digest.
+imageVersions:
+  pekko:
+    repository: docker.io/forwardmeasure/data-streaming-executor-pekko
+    tag: "1.1.0"
+    digest: "sha256:a1eab0f12073b4b2f0215fd350061522ffa01aca08ab259a81e8053ee04a90e3"
+  spark:
+    repository: docker.io/forwardmeasure/data-streaming-executor-spark
+    tag: "1.1.0"
+    digest: "sha256:7ffbf465517c4ac557bfd9f400fbdc8abc73e5944795318a5dece206341cc2dd"

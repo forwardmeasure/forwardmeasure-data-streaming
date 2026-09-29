@@ -1,0 +1,47 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+keycloak:
+  url: http://keycloak-internal.keycloak.svc.cluster.local:8080
+  realm: forwardmeasure
+  # fowf's own "openworkflow" resource-server client - fixed, cluster-wide, not per-product. Same
+  # value forwardmeasure-openworkflow's own openworkflow-k2-security/openworkflow-platform-clients
+  # releases already default to (deploy/helmfile/helmfiles/security.yaml.gotmpl) - the whole
+  # AuthZEN resource/scope/policy graph this Job grants against lives under this one client, not a
+  # separate "datastreaming" resource server.
+  clientUuid: "00000000-0000-0000-0000-000000000001"
+  clientId: openworkflow
+  # This launcher's own service-account identity, granted Organization membership + the
+  # workflow-execution-controller CLIENT role openworkflow-k2-security's own bootstrap.sh already
+  # creates on fowf's side (this Job does not recreate that role/AuthZEN policy - if k2-security has
+  # never run in this environment, this Job's role-mapping call will 404 on a missing role).
+  datastreamingClientId: datastreaming
+  datastreamingRole: workflow-execution-controller
+  # lux is the one real tenant on this cluster (matches forwardmeasure-openworkflow's own
+  # gcp-openworkflow-prod.yaml.gotmpl tenants: [{alias: lux}]) - not requiredEnv, since this repo
+  # has exactly one real environment today.
+  tenantAlias: lux
+# The Keycloak realm-admin credential (KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD only - never the full
+# fowf identity bundle) - synced into this namespace by forwardmeasure-platform's own
+# platform-secrets release, identity.dataStreamingCredentialsSecret.
+credentialsSecretName: data-streaming-keycloak-admin
+# The Secret this Job creates (if absent) or patches (if present) with the datastreaming client's
+# own id/secret - launcher.yaml.gotmpl's own credentialsSecretName value must match this exactly.
+targetSecretName: data-streaming-launcher-credentials
+image:
+  repository: alpine
+  tag: "3.22"
+  digest: ""

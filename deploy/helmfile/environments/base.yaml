@@ -32,6 +32,18 @@ imagePullPolicy: IfNotPresent
 # digest against the registry on every install - that script only walks .imageVersions entries
 # that have both a tag and an already-pinned digest.
 imageVersions:
+  # The launcher service - one image per framework; the release runs forwardmeasure-platform's
+  # platform.framework. Empty digests fall back to the tag until each image is pushed and pinned.
+  launcher:
+    repositories:
+      quarkus: forwardmeasure/data-streaming-launcher-quarkus
+      spring: forwardmeasure/data-streaming-launcher-spring
+      micronaut: forwardmeasure/data-streaming-launcher-micronaut
+    tag: "1.1.0"
+    digests:
+      quarkus: ""
+      spring: ""
+      micronaut: ""
   pekko:
     repository: docker.io/forwardmeasure/data-streaming-executor-pekko
     tag: "1.1.0"

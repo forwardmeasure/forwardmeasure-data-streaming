@@ -271,26 +271,21 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
    * QuarkusActiveOrganizationProvider} would look for the active-Organization role claim under a
    * client that doesn't exist here and reject every request.
    *
-   * <p>Defaults {@code OPENWORKFLOW_DEFAULT_ENGINE} to {@code kafka-streams} - see {@link
-   * #startExecutionManagement(String)} to route new executions at the Pekko engine instead (real
-   * fowf parity requirement: both engines share the identical {@code kubernetes-deployment}
-   * dispatch path via {@code KafkaProtocolOperationExecutors.create(...)}, so both need real
-   * end-to-end coverage, not just the one this fixture happened to build first).
+   * <p>Runs against the Kafka-Streams engine - see {@link #startExecutionManagement(String)} for
+   * the Pekko engine (real fowf parity requirement: both engines share the identical {@code
+   * kubernetes-deployment} dispatch path via {@code KafkaProtocolOperationExecutors.create(...)},
+   * so both need real end-to-end coverage, not just the one this fixture happened to build first).
    */
   public GenericContainer<?> startExecutionManagement() {
     return startExecutionManagement("kafka-streams");
   }
 
   /**
-   * @param defaultEngine {@code "kafka-streams"} or {@code "pekko"} - fowf's own real {@code
-   *     openworkflow.default-engine} config value, selecting which engine new executions submit
-   *     against. Both {@code OPENWORKFLOW_KAFKA_ENGINE_URL} and {@code
-   *     OPENWORKFLOW_PEKKO_ENGINE_URL} are always set to their own real alias regardless of which
-   *     engine is actually running - only the selected default engine's URL is ever called for a
-   *     top-level execution start, so the other one pointing at a container that may not exist is
-   *     harmless.
+   * @param engine {@code "kafka-streams"} or {@code "pekko"} - the one engine execution-management
+   *     runs ({@code OPENWORKFLOW_ENGINE_ID}), reached at that engine container's own alias.
    */
-  public GenericContainer<?> startExecutionManagement(String defaultEngine) {
+  public GenericContainer<?> startExecutionManagement(String engine) {
+    String engineAlias = "pekko".equals(engine) ? ENGINE_PEKKO_ALIAS : ENGINE_KAFKA_STREAMS_ALIAS;
     String issuer = hostDockerInternalIssuer();
     GenericContainer<?> executionManagement =
         new GenericContainer<>(DockerImageName.parse(EXECUTION_MANAGEMENT_IMAGE))
@@ -323,13 +318,9 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withEnv("OPENWORKFLOW_CLIENT_ID", AuthzenKeycloakFixture.AUTHZEN_CLIENT_ID)
             .withEnv("OPENWORKFLOW_CLIENT_SECRET", AuthzenKeycloakFixture.AUTHZEN_CLIENT_SECRET)
             .withEnv("OPENWORKFLOW_ORGANIZATION_CLIENT_ID", AuthzenKeycloakFixture.CLIENT_ID)
-            .withEnv("OPENWORKFLOW_DEFAULT_ENGINE", defaultEngine)
+            .withEnv("OPENWORKFLOW_ENGINE_ID", engine)
             .withEnv(
-                "OPENWORKFLOW_KAFKA_ENGINE_URL",
-                "http://" + ENGINE_KAFKA_STREAMS_ALIAS + ":8080/internal/v1/engine/")
-            .withEnv(
-                "OPENWORKFLOW_PEKKO_ENGINE_URL",
-                "http://" + ENGINE_PEKKO_ALIAS + ":8080/internal/v1/engine/")
+                "OPENWORKFLOW_ENGINE_URL", "http://" + engineAlias + ":8080/internal/v1/engine/")
             .withLogConsumer(
                 new Slf4jLogConsumer(LOGGER).withPrefix("openworkflow-execution-management"))
             .waitingFor(

@@ -61,7 +61,7 @@ releases:
         targetSecretName: {{ .Values.credentialsSecretName | quote }}
     labels: {stage: credentials, capability: data-streaming-credentials}
 
-  - name: data-streaming-launcher-{{ .Values.launcherFramework }}
+  - name: data-streaming-launcher
     namespace: {{ .Values.platform.namespaces.dataStreaming }}
     # Same shared chart forwardmeasure-openworkflow's own execution-management/definition-management
     # releases already use in this exact cluster (helmfiles/execution-services.yaml.gotmpl) - not a
@@ -77,13 +77,13 @@ releases:
     values:
       - serviceAccount:
           create: true
-          name: data-streaming-launcher-{{ .Values.launcherFramework }}
+          name: data-streaming-launcher
         automountServiceAccountToken: false
         terminationGracePeriodSeconds: 30
         podSecurityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
         securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
         services:
-          data-streaming-launcher-{{ .Values.launcherFramework }}:
+          data-streaming-launcher:
             enabled: true
             # Plain Deployment, not Knative - matches every other real service already running in
             # this cluster (forwardmeasure-openworkflow's own execution-management/definition-
@@ -92,26 +92,25 @@ releases:
             # established convention, not something confirmed to exist in this cluster - don't
             # assume it here.
             deploymentMode: deployment
-            framework: {{ .Values.launcherFramework }}
+            framework: {{ .Values.platform.framework }}
             runtime: jvm
             port: 8080
             database:
               enabled: false
             liquibaseWait:
               enabled: false
-            replicas: 1
+            # The chart sets spec.replicas from scaling.initialReplicas (a bare `replicas:` is ignored).
+            scaling: {initialReplicas: 1}
             resources:
               requests: {cpu: "250m", memory: "512Mi"}
               limits: {cpu: "1000m", memory: "1Gi"}
             image:
-              # No registry prefix here - java-microservice-helm-chart's own imageRef helper
-              # (_helpers.tpl) always prepends .image.registry (defaults to "docker.io") to
-              # .image.repository. A previous version of this file included "docker.io/" in
-              # repository too, which rendered as the literal, unpullable
-              # "docker.io/docker.io/forwardmeasure/..." - found by actually reading the rendered
-              # `helmfile template` output, not assumed.
-              repository: {{ printf "forwardmeasure/data-streaming-launcher-%s" .Values.launcherFramework | quote }}
-              tag: "1.1.0"
+              # The launcher image for forwardmeasure-platform's platform.framework (environments/
+              # base.yaml imageVersions.launcher). No registry prefix - java-microservice-helm-chart's
+              # imageRef helper always prepends .image.registry (default "docker.io").
+              repository: {{ index .Values.imageVersions.launcher.repositories .Values.platform.framework | quote }}
+              tag: {{ .Values.imageVersions.launcher.tag | quote }}
+              digest: {{ index .Values.imageVersions.launcher.digests .Values.platform.framework | quote }}
               pullPolicy: {{ .Values.imagePullPolicy }}
             env:
               # Direct-mode (bypass-fowf) dispatch target - this release's own namespace only.
@@ -160,4 +159,4 @@ releases:
                 secretKey: fowf-keycloak-client-secret
         imagePullSecrets:
           - name: {{ .Values.platform.secrets.imagePull }}
-    labels: {stage: launcher, capability: data-streaming-launcher, framework: {{ .Values.launcherFramework }}}
+    labels: {stage: launcher, capability: data-streaming-launcher, framework: {{ .Values.platform.framework }}}

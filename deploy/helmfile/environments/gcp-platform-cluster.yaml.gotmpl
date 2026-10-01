@@ -21,10 +21,6 @@
 # Cloud SQL instance) come from that environment's forwardmeasure-platform shared cluster file
 # (shared/clusters/<env>.yaml.gotmpl), loaded after this one.
 
-# Which framework's image this cluster actually runs - matches data-fabric-devops's own real,
-# already-deployed choice (only quarkus has a real, pushed launcher image today; spring/micronaut
-# exist for the test matrix's own parity proof, not as a second real deployment).
-launcherFramework: quarkus
 
 imagePullPolicy: Always
 

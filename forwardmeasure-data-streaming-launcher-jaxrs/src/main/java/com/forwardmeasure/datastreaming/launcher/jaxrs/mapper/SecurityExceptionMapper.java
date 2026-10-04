@@ -16,7 +16,6 @@
  */
 package com.forwardmeasure.datastreaming.launcher.jaxrs.mapper;
 
-import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.ErrorResponse;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
 import jakarta.ws.rs.ext.Provider;
@@ -37,8 +36,6 @@ public class SecurityExceptionMapper implements ExceptionMapper<SecurityExceptio
 
   @Override
   public Response toResponse(SecurityException exception) {
-    return Response.status(Response.Status.FORBIDDEN)
-        .entity(new ErrorResponse(exception.getMessage()))
-        .build();
+    return LauncherProblems.response(403, exception.getMessage());
   }
 }

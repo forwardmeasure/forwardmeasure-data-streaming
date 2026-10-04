@@ -22,7 +22,7 @@ keycloak:
   # releases already default to (deploy/helmfile/helmfiles/security.yaml.gotmpl) - the whole
   # AuthZEN resource/scope/policy graph this Job grants against lives under this one client, not a
   # separate "datastreaming" resource server.
-  clientUuid: "00000000-0000-0000-0000-000000000001"
+  # Looked up by clientId at run time (Keycloak generates the UUID on the platform).
   clientId: openworkflow
   # This launcher's own service-account identity, granted Organization membership + the
   # workflow-execution-controller CLIENT role openworkflow-k2-security's own bootstrap.sh already

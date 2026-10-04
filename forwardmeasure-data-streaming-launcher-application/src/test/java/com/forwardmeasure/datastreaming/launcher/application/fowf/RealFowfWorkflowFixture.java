@@ -592,6 +592,9 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             // #startAsyncApiDocumentServer), reachable from this container only via
             // host.docker.internal.
             .withEnv("OPENWORKFLOW_DEFINITION_RESOURCE_ALLOWED_HOSTS", "host.docker.internal")
+            // Required by definition-management since bundle documents are named by DID URL
+            // (fowf docs/did-method.md); there is no default. This fixture names none.
+            .withEnv("FORWARDMEASURE_DID_METHOD", "fwmtest")
             .withLogConsumer(
                 new Slf4jLogConsumer(LOGGER).withPrefix("openworkflow-definition-management"))
             .waitingFor(

@@ -17,11 +17,11 @@
 package com.forwardmeasure.datastreaming.launcher.jaxrs.mapper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.launcher.application.DirectLaunchRequest;
-import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.ErrorResponse;
+import com.forwardmeasure.openworkflow.common.model.Problem;
+import com.forwardmeasure.platform.server.jaxrs.RequestProblems;
 import jakarta.ws.rs.core.Response;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -46,7 +46,25 @@ class NullPointerExceptionMapperTest {
 
     Response response = mapper.toResponse(thrown);
 
+    // The shared contract's shape for a required value left out - as a bean-validation failure.
     assertEquals(400, response.getStatus());
-    assertTrue(((ErrorResponse) response.getEntity()).message().contains("ingestionSpec"));
+    assertEquals("application/problem+json", response.getMediaType().toString());
+    Problem problem = (Problem) response.getEntity();
+    assertEquals(1, problem.getViolations().size(), problem::toString);
+    assertEquals("ingestionSpec", problem.getViolations().get(0).getField());
+    assertEquals(RequestProblems.REQUIRED, problem.getViolations().get(0).getMessage());
+  }
+
+  /** A NullPointerException that names no argument is a server bug: the shared 500 problem. */
+  @Test
+  void anyOtherNullPointerExceptionIsAServerError() {
+    Response response =
+        new NullPointerExceptionMapper()
+            .toResponse(
+                new NullPointerException(
+                    "Cannot invoke \"String.length()\" because \"value\" is null"));
+
+    assertEquals(500, response.getStatus());
+    assertEquals(500, ((Problem) response.getEntity()).getStatus());
   }
 }

@@ -35,6 +35,9 @@ import com.forwardmeasure.datastreaming.launcher.jaxrs.mapper.SecurityExceptionM
 import com.forwardmeasure.datastreaming.launcher.jaxrs.mapper.UnsupportedOperationExceptionMapper;
 import com.forwardmeasure.openworkflow.execution.client.ApiClient;
 import com.forwardmeasure.openworkflow.execution.client.api.WorkflowExecutionsApi;
+import com.forwardmeasure.platform.server.jaxrs.RequestProblemsFeature;
+import com.forwardmeasure.platform.spring.security.ProblemAccessDeniedHandler;
+import com.forwardmeasure.platform.spring.security.ProblemAuthenticationEntryPoint;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import java.net.URI;
@@ -133,11 +136,34 @@ public class LauncherSpringBinding {
         policyVersion);
   }
 
+  /**
+   * Health is open: kubelet's readiness/liveness probes send no token, so requiring one keeps the
+   * pod un-Ready forever. Same shape as forwardmeasure-openworkflow's and -entity-intelligence's
+   * chains.
+   */
   @Bean
-  SecurityFilterChain dataStreamingSecurity(HttpSecurity http) throws Exception {
+  SecurityFilterChain dataStreamingSecurity(HttpSecurity http, ObjectMapper mapper)
+      throws Exception {
+    // A 401/403 is the same RFC 9457 problem Quarkus and Micronaut return, not an empty body.
+    var unauthenticated = new ProblemAuthenticationEntryPoint(mapper);
+    var denied = new ProblemAccessDeniedHandler(mapper);
     return http.csrf(csrf -> csrf.disable())
-        .authorizeHttpRequests(requests -> requests.anyRequest().authenticated())
-        .oauth2ResourceServer(resourceServer -> resourceServer.jwt(Customizer.withDefaults()))
+        .authorizeHttpRequests(
+            requests ->
+                requests
+                    .requestMatchers("/actuator/health/**")
+                    .permitAll()
+                    .anyRequest()
+                    .authenticated())
+        .exceptionHandling(
+            exceptions ->
+                exceptions.authenticationEntryPoint(unauthenticated).accessDeniedHandler(denied))
+        .oauth2ResourceServer(
+            resourceServer ->
+                resourceServer
+                    .authenticationEntryPoint(unauthenticated)
+                    .accessDeniedHandler(denied)
+                    .jwt(Customizer.withDefaults()))
         .build();
   }
 
@@ -208,7 +234,10 @@ public class LauncherSpringBinding {
             .register(ApiExceptionMapper.class)
             .register(AuthenticationRequiredExceptionMapper.class)
             .register(AuthorizationDeniedExceptionMapper.class)
-            .register(AuthorizationUnavailableExceptionMapper.class);
+            .register(AuthorizationUnavailableExceptionMapper.class)
+            // The shared RFC 9457 mappers - a body that doesn't bind, bean validation, any other
+            // WebApplicationException or unhandled failure - as Quarkus and Micronaut return them.
+            .register(RequestProblemsFeature.class);
   }
 
   private static Set<String> commaSeparated(String value) {

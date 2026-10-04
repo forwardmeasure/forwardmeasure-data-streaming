@@ -17,8 +17,10 @@
 package com.forwardmeasure.datastreaming.launcher.micronaut.deployment;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture;
 import com.forwardmeasure.datastreaming.launcher.application.AuthorizationAction;
@@ -280,6 +282,72 @@ class DirectIngestionMatrixMicronautKafkaStreamsSmokeTest implements TestPropert
   }
 
   /** Real WorldCheck row wc-1 from {@code WorldCheckFixtures#SAMPLE_TSV}, JSON-encoded. */
+  // One answer on every framework (fowf handoff doc section 4b): a path no service serves is a
+  // 401 problem without a token and a 404 problem with one; health is open, but a token sent to it
+  // must verify; this service's own client errors are problems too.
+
+  @Test
+  void unknownPath_unauthenticatedIsRejected() throws Exception {
+    assertUnauthorizedProblem(HttpRequest.GET("/no-such-resource"));
+  }
+
+  @Test
+  void unknownPath_authenticatedIsNotFound() throws Exception {
+    JsonNode problem =
+        problem(
+            assertProblem(
+                HttpRequest.GET("/no-such-resource").bearerAuth(fixture.mintUserToken()), 404));
+    assertEquals(404, problem.path("status").asInt());
+  }
+
+  @Test
+  void health_isOpenWithoutAToken() {
+    assertEquals(200, http.toBlocking().exchange(HttpRequest.GET("/health"), String.class).code());
+  }
+
+  @Test
+  void health_invalidTokenIsRejected() throws Exception {
+    assertUnauthorizedProblem(HttpRequest.GET("/health").bearerAuth("not-a-jwt"));
+  }
+
+  @Test
+  void aMissingNamespaceIsABadRequestProblem() throws Exception {
+    JsonNode problem =
+        problem(
+            assertProblem(
+                HttpRequest.GET("/ingestion-runs/some-run").bearerAuth(fixture.mintUserToken()),
+                400));
+    assertEquals("Bad Request", problem.path("title").asText());
+    assertEquals("the 'namespace' query parameter is required", problem.path("detail").asText());
+  }
+
+  private void assertUnauthorizedProblem(HttpRequest<?> request) throws Exception {
+    HttpClientResponseException thrown = assertProblem(request, 401);
+    assertEquals("Bearer", thrown.getResponse().getHeaders().get("WWW-Authenticate"));
+    assertEquals("Unauthorized", problem(thrown).path("title").asText());
+  }
+
+  private HttpClientResponseException assertProblem(HttpRequest<?> request, int status) {
+    HttpClientResponseException thrown =
+        assertThrows(
+            HttpClientResponseException.class,
+            () -> http.toBlocking().exchange(request, String.class));
+    assertEquals(
+        status,
+        thrown.getStatus().getCode(),
+        () -> "response body: " + thrown.getResponse().getBody(String.class).orElse(""));
+    assertEquals(
+        "application/problem+json",
+        thrown.getResponse().getContentType().map(Object::toString).orElse(""));
+    return thrown;
+  }
+
+  private static JsonNode problem(HttpClientResponseException thrown) throws Exception {
+    JsonNode problem = MAPPER.readTree(thrown.getResponse().getBody(String.class).orElse(""));
+    assertEquals("about:blank", problem.path("type").asText());
+    return problem;
+  }
+
   private static void seedOneRealWorldCheckRow(String bootstrapServers) {
     Map<String, Object> row = new LinkedHashMap<>();
     row.put("UID", "wc-1");

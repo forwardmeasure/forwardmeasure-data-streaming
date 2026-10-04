@@ -30,6 +30,17 @@
       <artifactId>forwardmeasure-authzen-api</artifactId>
     </dependency>
     <dependency><groupId>jakarta.ws.rs</groupId><artifactId>jakarta.ws.rs-api</artifactId><scope>provided</scope></dependency>
+    <dependency>
+      <!-- Every error as an RFC 9457 problem, on every framework: the shared request-contract mappers
+           (body that doesn't bind, bean validation, any WebApplicationException or unhandled
+           failure) plus RequestProblems for this module's own mappers. -->
+      <groupId>com.forwardmeasure.platform</groupId>
+      <artifactId>forwardmeasure-platform-server-jaxrs</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-common-models</artifactId>
+    </dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
     <dependency>
       <!-- StubAuthorizationService.permitAll() - these resource tests prove real HTTP wiring

@@ -17,7 +17,6 @@
 package com.forwardmeasure.datastreaming.launcher.jaxrs.mapper;
 
 import com.forwardmeasure.authzen.AuthorizationUnavailableException;
-import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.ErrorResponse;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
 import jakarta.ws.rs.ext.Provider;
@@ -37,8 +36,6 @@ public class AuthorizationUnavailableExceptionMapper
 
   @Override
   public Response toResponse(AuthorizationUnavailableException exception) {
-    return Response.status(Response.Status.SERVICE_UNAVAILABLE)
-        .entity(new ErrorResponse(exception.getMessage()))
-        .build();
+    return LauncherProblems.response(503, exception.getMessage());
   }
 }

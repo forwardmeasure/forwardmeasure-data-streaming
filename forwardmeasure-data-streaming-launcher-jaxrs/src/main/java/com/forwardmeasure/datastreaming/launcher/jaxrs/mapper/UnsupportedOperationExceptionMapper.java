@@ -16,7 +16,6 @@
  */
 package com.forwardmeasure.datastreaming.launcher.jaxrs.mapper;
 
-import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.ErrorResponse;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
 import jakarta.ws.rs.ext.Provider;
@@ -35,8 +34,6 @@ public class UnsupportedOperationExceptionMapper
 
   @Override
   public Response toResponse(UnsupportedOperationException exception) {
-    return Response.status(Response.Status.BAD_REQUEST)
-        .entity(new ErrorResponse(exception.getMessage()))
-        .build();
+    return LauncherProblems.response(400, exception.getMessage());
   }
 }

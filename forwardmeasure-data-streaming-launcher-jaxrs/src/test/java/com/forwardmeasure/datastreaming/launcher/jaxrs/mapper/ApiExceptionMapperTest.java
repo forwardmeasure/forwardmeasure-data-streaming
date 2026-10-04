@@ -18,7 +18,7 @@ package com.forwardmeasure.datastreaming.launcher.jaxrs.mapper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.ErrorResponse;
+import com.forwardmeasure.openworkflow.common.model.Problem;
 import com.forwardmeasure.openworkflow.execution.client.ApiException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.Test;
@@ -34,9 +34,12 @@ class ApiExceptionMapperTest {
     Response response = mapper.toResponse(exception);
 
     assertEquals(409, response.getStatus());
-    assertEquals(
-        "execution has moved on: version mismatch",
-        ((ErrorResponse) response.getEntity()).message());
+    assertEquals("application/problem+json", response.getMediaType().toString());
+    Problem problem = (Problem) response.getEntity();
+    assertEquals("about:blank", problem.getType());
+    assertEquals("Conflict", problem.getTitle());
+    assertEquals(409, problem.getStatus());
+    assertEquals("execution has moved on: version mismatch", problem.getDetail());
   }
 
   @Test
@@ -46,5 +49,6 @@ class ApiExceptionMapperTest {
     Response response = mapper.toResponse(exception);
 
     assertEquals(502, response.getStatus());
+    assertEquals(502, ((Problem) response.getEntity()).getStatus());
   }
 }

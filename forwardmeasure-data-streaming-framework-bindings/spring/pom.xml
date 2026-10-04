@@ -44,6 +44,11 @@
       <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
     </dependency>
     <dependency>
+      <!-- 401/403 as the RFC 9457 problem Quarkus and Micronaut return. -->
+      <groupId>com.forwardmeasure.platform</groupId>
+      <artifactId>forwardmeasure-platform-spring-security</artifactId>
+    </dependency>
+    <dependency>
       <!-- AuthzenAuthorizationFactory.create(...) - the real Keycloak AuthZEN PDP client this
            module's own authorizationService(...) bean wires. -->
       <groupId>com.forwardmeasure.authzen</groupId>

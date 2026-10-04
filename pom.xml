@@ -193,6 +193,12 @@
         <version>${openworkflow.version}</version>
       </dependency>
       <dependency>
+        <!-- RFC 9457 Problem/Violation - the error model every forwardmeasure service returns. -->
+        <groupId>com.forwardmeasure.openworkflow</groupId>
+        <artifactId>openworkflow-common-models</artifactId>
+        <version>${openworkflow.version}</version>
+      </dependency>
+      <dependency>
         <groupId>com.forwardmeasure.openworkflow</groupId>
         <artifactId>openworkflow-execution-client-apachehttp</artifactId>
         <version>${openworkflow.version}</version>

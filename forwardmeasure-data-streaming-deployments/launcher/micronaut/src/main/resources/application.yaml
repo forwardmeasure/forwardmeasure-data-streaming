@@ -1,6 +1,14 @@
 micronaut:
+  serde:
+    serialization:
+      # Every field written, nulls and empty collections included - Jackson's default on Quarkus and
+      # Spring. Serde's own default, NON_EMPTY, omits both (e.g. a problem's empty violations).
+      inclusion: ALWAYS
   security:
     enabled: true
+    # A request that matches no route is a 404, as on Quarkus and Spring - not Micronaut security's
+    # own 403 for an authenticated caller.
+    reject-not-found: false
     authentication: bearer
     token:
       jwt:
@@ -24,6 +32,18 @@ micronaut:
         access:
           - isAuthenticated()
       - pattern: /workflow-runs/**
+        access:
+          - isAuthenticated()
+      # Health open (kubelet's probes send no token). Every other path, an unknown one too, needs a
+      # verified token - Spring's anyRequest().authenticated(), Quarkus's /* policy. First match wins,
+      # so these stay last.
+      - pattern: "/health"
+        access:
+          - isAnonymous()
+      - pattern: "/health/**"
+        access:
+          - isAnonymous()
+      - pattern: "/**"
         access:
           - isAuthenticated()
 
@@ -68,3 +88,13 @@ datastreaming:
       decision-ttl: PT5S
       maximum-cache-entries: 10000
       policy-version: v1
+# Health only: /health/liveness and /health/readiness, the java-microservice chart's Micronaut probe
+# paths (micronaut-management). HealthEndpoint isn't sensitive, so micronaut-security lets kubelet's
+# token-less probes through without an intercept-url-map rule. Every other built-in endpoint (beans,
+# routes, threaddump, refresh, ...) is off - Spring and Quarkus expose only health over HTTP.
+endpoints:
+  all:
+    enabled: false
+  health:
+    enabled: true
+    sensitive: false

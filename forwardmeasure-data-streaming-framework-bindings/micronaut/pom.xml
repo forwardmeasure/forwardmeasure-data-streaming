@@ -58,6 +58,13 @@
       <groupId>io.micronaut.serde</groupId>
       <artifactId>micronaut-serde-jackson</artifactId>
     </dependency>
+    <dependency>
+      <!-- Every error as the RFC 9457 problem Quarkus and Spring return: request-contract failures,
+           401/403 (MicronautAuthorizationProblemHandler), an invalid bearer token on an open path
+           (MicronautInvalidBearerTokenRule), and JSON bodies read with Jackson as on the other two. -->
+      <groupId>com.forwardmeasure.platform</groupId>
+      <artifactId>forwardmeasure-platform-micronaut-validation</artifactId>
+    </dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
   </dependencies>
   <build>
@@ -79,6 +86,10 @@
             <path>
               <groupId>io.micronaut.serde</groupId>
               <artifactId>micronaut-serde-processor</artifactId>
+            </path>
+            <path>
+              <groupId>io.micronaut.validation</groupId>
+              <artifactId>micronaut-validation-processor</artifactId>
             </path>
           </annotationProcessorPaths>
         </configuration>

@@ -18,7 +18,7 @@ package com.forwardmeasure.datastreaming.launcher.jaxrs.mapper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.ErrorResponse;
+import com.forwardmeasure.openworkflow.common.model.Problem;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.Test;
 
@@ -31,7 +31,9 @@ class SecurityExceptionMapperTest {
     Response response = mapper.toResponse(new SecurityException("namespace not allowed: default"));
 
     assertEquals(403, response.getStatus());
-    assertEquals(
-        "namespace not allowed: default", ((ErrorResponse) response.getEntity()).message());
+    assertEquals("application/problem+json", response.getMediaType().toString());
+    Problem problem = (Problem) response.getEntity();
+    assertEquals("Forbidden", problem.getTitle());
+    assertEquals("namespace not allowed: default", problem.getDetail());
   }
 }

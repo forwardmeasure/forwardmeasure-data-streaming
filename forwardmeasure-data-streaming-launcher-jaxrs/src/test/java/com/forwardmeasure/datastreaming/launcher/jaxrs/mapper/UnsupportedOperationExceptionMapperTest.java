@@ -18,7 +18,7 @@ package com.forwardmeasure.datastreaming.launcher.jaxrs.mapper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.ErrorResponse;
+import com.forwardmeasure.openworkflow.common.model.Problem;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.Test;
 
@@ -32,7 +32,9 @@ class UnsupportedOperationExceptionMapperTest {
         mapper.toResponse(new UnsupportedOperationException("engine 'spark' is not supported"));
 
     assertEquals(400, response.getStatus());
-    assertEquals(
-        "engine 'spark' is not supported", ((ErrorResponse) response.getEntity()).message());
+    assertEquals("application/problem+json", response.getMediaType().toString());
+    Problem problem = (Problem) response.getEntity();
+    assertEquals("Bad Request", problem.getTitle());
+    assertEquals("engine 'spark' is not supported", problem.getDetail());
   }
 }

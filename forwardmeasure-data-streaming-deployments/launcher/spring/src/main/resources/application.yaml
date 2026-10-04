@@ -44,3 +44,9 @@ spring:
       resourceserver:
         jwt:
           issuer-uri: ${DATASTREAMING_KEYCLOAK_ISSUER:http://localhost:8080/realms/datastreaming}
+# Health only over HTTP (Spring Boot's own default, stated as fowf's Spring services do).
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

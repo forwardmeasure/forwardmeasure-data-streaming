@@ -16,7 +16,6 @@
  */
 package com.forwardmeasure.datastreaming.launcher.jaxrs.mapper;
 
-import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.ErrorResponse;
 import com.forwardmeasure.openworkflow.execution.client.ApiException;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
@@ -41,6 +40,6 @@ public class ApiExceptionMapper implements ExceptionMapper<ApiException> {
   public Response toResponse(ApiException exception) {
     int code = exception.getCode();
     int status = code >= 100 && code < 600 ? code : Response.Status.BAD_GATEWAY.getStatusCode();
-    return Response.status(status).entity(new ErrorResponse(exception.getMessage())).build();
+    return LauncherProblems.response(status, exception.getMessage());
   }
 }

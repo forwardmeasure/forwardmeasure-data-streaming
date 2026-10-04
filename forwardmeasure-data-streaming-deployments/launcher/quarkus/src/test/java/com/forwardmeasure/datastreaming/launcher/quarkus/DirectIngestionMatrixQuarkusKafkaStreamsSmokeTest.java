@@ -17,6 +17,7 @@
 package com.forwardmeasure.datastreaming.launcher.quarkus;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.equalTo;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -32,6 +33,7 @@ import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.specification.RequestSpecification;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -152,6 +154,64 @@ class DirectIngestionMatrixQuarkusKafkaStreamsSmokeTest {
   }
 
   /** Real WorldCheck row wc-1 from {@link WorldCheckFixtures#SAMPLE_TSV}, JSON-encoded. */
+  // One answer on every framework (fowf handoff doc section 4b): a path no service serves is a
+  // 401 problem without a token and a 404 problem with one; health is open, but a token sent to it
+  // must verify; this service's own client errors are problems too.
+
+  @Test
+  void unknownPath_unauthenticatedIsRejected() {
+    assertUnauthorizedProblem(given(), "/no-such-resource");
+  }
+
+  @Test
+  void unknownPath_authenticatedIsNotFound() {
+    given()
+        .header("Authorization", "Bearer " + SmokeResource.fixture.mintUserToken())
+        .when()
+        .get("/no-such-resource")
+        .then()
+        .statusCode(404)
+        .contentType("application/problem+json")
+        .body("type", equalTo("about:blank"))
+        .body("status", equalTo(404));
+  }
+
+  @Test
+  void health_isOpenWithoutAToken() {
+    given().when().get("/q/health").then().statusCode(200);
+  }
+
+  @Test
+  void health_invalidTokenIsRejected() {
+    assertUnauthorizedProblem(given().header("Authorization", "Bearer not-a-jwt"), "/q/health");
+  }
+
+  @Test
+  void aMissingNamespaceIsABadRequestProblem() {
+    given()
+        .header("Authorization", "Bearer " + SmokeResource.fixture.mintUserToken())
+        .when()
+        .get("/ingestion-runs/some-run")
+        .then()
+        .statusCode(400)
+        .contentType("application/problem+json")
+        .body("title", equalTo("Bad Request"))
+        .body("detail", equalTo("the 'namespace' query parameter is required"));
+  }
+
+  private static void assertUnauthorizedProblem(RequestSpecification request, String path) {
+    request
+        .when()
+        .get(path)
+        .then()
+        .statusCode(401)
+        .contentType("application/problem+json")
+        .header("WWW-Authenticate", "Bearer")
+        .body("type", equalTo("about:blank"))
+        .body("title", equalTo("Unauthorized"))
+        .body("status", equalTo(401));
+  }
+
   private static void seedOneRealWorldCheckRow(String bootstrapServers) {
     Map<String, Object> row = new LinkedHashMap<>();
     row.put("UID", "wc-1");

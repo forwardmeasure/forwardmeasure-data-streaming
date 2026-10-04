@@ -40,6 +40,12 @@
       <artifactId>micronaut-http-server-netty</artifactId>
     </dependency>
     <dependency>
+      <!-- /health/liveness and /health/readiness - the paths java-microservice's Micronaut
+           probes use. application.yaml enables only the health endpoint. -->
+      <groupId>io.micronaut</groupId>
+      <artifactId>micronaut-management</artifactId>
+    </dependency>
+    <dependency>
       <!-- The actual runtime JAX-RS route bridge - distinct from micronaut-jaxrs-processor below
            (compile-time only); confirmed necessary against fei's own real
            ingestion-service-micronaut-service pom, same gap, same fix. -->

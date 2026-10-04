@@ -43,6 +43,21 @@ datastreaming:
       policy-version: v1
 
 quarkus:
+  http:
+    auth:
+      # Authenticated by default, like the Spring launcher's anyRequest().authenticated() and the
+      # Micronaut launcher's intercept-url-map: quarkus-oidc alone verifies a presented token but never
+      # requires one, so an anonymous request reached the resources. Quarkus applies the most specific
+      # matching path, so health (kubelet's probes send no token) stays open.
+      # forwardmeasure-platform-quarkus-security's ProblemChallengeMechanism writes every 401 as the
+      # RFC 9457 problem Spring and Micronaut return.
+      permission:
+        health:
+          paths: /q/*
+          policy: permit
+        authenticated:
+          paths: /*
+          policy: authenticated
   oidc:
     auth-server-url: ${DATASTREAMING_KEYCLOAK_ISSUER:http://localhost:8080/realms/datastreaming}
     application-type: service

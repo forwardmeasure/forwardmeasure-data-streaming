@@ -19,6 +19,7 @@ package com.forwardmeasure.datastreaming.launcher.jaxrs;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.forwardmeasure.authzen.ActiveOrganization;
 import com.forwardmeasure.authzen.ActiveOrganizationProvider;
@@ -45,6 +46,7 @@ import com.forwardmeasure.testcontainers.kubernetes.KubernetesTestContainer;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
 import java.util.List;
 import java.util.Map;
@@ -154,9 +156,13 @@ final class IngestionRunResourceTest {
               client,
               ORGANIZATIONS);
 
-      Response response = resource.get("no-such-correlation-id", NAMESPACE);
-
-      assertEquals(404, response.getStatus());
+      // A NotFoundException, which the shared mapper answers as a 404 problem on every framework.
+      NotFoundException missing =
+          assertThrows(
+              NotFoundException.class, () -> resource.get("no-such-correlation-id", NAMESPACE));
+      assertEquals(
+          "no ingestion run 'no-such-correlation-id' in namespace '" + NAMESPACE + "'",
+          missing.getMessage());
     }
   }
 
@@ -208,26 +214,21 @@ final class IngestionRunResourceTest {
 
       resource.create(request);
 
-      Response beforeCancel;
-      do {
-        beforeCancel = resource.get(request.correlationId(), NAMESPACE);
+      while (!exists(resource, request.correlationId())) {
         Thread.sleep(200);
-      } while (beforeCancel.getStatus() == 404);
+      }
 
       Response cancelled = resource.cancel(request.correlationId(), NAMESPACE);
       assertEquals(204, cancelled.getStatus());
 
       long deadline = System.currentTimeMillis() + 60_000;
-      Response afterCancel;
-      do {
-        afterCancel = resource.get(request.correlationId(), NAMESPACE);
-        if (afterCancel.getStatus() == 404) {
-          break;
-        }
+      boolean gone = !exists(resource, request.correlationId());
+      while (!gone && System.currentTimeMillis() < deadline) {
         Thread.sleep(200);
-      } while (System.currentTimeMillis() < deadline);
+        gone = !exists(resource, request.correlationId());
+      }
 
-      assertEquals(404, afterCancel.getStatus(), "expected the Job to be gone after cancel()");
+      assertTrue(gone, "expected the Job to be gone after cancel()");
     }
   }
 
@@ -281,6 +282,16 @@ final class IngestionRunResourceTest {
     @Override
     public List<AuthorizationDecision> evaluateBatch(List<AuthorizationRequest> requests) {
       return requests.stream().map(this::evaluate).toList();
+    }
+  }
+
+  /** Whether {@code get} finds the run - it throws NotFoundException when it doesn't. */
+  private static boolean exists(IngestionRunResource resource, String correlationId) {
+    try {
+      resource.get(correlationId, NAMESPACE);
+      return true;
+    } catch (NotFoundException missing) {
+      return false;
     }
   }
 }

@@ -35,8 +35,9 @@ import com.forwardmeasure.datastreaming.launcher.application.IngestionJobPolicy;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowLaunchRequest;
 import com.forwardmeasure.datastreaming.launcher.application.auth.KeycloakClientCredentialsTokenSupplier;
-import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.ErrorResponse;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.RunAccepted;
+import com.forwardmeasure.openworkflow.common.model.Problem;
+import com.forwardmeasure.openworkflow.common.model.Violation;
 import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecution;
 import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecutionState;
 import com.forwardmeasure.openworkflow.execution.client.ApiClient;
@@ -114,7 +115,8 @@ import java.util.stream.Collectors;
       FlowControlSpec.class,
       ErrorPolicy.class,
       RunAccepted.class,
-      ErrorResponse.class,
+      Problem.class,
+      Violation.class,
       KubernetesJobObservation.class,
       WorkflowExecution.class,
       WorkflowExecutionState.class
@@ -138,7 +140,9 @@ import java.util.stream.Collectors;
 @SerdeImport(FlowControlSpec.class)
 @SerdeImport(ErrorPolicy.class)
 @SerdeImport(RunAccepted.class)
-@SerdeImport(ErrorResponse.class)
+// Every error body: forwardmeasure-platform's RFC 9457 problem (openworkflow-common-models).
+@SerdeImport(Problem.class)
+@SerdeImport(Violation.class)
 @SerdeImport(KubernetesJobObservation.class)
 // Real, live-caught gap (2026-09-24, WorkflowBoundedMatrixMicronautPekkoSmokeTest): fowf's own
 // generated WorkflowExecution model - returned directly by WorkflowRunResource's create()/get() -

@@ -52,7 +52,6 @@ releases:
       - keycloak:
           url: {{ .Values.platform.endpoints.keycloak.url | quote }}
           realm: {{ .Values.platform.endpoints.keycloak.realm | quote }}
-          clientUuid: {{ dig "keycloak" "clientUuid" "00000000-0000-0000-0000-000000000001" .Values | quote }}
           clientId: {{ dig "keycloak" "clientId" "openworkflow" .Values | quote }}
           datastreamingClientId: {{ .Values.authorizationClientId | quote }}
           # This cluster's tenant, from forwardmeasure-platform's shared cluster file.

@@ -32,6 +32,12 @@
       <artifactId>quarkus-oidc</artifactId>
     </dependency>
     <dependency>
+      <!-- Every HTTP-layer 401 (ProblemChallengeMechanism) and in-JAX-RS 401/403 as the RFC 9457
+           problem Spring and Micronaut return. -->
+      <groupId>com.forwardmeasure.platform</groupId>
+      <artifactId>forwardmeasure-platform-quarkus-security</artifactId>
+    </dependency>
+    <dependency>
       <!-- AuthzenAuthorizationFactory.create(...) - the real Keycloak AuthZEN PDP client this
            module's own authorizationService(...) producer wires. -->
       <groupId>com.forwardmeasure.authzen</groupId>

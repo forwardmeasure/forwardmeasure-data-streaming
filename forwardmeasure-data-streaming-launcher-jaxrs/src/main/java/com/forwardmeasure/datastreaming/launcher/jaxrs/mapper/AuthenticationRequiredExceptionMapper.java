@@ -17,7 +17,6 @@
 package com.forwardmeasure.datastreaming.launcher.jaxrs.mapper;
 
 import com.forwardmeasure.authzen.AuthenticationRequiredException;
-import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.ErrorResponse;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
 import jakarta.ws.rs.ext.Provider;
@@ -44,8 +43,9 @@ public class AuthenticationRequiredExceptionMapper
 
   @Override
   public Response toResponse(AuthenticationRequiredException exception) {
-    return Response.status(Response.Status.UNAUTHORIZED)
-        .entity(new ErrorResponse(exception.getMessage()))
+    // The same challenge the security layer's own 401 carries, on every framework.
+    return Response.fromResponse(LauncherProblems.response(401, exception.getMessage()))
+        .header("WWW-Authenticate", "Bearer")
         .build();
   }
 }

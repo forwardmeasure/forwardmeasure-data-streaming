@@ -25,6 +25,7 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
@@ -99,7 +100,10 @@ public class IngestionRunResource {
     return launcher
         .observe(client, namespace, correlationId, organizations.current())
         .map(observation -> Response.ok(observation).build())
-        .orElseGet(() -> Response.status(Response.Status.NOT_FOUND).build());
+        .orElseThrow(
+            () ->
+                new NotFoundException(
+                    "no ingestion run '" + correlationId + "' in namespace '" + namespace + "'"));
   }
 
   @POST

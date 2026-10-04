@@ -16,10 +16,11 @@
  */
 package com.forwardmeasure.datastreaming.launcher.jaxrs.mapper;
 
-import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.ErrorResponse;
+import com.forwardmeasure.platform.server.jaxrs.UnhandledExceptionProblemMapper;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
 import jakarta.ws.rs.ext.Provider;
+import java.util.regex.Pattern;
 
 /**
  * Translates {@link NullPointerException} into 400 Bad Request - specifically the ones {@code
@@ -35,11 +36,16 @@ import jakarta.ws.rs.ext.Provider;
  */
 @Provider
 public class NullPointerExceptionMapper implements ExceptionMapper<NullPointerException> {
+  private static final Pattern ARGUMENT_NAME = Pattern.compile("[A-Za-z_$][A-Za-z0-9_$]*");
 
   @Override
   public Response toResponse(NullPointerException exception) {
-    return Response.status(Response.Status.BAD_REQUEST)
-        .entity(new ErrorResponse("missing required field: " + exception.getMessage()))
-        .build();
+    // A request record refusing a null argument names it: Objects.requireNonNull(spec, "spec").
+    // Any other NullPointerException is a server bug - the shared 500 problem, not a 400.
+    String argument = exception.getMessage();
+    if (argument != null && ARGUMENT_NAME.matcher(argument).matches()) {
+      return LauncherProblems.required(argument);
+    }
+    return new UnhandledExceptionProblemMapper().toResponse(exception);
   }
 }

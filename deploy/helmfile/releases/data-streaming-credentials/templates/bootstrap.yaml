@@ -25,7 +25,6 @@ data:
     apk add --no-cache curl jq >/dev/null
     base={{ .Values.keycloak.url }}
     realm={{ .Values.keycloak.realm }}
-    client={{ .Values.keycloak.clientUuid }}
     role={{ .Values.keycloak.datastreamingRole }}
     tenant={{ .Values.keycloak.tenantAlias }}
     k8s_token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
@@ -37,6 +36,12 @@ data:
     json="Content-Type: application/json"
     get() { curl -fsS -H "$auth" "$base/admin/realms/$realm/$1"; }
     post() { curl -sS -o /tmp/response -w '%{http_code}' -X POST -H "$auth" -H "$json" "$base/admin/realms/$realm/$1" --data "$2"; }
+
+    # The shared "openworkflow" client's Keycloak-internal UUID, looked up by clientId: on the
+    # platform, Keycloak generates it (a fixed UUID existed only in fowf's acceptance realm), as
+    # forwardmeasure-openworkflow's openworkflow-platform-clients bootstrap also does.
+    client=$(get "clients?clientId={{ .Values.keycloak.clientId }}" | jq -r '.[0].id // empty')
+    if [ -z "$client" ]; then echo "Keycloak client {{ .Values.keycloak.clientId }} not found in realm $realm" >&2; exit 1; fi
 
     # Same idempotent create-if-absent pattern as openworkflow-platform-clients' own bootstrap.sh
     # (forwardmeasure-openworkflow/deploy/helmfile/releases/openworkflow-platform-clients) - creates

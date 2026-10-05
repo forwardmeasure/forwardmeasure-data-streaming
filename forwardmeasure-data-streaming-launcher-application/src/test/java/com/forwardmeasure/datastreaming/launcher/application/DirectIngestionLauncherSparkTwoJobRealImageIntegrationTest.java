@@ -26,7 +26,6 @@ import com.forwardmeasure.authzen.AuthorizationRequest;
 import com.forwardmeasure.authzen.AuthorizationService;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.testfixtures.TestCustomerMasterFixtures;
-import com.forwardmeasure.jpa.tenancy.TenantDatabase;
 import com.forwardmeasure.jpa.tenancy.TenantId;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
 import com.forwardmeasure.testcontainers.junit.kafka.WithKafkaContainer;
@@ -108,7 +107,6 @@ final class DirectIngestionLauncherSparkTwoJobRealImageIntegrationTest {
   private static final ActiveOrganization ACTOR =
       new ActiveOrganization(
           new TenantId(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")),
-          TenantDatabase.forAlias("test-tenant"),
           "org-1",
           "actor-1",
           Set.of("reviewer"));
@@ -165,7 +163,7 @@ final class DirectIngestionLauncherSparkTwoJobRealImageIntegrationTest {
 
       String sparkJobName = launcher.launch(client, request, ACTOR);
       assertEquals(
-          DirectIngestionLauncher.deterministicJobName(request.correlationId() + ":spark"),
+          DirectIngestionLauncher.deterministicJobName(ACTOR, request.correlationId() + ":spark"),
           sparkJobName,
           "launch() must return the Spark Job's own name for a staged plan, not the delivery"
               + " Job's");
@@ -176,12 +174,14 @@ final class DirectIngestionLauncherSparkTwoJobRealImageIntegrationTest {
           "=== spark pod logs ===\n{}",
           podLogs(
               client,
-              DirectIngestionLauncher.deterministicJobName(request.correlationId() + ":spark")));
+              DirectIngestionLauncher.deterministicJobName(
+                  ACTOR, request.correlationId() + ":spark")));
       LOGGER.info(
           "=== delivery pod logs ===\n{}",
           podLogs(
               client,
-              DirectIngestionLauncher.deterministicJobName(request.correlationId() + ":delivery")));
+              DirectIngestionLauncher.deterministicJobName(
+                  ACTOR, request.correlationId() + ":delivery")));
       assertEquals(
           KubernetesJobObservation.Phase.SUCCEEDED,
           finalObservation.phase(),

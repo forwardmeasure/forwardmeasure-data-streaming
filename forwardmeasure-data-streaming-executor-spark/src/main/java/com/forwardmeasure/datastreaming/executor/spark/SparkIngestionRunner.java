@@ -129,7 +129,8 @@ public final class SparkIngestionRunner {
         plan.transforms(),
         plan.destination(),
         plan.delivery(),
-        plan.errors());
+        plan.errors(),
+        plan.mergePolicy());
   }
 
   public static void main(String[] args) throws Exception {
@@ -143,8 +144,16 @@ public final class SparkIngestionRunner {
             "forwardmeasure-data-streaming-ingestion", sparkExecutorConfigFromEnv());
     int exitCode = 0;
     try {
-      IngestionResult result = run(spark, plan, kafkaBootstrapServers);
-      LOGGER.info("SparkIngestionRunner: recordsWritten={}", result.recordsWritten());
+      if (plan.profile().executionMode()
+          == com.forwardmeasure.datastreaming.api.ExecutionMode.CONTINUOUS) {
+        ContinuousSparkStageRunner.run(spark, plan, kafkaBootstrapServers);
+      } else if (plan.sources().size() > 1) {
+        var result = SparkCorrelationRunner.run(spark, plan, kafkaBootstrapServers);
+        LOGGER.info("SparkCorrelationRunner: groupsWritten={}", result.groupCount());
+      } else {
+        IngestionResult result = run(spark, plan, kafkaBootstrapServers);
+        LOGGER.info("SparkIngestionRunner: recordsWritten={}", result.recordsWritten());
+      }
     } catch (Exception e) {
       LOGGER.error("SparkIngestionRunner: run failed", e);
       exitCode = 1;

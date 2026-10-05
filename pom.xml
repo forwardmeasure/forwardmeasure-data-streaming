@@ -44,7 +44,7 @@
   </licenses>
 
   <properties>
-    <revision>1.0.0</revision>
+    <revision>1.1.0</revision>
     <forwardmeasure-object-storage.version>1.1.0</forwardmeasure-object-storage.version>
     <forwardmeasure-jpa.version>1.1.0</forwardmeasure-jpa.version>
     <!-- com.forwardmeasure.jpa is a multi-module library (-core/-tenancy/-quarkus/-spring/-
@@ -99,6 +99,7 @@
     <module>forwardmeasure-data-streaming-executor-kafka-streams</module>
     <module>forwardmeasure-data-streaming-launcher-application</module>
     <module>forwardmeasure-data-streaming-launcher-jaxrs</module>
+    <module>forwardmeasure-data-streaming-launcher-client</module>
     <module>forwardmeasure-data-streaming-framework-bindings</module>
     <module>forwardmeasure-data-streaming-deployments</module>
   </modules>

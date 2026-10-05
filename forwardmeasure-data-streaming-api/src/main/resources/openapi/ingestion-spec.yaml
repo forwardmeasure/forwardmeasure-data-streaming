@@ -50,6 +50,10 @@ components:
           minItems: 1
           items:
             $ref: "#/components/schemas/SourcePlan"
+        mergePolicyUri:
+          type: string
+          default: classpath:/merge-policies/entity-v1.yaml
+          description: Versioned correlation policy resource, available to the launcher and executor.
         blockingField:
           type: [string, "null"]
           description: Required (by real runtime convention, not enforced in this schema) when sources.size() > 1.
@@ -199,9 +203,8 @@ components:
     TransformGraph:
       type: object
       description: >
-        The transform side of an ExecutionPlan as a real node/edge graph - not yet exercised by any
-        real fei pipeline (both WorldCheck and Customer Master use SourcePlan.mapper directly);
-        included here for completeness since it is a real, real top-level IngestionSpec field.
+        Reserved authoring model. Nonempty graphs are rejected before dispatch; use source mapper
+        field transforms. Both WorldCheck and Customer Master use SourcePlan.mapper directly.
       required: [entryNode, nodes]
       additionalProperties: false
       properties:

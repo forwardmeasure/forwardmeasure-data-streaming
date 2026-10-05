@@ -68,9 +68,38 @@ public final class SparkHandoffSpecs {
       throw new IllegalArgumentException(
           "SparkHandoffSpecs: plan has no sparkStage - there is nothing to hand off from");
     }
+    if (plan.profile().executionMode() == ExecutionMode.CONTINUOUS) {
+      List<SourcePlan> sources = new ArrayList<>();
+      for (int index = 0; index < plan.sources().size(); index++) {
+        SourcePlan original = plan.sources().get(index);
+        SourceSpec kafka =
+            new SourceSpec(
+                "kafka",
+                "kafka:" + continuousTopic(plan, index) + "?brokers=" + kafkaBootstrapServers,
+                null,
+                null,
+                null,
+                Map.of());
+        sources.add(
+            new SourcePlan(
+                original.sourceKey(),
+                kafka,
+                new TransformSpec(
+                    original.mapper().target(), identityFieldRules(List.of(original))),
+                original.trustWeight()));
+      }
+      return new IngestionSpec(
+          sources,
+          plan.blockingField(),
+          null,
+          plan.destination(),
+          ExecutionMode.CONTINUOUS,
+          plan.delivery(),
+          plan.errors());
+    }
     String handoffTopic = plan.sparkStage().get().handoffTopic();
     TransformSpec identityMapper =
-        new TransformSpec(originalMapperTarget(plan), identityFieldRules(plan));
+        new TransformSpec(originalMapperTarget(plan), identityFieldRules(plan.sources()));
     SourceSpec kafkaSource =
         new SourceSpec(
             "kafka",
@@ -90,6 +119,11 @@ public final class SparkHandoffSpecs {
         plan.errors());
   }
 
+  /** Each original source keeps its own ordered contribution stream for continuous correlation. */
+  public static String continuousTopic(ExecutionPlan plan, int sourceIndex) {
+    return plan.sparkStage().orElseThrow().handoffTopic() + "-source-" + sourceIndex;
+  }
+
   private static String originalMapperTarget(ExecutionPlan plan) {
     for (SourcePlan source : plan.sources()) {
       if (source.mapper().target() != null) {
@@ -105,9 +139,9 @@ public final class SparkHandoffSpecs {
    * rule and an ALIAS rule) all collapse into the one already-accumulated value Spark wrote under
    * that single target key.
    */
-  private static List<FieldRule> identityFieldRules(ExecutionPlan plan) {
+  private static List<FieldRule> identityFieldRules(List<SourcePlan> sources) {
     Set<String> targets = new LinkedHashSet<>();
-    for (SourcePlan source : plan.sources()) {
+    for (SourcePlan source : sources) {
       for (FieldRule rule : source.mapper().fields()) {
         targets.add(rule.target());
       }

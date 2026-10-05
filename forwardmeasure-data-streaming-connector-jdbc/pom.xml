@@ -24,7 +24,6 @@
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
     <dependency><groupId>com.forwardmeasure.jpa</groupId><artifactId>forwardmeasure-jpa-core</artifactId></dependency>
     <dependency><groupId>com.forwardmeasure.jpa</groupId><artifactId>forwardmeasure-jpa-tenancy</artifactId></dependency>
-    <dependency><groupId>org.apache.pekko</groupId><artifactId>pekko-stream_${scala.binary.version}</artifactId></dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
     <!-- Test-only: JpaPagingSourceTest proves real paging against a real Postgres schema, the same
          way forwardmeasure-jpa-locking's own real integration test does (WithPostgreSqlContainer +

@@ -60,15 +60,45 @@ public record IngestionSpec(
     @JsonProperty("sink") SinkSpec sink,
     @JsonProperty("executionMode") ExecutionMode executionMode,
     @JsonProperty("delivery") DeliverySemantics delivery,
-    @JsonProperty("errors") ErrorPolicy errors)
+    @JsonProperty("errors") ErrorPolicy errors,
+    @JsonProperty("mergePolicyUri") String mergePolicyUri)
     implements Serializable {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(IngestionSpec.class);
 
+  public IngestionSpec(
+      List<SourcePlan> sources,
+      String blockingField,
+      TransformGraph transforms,
+      SinkSpec sink,
+      ExecutionMode executionMode,
+      DeliverySemantics delivery,
+      ErrorPolicy errors) {
+    this(
+        sources,
+        blockingField,
+        transforms,
+        sink,
+        executionMode,
+        delivery,
+        errors,
+        MergePolicy.DEFAULT_URI);
+  }
+
   public IngestionSpec {
+    mergePolicyUri =
+        mergePolicyUri == null || mergePolicyUri.isBlank()
+            ? MergePolicy.DEFAULT_URI
+            : mergePolicyUri;
     sources = sources == null ? List.of() : List.copyOf(sources);
     if (sources.isEmpty()) {
       throw new IllegalArgumentException("An IngestionSpec must have at least one source");
+    }
+    if (sources.stream().map(SourcePlan::sourceKey).distinct().count() != sources.size()) {
+      throw new IllegalArgumentException("Source keys must be unique");
+    }
+    if (sources.size() > 1 && (blockingField == null || blockingField.isBlank())) {
+      throw new IllegalArgumentException("Correlated ingestion requires blockingField");
     }
     Objects.requireNonNull(sink, "sink");
     Objects.requireNonNull(executionMode, "executionMode");

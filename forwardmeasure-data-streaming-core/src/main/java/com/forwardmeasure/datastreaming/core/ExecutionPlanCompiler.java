@@ -76,7 +76,8 @@ public final class ExecutionPlanCompiler {
             spec.transforms(),
             spec.sink(),
             spec.delivery(),
-            spec.errors());
+            spec.errors(),
+            com.forwardmeasure.datastreaming.api.MergePolicy.load(spec.mergePolicyUri()));
     if (LOGGER.isInfoEnabled()) {
       LOGGER.info(
           "plan.compiled engine={} cardinality={} mode={} sparkStage={} cost={} state={}",
@@ -126,7 +127,21 @@ public final class ExecutionPlanCompiler {
       return Optional.empty();
     }
     List<String> heavyTransformNames = heavyTransformNames(spec);
-    String handoffTopic = "fds-spark-handoff-" + Integer.toHexString(spec.hashCode());
+    ExecutionPlan identityPlan =
+        new ExecutionPlan(
+            new ExecutionProfile(
+                spec.sourceCardinality(), spec.executionMode(), resolveEngine(spec, folded)),
+            spec.sources(),
+            spec.blockingField(),
+            Optional.empty(),
+            spec.transforms(),
+            spec.sink(),
+            spec.delivery(),
+            spec.errors(),
+            com.forwardmeasure.datastreaming.api.MergePolicy.load(spec.mergePolicyUri()));
+    String handoffTopic =
+        com.forwardmeasure.datastreaming.api.ExecutionIdentity.of(
+            identityPlan, "fds-spark-handoff-", System.getenv("FDS_EXECUTION_ID"));
     return Optional.of(new SparkStagePlan(heavyTransformNames, handoffTopic));
   }
 

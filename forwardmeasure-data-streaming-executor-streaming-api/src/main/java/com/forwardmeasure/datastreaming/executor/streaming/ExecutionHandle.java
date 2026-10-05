@@ -28,5 +28,10 @@ public interface ExecutionHandle {
 
   boolean isRunning();
 
+  /** Terminal failure, when the engine exposes its cause. */
+  default java.util.Optional<Throwable> failure() {
+    return java.util.Optional.empty();
+  }
+
   void stop();
 }

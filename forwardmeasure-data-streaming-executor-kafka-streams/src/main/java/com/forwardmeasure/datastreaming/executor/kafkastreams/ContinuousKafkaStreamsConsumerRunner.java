@@ -26,7 +26,6 @@ import com.forwardmeasure.datastreaming.mappers.OpenSearchSinkRowWriter;
 import com.forwardmeasure.datastreaming.mappers.SinkRowWriter;
 import java.util.Map;
 import java.util.Properties;
-import java.util.UUID;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.StreamsBuilder;
@@ -63,7 +62,9 @@ final class ContinuousKafkaStreamsConsumerRunner {
   KafkaStreamsExecutionHandle run(ExecutionPlan plan) {
     SourcePlan source = plan.sources().get(0);
     KafkaConnectorUri sourceUri = KafkaConnectorUri.parse(source.source().uri());
-    String applicationId = "fds-kafka-streams-" + UUID.randomUUID();
+    String applicationId =
+        com.forwardmeasure.datastreaming.api.ExecutionIdentity.of(
+            plan, "fds-kafka-streams-", System.getenv("FDS_EXECUTION_ID"));
 
     Topology topology = buildTopology(source.mapper(), sourceUri.topic(), plan);
 
@@ -74,8 +75,9 @@ final class ContinuousKafkaStreamsConsumerRunner {
     streamsConfigOverrides.forEach(props::put);
 
     KafkaStreams streams = new KafkaStreams(topology, props);
+    var handle = new KafkaStreamsExecutionHandle(applicationId, streams);
     streams.start();
-    return new KafkaStreamsExecutionHandle(applicationId, streams);
+    return handle;
   }
 
   private Topology buildTopology(TransformSpec mapperSpec, String inputTopic, ExecutionPlan plan) {

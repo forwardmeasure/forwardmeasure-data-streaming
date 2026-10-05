@@ -72,7 +72,8 @@ final class BoundedPekkoStreamsConsumerRunner {
             result.recordsProcessed(),
             System.currentTimeMillis() - startMillis);
       } else {
-        PekkoCorrelationRunner.CorrelationResult result = PekkoCorrelationRunner.run(spec, system);
+        PekkoCorrelationRunner.CorrelationResult result =
+            PekkoCorrelationRunner.run(spec, system, plan.mergePolicy());
         LOGGER.info(
             "run.completed engine=PEKKO_STREAMS mode=BOUNDED cardinality=CORRELATED"
                 + " sourceCount={} groupCount={} elapsedMs={}",

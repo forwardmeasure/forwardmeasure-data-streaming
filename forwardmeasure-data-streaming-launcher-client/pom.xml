@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Licensed to the Apache Software Foundation (ASF) under one or more
+contributor license agreements. See the NOTICE file distributed with
+this work for additional information regarding copyright ownership.
+The ASF licenses this file to You under the Apache License, Version 2.0
+(the "License"); you may not use this file except in compliance with
+ the License. You may obtain a copy of the License at
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-parent</artifactId><version>${revision}</version></parent>
+  <artifactId>forwardmeasure-data-streaming-launcher-client</artifactId>
+  <name>ForwardMeasure Data Streaming Generated Launcher Client</name>
+  <dependencies>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
+    <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-annotations</artifactId></dependency>
+    <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId></dependency>
+    <dependency><groupId>com.fasterxml.jackson.datatype</groupId><artifactId>jackson-datatype-jsr310</artifactId></dependency>
+    <dependency><groupId>jakarta.annotation</groupId><artifactId>jakarta.annotation-api</artifactId></dependency>
+    <dependency><groupId>org.apache.httpcomponents.client5</groupId><artifactId>httpclient5</artifactId></dependency>
+  </dependencies>
+  <build><plugins>
+    <!-- Generated sources follow the same compiler policy as the FOWF generated clients. -->
+    <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><configuration><showWarnings>false</showWarnings><compilerArgs combine.self="override"><arg>-Xlint:none</arg></compilerArgs></configuration></plugin>
+    <plugin><groupId>org.openapitools</groupId><artifactId>openapi-generator-maven-plugin</artifactId>
+      <executions><execution><id>launcher-client</id><phase>generate-sources</phase><goals><goal>generate</goal></goals><configuration>
+        <inputSpec>${project.basedir}/../forwardmeasure-data-streaming-api/src/main/resources/openapi/launcher.yaml</inputSpec>
+        <generatorName>java</generatorName><library>apache-httpclient</library>
+        <apiPackage>com.forwardmeasure.datastreaming.launcher.client.api</apiPackage>
+        <modelPackage>com.forwardmeasure.datastreaming.launcher.client.model</modelPackage>
+        <invokerPackage>com.forwardmeasure.datastreaming.launcher.client</invokerPackage>
+        <generateApiTests>false</generateApiTests><generateModelTests>false</generateModelTests>
+        <generateApiDocumentation>false</generateApiDocumentation><generateModelDocumentation>false</generateModelDocumentation>
+        <schemaMappings><schemaMapping>IngestionSpec=com.forwardmeasure.datastreaming.api.IngestionSpec</schemaMapping></schemaMappings>
+        <configOptions>
+          <supportUrlQuery>false</supportUrlQuery><sourceFolder>src/main/java</sourceFolder><hideGenerationTimestamp>true</hideGenerationTimestamp>
+          <openApiNullable>false</openApiNullable><serializationLibrary>jackson</serializationLibrary>
+          <useJakartaEe>true</useJakartaEe><useRuntimeException>true</useRuntimeException>
+        </configOptions>
+      </configuration></execution></executions>
+    </plugin>
+  </plugins></build>
+</project>

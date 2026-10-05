@@ -49,6 +49,7 @@ public final class WorkflowIngestionLauncher {
   private final WorkflowExecutionsApi executionsApi;
   private final AuthorizationService authorization;
   private final boolean assertSubjectActor;
+  private final IngestionLaunchPlanner planner;
 
   /**
    * Defaults {@code assertSubjectActor} to {@code false} - see the 3-arg constructor's own javadoc
@@ -84,6 +85,15 @@ public final class WorkflowIngestionLauncher {
       WorkflowExecutionsApi executionsApi,
       AuthorizationService authorization,
       boolean assertSubjectActor) {
+    this(executionsApi, authorization, assertSubjectActor, null);
+  }
+
+  public WorkflowIngestionLauncher(
+      WorkflowExecutionsApi executionsApi,
+      AuthorizationService authorization,
+      boolean assertSubjectActor,
+      IngestionLaunchPlanner planner) {
+    this.planner = planner;
     this.executionsApi = Objects.requireNonNull(executionsApi, "executionsApi");
     this.authorization = Objects.requireNonNull(authorization, "authorization");
     this.assertSubjectActor = assertSubjectActor;
@@ -116,10 +126,18 @@ public final class WorkflowIngestionLauncher {
             AuthorizationAction.WORKFLOW_RUN_LAUNCH,
             request.correlationId(),
             Map.of()));
+    Object input = request.input();
+    if (request.ingestion() != null) {
+      if (planner == null)
+        throw new IllegalStateException("This launcher has no ingestion planner configured");
+      input =
+          planner.workflowInput(
+              request.ingestion(), actor.tenantId() + ":" + request.idempotencyKey());
+    }
     WorkflowExecutionStart start =
         new WorkflowExecutionStart()
             .revisionId(request.revisionId())
-            .input(request.input())
+            .input(input)
             .subjectActor(assertSubjectActor ? subjectActorFor(actor) : null);
     return executionsApi.startWorkflowExecution(
         request.idempotencyKey(), request.correlationId(), start);

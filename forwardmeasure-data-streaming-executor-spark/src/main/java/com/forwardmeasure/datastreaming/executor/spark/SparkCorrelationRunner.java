@@ -85,7 +85,8 @@ public final class SparkCorrelationRunner {
     // Cached deliberately: count() below and the write() call are two separate actions on the
     // same lazily-evaluated RDD - without caching, Spark would recompute the entire
     // read/map/correlate/merge pipeline (across every source) a second time for the write alone.
-    JavaRDD<Map<String, Object>> merged = SparkCorrelationEngine.correlate(mapped).cache();
+    JavaRDD<Map<String, Object>> merged =
+        SparkCorrelationEngine.correlate(mapped, plan.mergePolicy()).cache();
     long groupCount = merged.count();
     SinkSpec handoffSink = SparkIngestionRunner.handoffSink(plan, kafkaBootstrapServers);
     SparkSinks.write(spark, merged, handoffSink, plan.errors());

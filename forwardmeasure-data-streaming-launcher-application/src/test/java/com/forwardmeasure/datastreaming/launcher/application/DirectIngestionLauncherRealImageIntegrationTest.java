@@ -30,7 +30,6 @@ import com.forwardmeasure.datastreaming.api.SinkSpec;
 import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
-import com.forwardmeasure.jpa.tenancy.TenantDatabase;
 import com.forwardmeasure.jpa.tenancy.TenantId;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
 import com.forwardmeasure.testcontainers.junit.kubernetes.WithKubernetesContainer;
@@ -116,7 +115,6 @@ final class DirectIngestionLauncherRealImageIntegrationTest {
   private static final ActiveOrganization ACTOR =
       new ActiveOrganization(
           new TenantId(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")),
-          TenantDatabase.forAlias("test-tenant"),
           "org-1",
           "actor-1",
           Set.of("reviewer"));

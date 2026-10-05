@@ -32,7 +32,6 @@ import com.forwardmeasure.datastreaming.api.SinkSpec;
 import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
-import com.forwardmeasure.jpa.tenancy.TenantDatabase;
 import com.forwardmeasure.jpa.tenancy.TenantId;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
 import com.forwardmeasure.testcontainers.junit.kubernetes.WithKubernetesContainer;
@@ -70,7 +69,6 @@ final class DirectIngestionLauncherTest {
   private static final ActiveOrganization ACTOR =
       new ActiveOrganization(
           new TenantId(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")),
-          TenantDatabase.forAlias("test-tenant"),
           "org-1",
           "actor-1",
           Set.of("reviewer"));
@@ -109,7 +107,8 @@ final class DirectIngestionLauncherTest {
 
     try (KubernetesClient client = kubernetes.createClient()) {
       String jobName = launcher.launch(client, request, ACTOR);
-      assertEquals(DirectIngestionLauncher.deterministicJobName(request.correlationId()), jobName);
+      assertEquals(
+          DirectIngestionLauncher.deterministicJobName(ACTOR, request.correlationId()), jobName);
 
       KubernetesJobObservation observation =
           pollUntilTerminal(launcher, client, request.correlationId());
@@ -182,7 +181,7 @@ final class DirectIngestionLauncherTest {
                           .getName()
                           .equals(
                               DirectIngestionLauncher.deterministicJobName(
-                                  request.correlationId()))));
+                                  ACTOR, request.correlationId()))));
     }
   }
 
@@ -230,6 +229,86 @@ final class DirectIngestionLauncherTest {
 
       assertTrue(afterCancel.isEmpty(), "expected the Job to be gone after cancel()");
     }
+  }
+
+  @Test
+  @Timeout(180)
+  void replacementLauncherPreservesPlannedDeliveryAndRejectsChangedIdempotencyPayload(
+      KubernetesTestContainer kubernetes) throws Exception {
+    var spec =
+        com.forwardmeasure.datastreaming.testfixtures.TestCustomerMasterFixtures
+            .boundedKafkaSpecWithScreening(
+                "unused:9092", MARKER, "http://unused:9200", java.nio.file.Path.of(""));
+    var request =
+        new DirectLaunchRequest(
+            UUID.randomUUID().toString(),
+            NAMESPACE,
+            spec,
+            Map.of("memory", "16Mi"),
+            Map.of("memory", "64Mi"),
+            120L);
+    try (KubernetesClient client = kubernetes.createClient()) {
+      stagedLauncher().launch(client, request, ACTOR);
+      var changed =
+          new DirectLaunchRequest(
+              request.correlationId(),
+              NAMESPACE,
+              spec,
+              request.resourceRequests(),
+              request.resourceLimits(),
+              121L);
+      assertThrows(
+          IllegalArgumentException.class, () -> stagedLauncher().launch(client, changed, ACTOR));
+      // The replacement has no in-memory record of the original launch.
+      var replacement = stagedLauncher();
+      assertEquals(
+          KubernetesJobObservation.Phase.SUCCEEDED,
+          pollUntilTerminal(replacement, client, request.correlationId()).phase());
+      var delivery =
+          client
+              .batch()
+              .v1()
+              .jobs()
+              .inNamespace(NAMESPACE)
+              .withName(
+                  DirectIngestionLauncher.deterministicJobName(
+                      ACTOR, request.correlationId() + ":delivery"))
+              .get();
+      assertEquals(120L, delivery.getSpec().getActiveDeadlineSeconds());
+      var container = delivery.getSpec().getTemplate().getSpec().getContainers().getFirst();
+      assertEquals(
+          new io.fabric8.kubernetes.api.model.Quantity("64Mi"),
+          container.getResources().getLimits().get("memory"));
+      assertTrue(
+          container.getEnv().stream()
+              .anyMatch(env -> "MERGE_POLICY_YAML_BASE64".equals(env.getName())));
+    }
+  }
+
+  @Test
+  void stagedLaunchChecksNamespaceBeforeAnyClusterMutation() {
+    var spec =
+        com.forwardmeasure.datastreaming.testfixtures.TestCustomerMasterFixtures
+            .boundedKafkaSpecWithScreening(
+                "unused:9092", MARKER, "http://unused:9200", java.nio.file.Path.of(""));
+    var request =
+        new DirectLaunchRequest("denied", "not-authorized", spec, Map.of(), Map.of(), null);
+    assertThrows(SecurityException.class, () -> stagedLauncher().launch(null, request, ACTOR));
+  }
+
+  private static DirectIngestionLauncher stagedLauncher() {
+    return new DirectIngestionLauncher(
+        IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
+        AUTHORIZATION,
+        STAND_IN_IMAGE,
+        "true",
+        STAND_IN_IMAGE,
+        "true",
+        List.of(),
+        Map.of(),
+        STAND_IN_IMAGE,
+        "grep -q " + MARKER,
+        "unused:9092");
   }
 
   private static IngestionSpec ingestionSpecWithMarker(String sourceConnector) {

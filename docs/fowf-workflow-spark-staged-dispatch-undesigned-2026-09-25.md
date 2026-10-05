@@ -1,5 +1,13 @@
 # fowf workflow-mode has never dispatched a Spark-staged spec — handover (2026-09-25)
 
+> Historical investigation. The 2026-10-04 architecture decision SINV-05 has resolved the
+> ownership question below: FDS computes the plan and derived delivery spec for both invocation
+> paths; workflow authors do not hand-author that derived spec. Implementation remains open.
+> Follow the [current deployment plan](../../forwardmeasure-openworkflow/docs/rehabilitation/completion-work.md),
+> packets D2 and D5. The older “not a bug” and “neither direction chosen” statements below do
+> not describe the current accepted requirements.
+
+
 Written for whoever on the fowf side looks at extending workflow-triggered ingestion to cover
 Spark-staged specs. This is a real, open design gap, not a bug — nothing is broken, because nothing
 exists yet. Every claim below is grounded in a direct read of this repo's own current code.

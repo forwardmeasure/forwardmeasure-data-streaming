@@ -173,8 +173,10 @@ public class LauncherQuarkusBinding {
   @Produces
   @ApplicationScoped
   WorkflowIngestionLauncher workflowIngestionLauncher(
-      WorkflowExecutionsApi executionsApi, AuthorizationService authorization) {
-    return new WorkflowIngestionLauncher(executionsApi, authorization);
+      WorkflowExecutionsApi executionsApi,
+      AuthorizationService authorization,
+      DirectIngestionLauncher direct) {
+    return new WorkflowIngestionLauncher(executionsApi, authorization, false, direct.planner());
   }
 
   @Produces

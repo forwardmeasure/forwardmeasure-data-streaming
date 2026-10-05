@@ -18,6 +18,7 @@ package com.forwardmeasure.datastreaming.executor.pekko;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
+import com.forwardmeasure.datastreaming.api.MergePolicy;
 import com.forwardmeasure.datastreaming.connector.camel.CamelBridge;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline;
 import java.io.IOException;
@@ -67,6 +68,11 @@ public final class PekkoCorrelationRunner {
    * PekkoCorrelationEngine#correlate}), and writes the merged rows to {@code spec.sink()}.
    */
   public static CorrelationResult run(IngestionSpec spec, ActorSystem system) throws IOException {
+    return run(spec, system, MergePolicy.load(spec.mergePolicyUri()));
+  }
+
+  public static CorrelationResult run(IngestionSpec spec, ActorSystem system, MergePolicy policy)
+      throws IOException {
     if (spec.sources().size() <= 1) {
       throw new IllegalArgumentException(
           "PekkoCorrelationRunner: expected more than one source, got "
@@ -97,7 +103,7 @@ public final class PekkoCorrelationRunner {
       List<List<PekkoCorrelationEngine.PekkoCorrelationRecord>> mappedSources =
           reads.stream().map(CompletableFuture::join).toList();
 
-      List<Map<String, Object>> merged = PekkoCorrelationEngine.correlate(mappedSources);
+      List<Map<String, Object>> merged = PekkoCorrelationEngine.correlate(mappedSources, policy);
 
       ObjectMapper objectMapper = new ObjectMapper();
       Sink<Map<String, Object>, CompletionStage<Done>> sink =

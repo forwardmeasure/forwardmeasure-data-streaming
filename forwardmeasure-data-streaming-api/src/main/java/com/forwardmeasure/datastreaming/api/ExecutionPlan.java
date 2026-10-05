@@ -49,9 +49,37 @@ public record ExecutionPlan(
     TransformGraph transforms,
     SinkSpec destination,
     DeliverySemantics delivery,
-    ErrorPolicy errors) {
+    ErrorPolicy errors,
+    MergePolicy mergePolicy) {
+
+  public ExecutionPlan(
+      ExecutionProfile profile,
+      List<SourcePlan> sources,
+      String blockingField,
+      Optional<SparkStagePlan> sparkStage,
+      TransformGraph transforms,
+      SinkSpec destination,
+      DeliverySemantics delivery,
+      ErrorPolicy errors) {
+    this(
+        profile,
+        sources,
+        blockingField,
+        sparkStage,
+        transforms,
+        destination,
+        delivery,
+        errors,
+        MergePolicy.defaults());
+  }
 
   public ExecutionPlan {
+    if (transforms != null) {
+      throw new IllegalArgumentException(
+          "TransformGraph execution is not supported: declare executable field transforms in each"
+              + " source mapper");
+    }
+    mergePolicy = mergePolicy == null ? MergePolicy.defaults() : mergePolicy;
     Objects.requireNonNull(profile, "profile");
     sources = sources == null ? List.of() : List.copyOf(sources);
     if (sources.isEmpty()) {

@@ -211,9 +211,11 @@ class DirectIngestionMatrixQuarkusKafkaStreamsTestCustomerMasterSmokeTest {
     @Override
     public Map<String, String> start() {
       fixture = AuthzenKeycloakFixture.start();
-      UUID tenantId = UUID.randomUUID();
+      var tenantDid =
+          com.forwardmeasure.jpa.tenancy.Did.parse("did:fwmtest:tenant:" + UUID.randomUUID());
+      UUID tenantId = com.forwardmeasure.jpa.tenancy.TenantId.forDid(tenantDid).value();
       String organizationId =
-          fixture.provisionTenant("quarkus-kstreams-cm-smoke-org", tenantId, ROLE_NAME);
+          fixture.provisionTenant("quarkus-kstreams-cm-smoke-org", tenantDid, ROLE_NAME);
       fixture.grantResourceAuthorization(
           organizationId,
           "datastreaming-ingestion-run",

@@ -126,10 +126,12 @@ public final class EnvConfiguredJobLauncher {
 
   public Optional<KubernetesJobObservation> observe(
       KubernetesClient client, String namespace, String correlationId) {
+    policy.authorizeNamespace(namespace);
     return KubernetesJobLifecycle.observe(client, namespace, jobName(correlationId));
   }
 
   public void cancel(KubernetesClient client, String namespace, String correlationId) {
+    policy.authorizeNamespace(namespace);
     KubernetesJobLifecycle.cancel(client, namespace, jobName(correlationId));
   }
 

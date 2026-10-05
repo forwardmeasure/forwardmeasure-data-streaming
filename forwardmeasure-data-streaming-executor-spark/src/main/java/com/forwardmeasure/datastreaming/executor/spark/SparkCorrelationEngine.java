@@ -18,8 +18,10 @@ package com.forwardmeasure.datastreaming.executor.spark;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.forwardmeasure.datastreaming.api.MergePolicy;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
+import com.forwardmeasure.datastreaming.core.CorrelationMerge;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline.MalformedRecordPolicy;
 import com.forwardmeasure.datastreaming.mappers.FieldMappingEngine;
 import com.forwardmeasure.datastreaming.mappers.MapSourceRow;
@@ -30,7 +32,6 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -188,6 +189,11 @@ public final class SparkCorrelationEngine {
    */
   public static JavaRDD<Map<String, Object>> correlate(
       List<JavaRDD<SparkCorrelationRecord>> sources) {
+    return correlate(sources, MergePolicy.defaults());
+  }
+
+  public static JavaRDD<Map<String, Object>> correlate(
+      List<JavaRDD<SparkCorrelationRecord>> sources, MergePolicy policy) {
     if (sources.isEmpty()) {
       throw new IllegalArgumentException("sources must not be empty");
     }
@@ -201,21 +207,20 @@ public final class SparkCorrelationEngine {
 
     return grouped.map(
         (Function<Tuple2<String, Iterable<SparkCorrelationRecord>>, Map<String, Object>>)
-            pair -> mergeGroup(pair._2()));
+            pair -> mergeGroup(pair._2(), policy));
   }
 
-  private static Map<String, Object> mergeGroup(Iterable<SparkCorrelationRecord> group) {
+  private static Map<String, Object> mergeGroup(
+      Iterable<SparkCorrelationRecord> group, MergePolicy policy) {
     List<SparkCorrelationRecord> sorted = new ArrayList<>();
     group.forEach(sorted::add);
-    sorted.sort(Comparator.comparingDouble(SparkCorrelationRecord::trustWeight).reversed());
+    sorted.sort(
+        Comparator.comparingDouble(SparkCorrelationRecord::trustWeight)
+            .reversed()
+            .thenComparing(SparkCorrelationRecord::sourceKey));
 
-    Map<String, Object> merged = new LinkedHashMap<>();
-    for (SparkCorrelationRecord record : sorted) {
-      for (Map.Entry<String, Object> field : record.mappedFields().entrySet()) {
-        merged.putIfAbsent(field.getKey(), field.getValue());
-      }
-    }
-    return merged;
+    return CorrelationMerge.merge(
+        sorted.stream().map(SparkCorrelationRecord::mappedFields).toList(), policy);
   }
 
   /**

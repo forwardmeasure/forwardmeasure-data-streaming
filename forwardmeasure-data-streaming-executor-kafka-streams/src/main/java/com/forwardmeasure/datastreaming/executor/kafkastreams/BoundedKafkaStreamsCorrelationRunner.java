@@ -21,8 +21,10 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forwardmeasure.datastreaming.api.ErrorPolicy;
 import com.forwardmeasure.datastreaming.api.KafkaConnectorUri;
+import com.forwardmeasure.datastreaming.api.MergePolicy;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
 import com.forwardmeasure.datastreaming.api.SourcePlan;
+import com.forwardmeasure.datastreaming.core.CorrelationMerge;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline.MalformedRecordPolicy;
 import com.forwardmeasure.datastreaming.mappers.FieldMappingEngine;
 import com.forwardmeasure.datastreaming.mappers.MapSourceRow;
@@ -88,7 +90,8 @@ final class BoundedKafkaStreamsCorrelationRunner {
       String blockingField,
       SinkSpec sink,
       ErrorPolicy errors,
-      FieldMappingEngine mapper) {
+      FieldMappingEngine mapper,
+      MergePolicy policy) {
     if (sources.size() <= 1) {
       throw new IllegalArgumentException(
           "BoundedKafkaStreamsCorrelationRunner: expected more than one source, got "
@@ -110,7 +113,7 @@ final class BoundedKafkaStreamsCorrelationRunner {
     long groupCount = 0;
     try (SinkRowWriter sinkRowWriter = new OpenSearchSinkRowWriter(sink)) {
       for (List<CorrelationRecord> group : grouped.values()) {
-        sinkRowWriter.write(mergeGroup(group));
+        sinkRowWriter.write(mergeGroup(group, policy));
         groupCount++;
       }
     }
@@ -221,17 +224,15 @@ final class BoundedKafkaStreamsCorrelationRunner {
     return new CorrelationRecord(blockingKey, source.sourceKey(), source.trustWeight(), mapped);
   }
 
-  private static Map<String, Object> mergeGroup(List<CorrelationRecord> group) {
+  private static Map<String, Object> mergeGroup(List<CorrelationRecord> group, MergePolicy policy) {
     List<CorrelationRecord> sorted = new ArrayList<>(group);
-    sorted.sort(Comparator.comparingDouble(CorrelationRecord::trustWeight).reversed());
+    sorted.sort(
+        Comparator.comparingDouble(CorrelationRecord::trustWeight)
+            .reversed()
+            .thenComparing(CorrelationRecord::sourceKey));
 
-    Map<String, Object> merged = new LinkedHashMap<>();
-    for (CorrelationRecord record : sorted) {
-      for (Map.Entry<String, Object> field : record.mappedFields().entrySet()) {
-        merged.putIfAbsent(field.getKey(), field.getValue());
-      }
-    }
-    return merged;
+    return CorrelationMerge.merge(
+        sorted.stream().map(CorrelationRecord::mappedFields).toList(), policy);
   }
 
   private static String normalizeBlockingKey(String value) {

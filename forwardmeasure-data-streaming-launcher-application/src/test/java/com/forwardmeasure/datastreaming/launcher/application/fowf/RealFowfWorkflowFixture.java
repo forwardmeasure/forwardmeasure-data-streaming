@@ -194,7 +194,9 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
 
     TenantId tenantId = deriveTenantId(tenantAlias);
     AuthzenKeycloakFixture keycloak = AuthzenKeycloakFixture.start();
-    String organizationId = keycloak.provisionTenant(tenantAlias, tenantId.value(), role);
+    String organizationId =
+        keycloak.provisionTenant(
+            tenantAlias, new Did("did:web:" + tenantAlias + "." + TENANT_DOMAIN), role);
     LOGGER.info(
         "RealFowfWorkflowFixture: provisioned Keycloak Organization '{}' for tenantId={}"
             + " (matches the real openworkflow-migrations tenant registry row)",
@@ -236,7 +238,6 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             AuthorizationAction.DEFINITION_READ.scope(),
             AuthorizationAction.DEFINITION_LIST.scope(),
             AuthorizationAction.DEFINITION_VALIDATE.scope(),
-            AuthorizationAction.DEFINITION_SUBMIT.scope(),
             AuthorizationAction.DEFINITION_PUBLISH.scope()));
     // A THIRD, real server-side check - independent of the two above - runs inside the
     // operation-adapter itself (AuthzenOperationSecurityResolver, confirmed by direct source
@@ -972,16 +973,6 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
 
   public String organizationId() {
     return organizationId;
-  }
-
-  /**
-   * A real, second identity in this fixture's own Organization - genuinely different from {@link
-   * AuthzenKeycloakFixture#mintUserToken()} - needed for {@code
-   * WorkflowGovernanceServiceImpl#publishWorkflowDefinition}'s unconditional maker-checker check.
-   * See {@link AuthzenKeycloakFixture#provisionServiceAccountReviewer}'s own javadoc.
-   */
-  public String provisionReviewerToken(String role) {
-    return keycloak.provisionServiceAccountReviewer(organizationId, role);
   }
 
   /**

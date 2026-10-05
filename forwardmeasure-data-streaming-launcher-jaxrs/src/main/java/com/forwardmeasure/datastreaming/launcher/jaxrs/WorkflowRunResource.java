@@ -22,15 +22,7 @@ import com.forwardmeasure.datastreaming.launcher.application.WorkflowLaunchReque
 import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecution;
 import com.forwardmeasure.openworkflow.execution.client.ApiException;
 import jakarta.ws.rs.BadRequestException;
-import jakarta.ws.rs.Consumes;
-import jakarta.ws.rs.GET;
-import jakarta.ws.rs.HeaderParam;
-import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
-import jakarta.ws.rs.PathParam;
-import jakarta.ws.rs.Produces;
-import jakarta.ws.rs.QueryParam;
-import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.util.Objects;
 import java.util.UUID;
@@ -51,7 +43,8 @@ import java.util.UUID;
  * a connectivity failure) is translated by this module's {@code mapper} package, not here.
  */
 @Path("/workflow-runs")
-public class WorkflowRunResource {
+public class WorkflowRunResource
+    implements com.forwardmeasure.datastreaming.launcher.contract.WorkflowRunsApi {
 
   private final WorkflowIngestionLauncher launcher;
   private final ActiveOrganizationProvider organizations;
@@ -62,9 +55,22 @@ public class WorkflowRunResource {
     this.organizations = Objects.requireNonNull(organizations, "organizations");
   }
 
-  @POST
-  @Consumes(MediaType.APPLICATION_JSON)
-  @Produces(MediaType.APPLICATION_JSON)
+  @Override
+  public Response createWorkflowRun(WorkflowLaunchRequest request) throws ApiException {
+    return create(request);
+  }
+
+  @Override
+  public Response getWorkflowRun(UUID executionId) throws ApiException {
+    return get(executionId);
+  }
+
+  @Override
+  public Response cancelWorkflowRun(
+      UUID executionId, String ifMatch, String correlationId, String reason) throws ApiException {
+    return cancel(executionId, ifMatch, correlationId, reason);
+  }
+
   public Response create(WorkflowLaunchRequest request) throws ApiException {
     WorkflowExecution execution = launcher.launch(request, organizations.current());
     return Response.accepted()
@@ -73,21 +79,11 @@ public class WorkflowRunResource {
         .build();
   }
 
-  @GET
-  @Path("/{executionId}")
-  @Produces(MediaType.APPLICATION_JSON)
-  public Response get(@PathParam("executionId") UUID executionId) throws ApiException {
+  public Response get(UUID executionId) throws ApiException {
     return Response.ok(launcher.observe(executionId, organizations.current())).build();
   }
 
-  @POST
-  @Path("/{executionId}/cancel")
-  @Produces(MediaType.APPLICATION_JSON)
-  public Response cancel(
-      @PathParam("executionId") UUID executionId,
-      @HeaderParam("If-Match") String ifMatch,
-      @QueryParam("correlationId") String correlationId,
-      @QueryParam("reason") String reason)
+  public Response cancel(UUID executionId, String ifMatch, String correlationId, String reason)
       throws ApiException {
     if (ifMatch == null || ifMatch.isBlank()) {
       throw new BadRequestException("the 'If-Match' header is required");

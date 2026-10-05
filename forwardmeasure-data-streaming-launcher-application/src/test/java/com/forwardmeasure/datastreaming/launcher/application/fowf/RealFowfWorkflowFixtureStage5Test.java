@@ -35,7 +35,7 @@ import org.testcontainers.containers.GenericContainer;
 /**
  * Stage 5 only: the real {@code openworkflow-definition-management-quarkus} image, publishing a
  * real {@code WorkflowDefinition} through fowf's own generated Java client SDK - the exact same
- * create -&gt; validate -&gt; submit -&gt; publish governance sequence {@code
+ * create -&gt; validate -&gt; publish governance sequence {@code
  * forwardmeasure-entity-intelligence}'s own real, already-proven {@code
  * WorkflowDefinitionPublisherMain} uses (mirrored here, not reinvented). The workflow itself is the
  * real 2-step apply+await {@code kubernetes-deployment} pattern from {@code
@@ -68,16 +68,11 @@ class RealFowfWorkflowFixtureStage5Test {
       ApiClient authorApiClient = new ApiClient();
       authorApiClient.setBasePath(baseUrl);
       authorApiClient.setBearerToken(fixture.keycloak().mintUserToken());
-      ApiClient reviewerApiClient = new ApiClient();
-      reviewerApiClient.setBasePath(baseUrl);
-      reviewerApiClient.setBearerToken(fixture.provisionReviewerToken(ROLE));
 
       WorkflowsApi workflows = new WorkflowsApi(authorApiClient);
       WorkflowDefinitionsApi definitions = new WorkflowDefinitionsApi(authorApiClient);
       WorkflowDefinitionGovernanceApi governance =
           new WorkflowDefinitionGovernanceApi(authorApiClient);
-      WorkflowDefinitionGovernanceApi reviewerGovernance =
-          new WorkflowDefinitionGovernanceApi(reviewerApiClient);
 
       Workflow workflow =
           workflows.createWorkflow(
@@ -99,13 +94,9 @@ class RealFowfWorkflowFixtureStage5Test {
           Boolean.TRUE.equals(validation.getValid()),
           "expected the real workflow document to compile cleanly: " + validation.getViolations());
 
-      WorkflowDefinition submitted =
-          governance.submitWorkflowDefinition(
-              ifMatch(created.getRevision()), workflow.getId(), created.getId());
-
       WorkflowDefinition published =
-          reviewerGovernance.publishWorkflowDefinition(
-              ifMatch(submitted.getRevision()), workflow.getId(), created.getId());
+          governance.publishWorkflowDefinition(
+              ifMatch(created.getRevision()), workflow.getId(), created.getId());
 
       assertEquals("PUBLISHED", published.getStatus().name());
     }

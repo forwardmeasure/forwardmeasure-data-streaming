@@ -25,7 +25,6 @@ import com.forwardmeasure.authzen.AuthorizationRequest;
 import com.forwardmeasure.authzen.AuthorizationService;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.testfixtures.WorldCheckFixtures;
-import com.forwardmeasure.jpa.tenancy.TenantDatabase;
 import com.forwardmeasure.jpa.tenancy.TenantId;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
 import com.forwardmeasure.testcontainers.junit.kafka.WithKafkaContainer;
@@ -105,7 +104,6 @@ final class DirectIngestionLauncherKafkaStreamsRealImageIntegrationTest {
   private static final ActiveOrganization ACTOR =
       new ActiveOrganization(
           new TenantId(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")),
-          TenantDatabase.forAlias("test-tenant"),
           "org-1",
           "actor-1",
           Set.of("reviewer"));

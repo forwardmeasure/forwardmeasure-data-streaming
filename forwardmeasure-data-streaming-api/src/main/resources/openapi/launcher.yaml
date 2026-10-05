@@ -1,0 +1,147 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+#  the License. You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+openapi: 3.0.3
+info:
+  title: ForwardMeasure Data Streaming Launcher
+  version: 1.1.0
+security:
+  - bearerAuth: []
+paths:
+  /ingestion-runs:
+    post:
+      tags: [IngestionRuns]
+      operationId: createIngestionRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DirectLaunchRequest'}
+      responses:
+        '202':
+          description: Run accepted
+          headers:
+            Location: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RunAccepted'}
+        default: {$ref: '#/components/responses/Problem'}
+  /ingestion-runs/{correlationId}:
+    get:
+      tags: [IngestionRuns]
+      operationId: getIngestionRun
+      parameters:
+        - {$ref: '#/components/parameters/CorrelationId'}
+        - {$ref: '#/components/parameters/Namespace'}
+      responses:
+        '200': {description: Current Kubernetes run observation, content: {application/json: {schema: {type: object}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /ingestion-runs/{correlationId}/cancel:
+    post:
+      tags: [IngestionRuns]
+      operationId: cancelIngestionRun
+      parameters:
+        - {$ref: '#/components/parameters/CorrelationId'}
+        - {$ref: '#/components/parameters/Namespace'}
+      responses:
+        '204': {description: Cancellation requested}
+        default: {$ref: '#/components/responses/Problem'}
+  /workflow-runs:
+    post:
+      tags: [WorkflowRuns]
+      operationId: createWorkflowRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/WorkflowLaunchRequest'}
+      responses:
+        '202': {description: Workflow execution admitted, content: {application/json: {schema: {type: object}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /workflow-runs/{executionId}:
+    get:
+      tags: [WorkflowRuns]
+      operationId: getWorkflowRun
+      parameters:
+        - {$ref: '#/components/parameters/ExecutionId'}
+      responses:
+        '200': {description: Current workflow execution, content: {application/json: {schema: {type: object}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /workflow-runs/{executionId}/cancel:
+    post:
+      tags: [WorkflowRuns]
+      operationId: cancelWorkflowRun
+      parameters:
+        - {$ref: '#/components/parameters/ExecutionId'}
+        - {name: If-Match, in: header, required: true, schema: {type: string}}
+        - {name: correlationId, in: query, required: true, schema: {type: string}}
+        - {name: reason, in: query, schema: {type: string}}
+      responses:
+        '200': {description: Cancellation requested, content: {application/json: {schema: {type: object}}}}
+        default: {$ref: '#/components/responses/Problem'}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  parameters:
+    CorrelationId: {name: correlationId, in: path, required: true, schema: {type: string, minLength: 1}}
+    Namespace: {name: namespace, in: query, required: true, schema: {type: string, minLength: 1}}
+    ExecutionId: {name: executionId, in: path, required: true, schema: {type: string, format: uuid}}
+  responses:
+    Problem:
+      description: RFC 9457 problem
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+  schemas:
+    IngestionSpec:
+      type: object
+      description: Shared IngestionSpec contract in ingestion-spec.yaml; identical in direct and planned workflow modes.
+    DirectLaunchRequest:
+      type: object
+      required: [correlationId, namespace, ingestionSpec]
+      properties:
+        correlationId: {type: string, minLength: 1}
+        namespace: {type: string, minLength: 1}
+        ingestionSpec: {$ref: '#/components/schemas/IngestionSpec'}
+        resourceRequests: {type: object, additionalProperties: {type: string}}
+        resourceLimits: {type: object, additionalProperties: {type: string}}
+        activeDeadlineSeconds: {type: integer, format: int64, minimum: 1}
+    WorkflowLaunchRequest:
+      type: object
+      required: [revisionId, idempotencyKey, correlationId]
+      oneOf:
+        - required: [input]
+        - required: [ingestion]
+      properties:
+        revisionId: {type: string, format: uuid}
+        input: {type: object, additionalProperties: true}
+        ingestion:
+          $ref: '#/components/schemas/DirectLaunchRequest'
+        idempotencyKey: {type: string, minLength: 1}
+        correlationId: {type: string, minLength: 1}
+    RunAccepted:
+      type: object
+      required: [correlationId, jobName]
+      properties:
+        correlationId: {type: string}
+        jobName: {type: string}
+    Problem:
+      type: object
+      properties:
+        type: {type: string}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        instance: {type: string}

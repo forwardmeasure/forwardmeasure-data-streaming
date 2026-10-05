@@ -85,7 +85,12 @@ public final class KafkaStreamsDeliveryEngine implements DeliveryEngine {
           plan.sources().get(0), plan.destination(), plan.errors(), mapper);
     } else {
       BoundedKafkaStreamsCorrelationRunner.run(
-          plan.sources(), plan.blockingField(), plan.destination(), plan.errors(), mapper);
+          plan.sources(),
+          plan.blockingField(),
+          plan.destination(),
+          plan.errors(),
+          mapper,
+          plan.mergePolicy());
     }
     return new CompletedExecutionHandle(id);
   }
@@ -112,7 +117,7 @@ public final class KafkaStreamsDeliveryEngine implements DeliveryEngine {
     try {
       ExecutionHandle handle =
           new KafkaStreamsDeliveryEngine(Map.of()).execute(plan, spec.executionMode());
-      if (handle.isRunning()) {
+      if (spec.executionMode() == ExecutionMode.CONTINUOUS) {
         awaitShutdown(handle);
       }
       LOGGER.info("KafkaStreamsDeliveryEngine: run completed, id={}", handle.id());
@@ -127,14 +132,28 @@ public final class KafkaStreamsDeliveryEngine implements DeliveryEngine {
 
   private static void awaitShutdown(ExecutionHandle handle) throws InterruptedException {
     CountDownLatch latch = new CountDownLatch(1);
-    Runtime.getRuntime()
-        .addShutdownHook(
-            new Thread(
-                () -> {
-                  handle.stop();
-                  latch.countDown();
-                }));
-    latch.await();
+    Thread hook =
+        new Thread(
+            () -> {
+              handle.stop();
+              latch.countDown();
+            });
+    Runtime.getRuntime().addShutdownHook(hook);
+    try {
+      while (!latch.await(1, java.util.concurrent.TimeUnit.SECONDS)) {
+        if (!handle.isRunning()) {
+          throw new IllegalStateException(
+              "Continuous ingestion stopped unexpectedly", handle.failure().orElse(null));
+        }
+      }
+    } finally {
+      handle.stop();
+      try {
+        Runtime.getRuntime().removeShutdownHook(hook);
+      } catch (IllegalStateException shuttingDown) {
+        /* JVM shutdown owns the hook. */
+      }
+    }
   }
 
   private static String requiredEnv(String name) {

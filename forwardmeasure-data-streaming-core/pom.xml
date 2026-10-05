@@ -4,11 +4,7 @@
   <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-parent</artifactId><version>${revision}</version></parent>
   <artifactId>forwardmeasure-data-streaming-core</artifactId>
   <name>ForwardMeasure Data Streaming Core</name>
-  <description>Backpressure pipeline primitives and execution-engine selection glue shared by the
-    Pekko and Spark executors. Depends on the org's Reactive Streams SPI usage (Pekko Streams
-    natively implements it; Camel connectors reach it via camel-reactive-streams) - see D6 in the
-    design plan for why this is the seam between connectivity and execution rather than bespoke
-    per-connector glue.</description>
+  <description>Engine-neutral planning, correlation merge and failure policies.</description>
   <properties>
     <!-- Has real public classes to document (unlike this repo's still-scaffolded modules) - see
          the parent pom's default. -->
@@ -22,7 +18,6 @@
          2026-09-21 for this reason. -->
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-transforms</artifactId></dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-mappers</artifactId></dependency>
-    <dependency><groupId>org.apache.pekko</groupId><artifactId>pekko-stream_${scala.binary.version}</artifactId></dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
   </dependencies>
 </project>

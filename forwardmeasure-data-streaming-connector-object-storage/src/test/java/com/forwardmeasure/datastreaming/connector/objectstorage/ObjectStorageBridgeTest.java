@@ -31,15 +31,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import org.apache.pekko.Done;
-import org.apache.pekko.actor.ActorSystem;
-import org.apache.pekko.stream.javadsl.Sink;
-import org.apache.pekko.stream.javadsl.Source;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -61,7 +56,6 @@ class ObjectStorageBridgeTest {
       storage.createBucket(new StorageClient.CreateBucketRequest(BUCKET, Map.of(), Map.of()));
 
       ExecutorService executor = Executors.newFixedThreadPool(4);
-      ActorSystem system = ActorSystem.create("object-storage-bridge-test");
       try {
         ObjectStorageBridge bridge = new ObjectStorageBridge(storage, executor);
 
@@ -76,29 +70,22 @@ class ObjectStorageBridgeTest {
                             "text/plain"))
                 .toList();
 
-        CompletionStage<Done> writeCompletion = Source.from(writes).runWith(bridge.sink(4), system);
-        writeCompletion.toCompletableFuture().join();
-
-        List<ObjectInfo> listed =
-            bridge
-                .list(BUCKET, "evidence/")
-                .runWith(Sink.seq(), system)
-                .toCompletableFuture()
-                .join();
+        for (WriteRequest write : writes) bridge.write(write).toCompletableFuture().join();
+        List<ObjectInfo> listed = new java.util.ArrayList<>();
+        String token = null;
+        do {
+          var page = bridge.listPage(BUCKET, "evidence/", token).toCompletableFuture().join();
+          listed.addAll(page.objects());
+          token = page.isTruncated() ? page.nextContinuationToken() : null;
+        } while (token != null);
         assertEquals(ROW_COUNT, listed.size());
-
         List<String> contents =
-            bridge
-                .readAll(BUCKET, "evidence/", 4)
-                .runWith(Sink.seq(), system)
-                .toCompletableFuture()
-                .join();
+            listed.stream().map(info -> bridge.read(info).toCompletableFuture().join()).toList();
         Set<String> expected =
             IntStream.range(0, ROW_COUNT).mapToObj(i -> "row " + i).collect(Collectors.toSet());
         assertEquals(ROW_COUNT, contents.size());
         assertTrue(Set.copyOf(contents).containsAll(expected));
       } finally {
-        system.terminate();
         executor.shutdown();
       }
     }

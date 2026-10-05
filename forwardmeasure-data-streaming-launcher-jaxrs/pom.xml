@@ -72,5 +72,44 @@
       <artifactId>forwardmeasure-testcontainers-kubernetes</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency><groupId>jakarta.annotation</groupId><artifactId>jakarta.annotation-api</artifactId><scope>provided</scope></dependency>
   </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.openapitools</groupId><artifactId>openapi-generator-maven-plugin</artifactId>
+        <executions><execution><id>launcher-contract</id><phase>generate-sources</phase><goals><goal>generate</goal></goals>
+          <configuration>
+            <inputSpec>${project.basedir}/../forwardmeasure-data-streaming-api/src/main/resources/openapi/launcher.yaml</inputSpec>
+            <generatorName>jaxrs-spec</generatorName>
+            <templateDirectory>${project.basedir}/src/main/oas-templates</templateDirectory>
+            <apiPackage>com.forwardmeasure.datastreaming.launcher.contract</apiPackage>
+            <generateModels>false</generateModels><generateSupportingFiles>false</generateSupportingFiles>
+            <generateApiTests>false</generateApiTests><generateApiDocumentation>false</generateApiDocumentation>
+            <schemaMappings>
+              <schemaMapping>IngestionSpec=com.forwardmeasure.datastreaming.api.IngestionSpec</schemaMapping>
+              <schemaMapping>DirectLaunchRequest=com.forwardmeasure.datastreaming.launcher.application.DirectLaunchRequest</schemaMapping>
+              <schemaMapping>WorkflowLaunchRequest=com.forwardmeasure.datastreaming.launcher.application.WorkflowLaunchRequest</schemaMapping>
+              <schemaMapping>RunAccepted=com.forwardmeasure.datastreaming.launcher.jaxrs.dto.RunAccepted</schemaMapping>
+              <schemaMapping>Problem=com.forwardmeasure.openworkflow.common.model.Problem</schemaMapping>
+            </schemaMappings>
+            <importMappings>
+              <importMapping>DirectLaunchRequest=com.forwardmeasure.datastreaming.launcher.application.DirectLaunchRequest</importMapping>
+              <importMapping>WorkflowLaunchRequest=com.forwardmeasure.datastreaming.launcher.application.WorkflowLaunchRequest</importMapping>
+              <importMapping>RunAccepted=com.forwardmeasure.datastreaming.launcher.jaxrs.dto.RunAccepted</importMapping>
+              <importMapping>Problem=com.forwardmeasure.openworkflow.common.model.Problem</importMapping>
+            </importMappings>
+            <addCompileSourceRoot>true</addCompileSourceRoot>
+            <configOptions>
+              <sourceFolder>src/main/java</sourceFolder>
+              <interfaceOnly>true</interfaceOnly><returnResponse>true</returnResponse>
+              <useJakartaEe>true</useJakartaEe><useSwaggerAnnotations>false</useSwaggerAnnotations>
+              <useBeanValidation>false</useBeanValidation><useTags>true</useTags>
+              <hideGenerationTimestamp>true</hideGenerationTimestamp><sortParamsByRequiredFlag>false</sortParamsByRequiredFlag>
+            </configOptions>
+          </configuration>
+        </execution></executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>

@@ -77,7 +77,18 @@ releases:
       - serviceAccount:
           create: true
           name: data-streaming-launcher
-        automountServiceAccountToken: false
+        # Direct dispatch uses the in-cluster Kubernetes client. The chart grants this
+        # account Job observation/lifecycle permissions in the launcher namespace.
+        automountServiceAccountToken: true
+        # Spark handoff state is stored in a ConfigMap by DirectIngestionLauncher;
+        # the chart's automatic launcher Job role does not include ConfigMaps.
+        rbac:
+          create: true
+          name: data-streaming-launcher-handoff
+          rules:
+            - apiGroups: [""]
+              resources: ["configmaps"]
+              verbs: ["create", "get", "delete"]
         terminationGracePeriodSeconds: 30
         podSecurityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
         securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
@@ -98,6 +109,9 @@ releases:
               enabled: false
             liquibaseWait:
               enabled: false
+            emptyDirVolumeMounts:
+              - name: tmp
+                mountPath: /tmp
             # The chart sets spec.replicas from scaling.initialReplicas (a bare `replicas:` is ignored).
             scaling: {initialReplicas: 1}
             resources:

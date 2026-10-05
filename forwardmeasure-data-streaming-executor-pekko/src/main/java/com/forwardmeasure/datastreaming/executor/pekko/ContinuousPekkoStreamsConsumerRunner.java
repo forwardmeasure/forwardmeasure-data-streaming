@@ -29,7 +29,6 @@ import com.forwardmeasure.datastreaming.mappers.SourceRow;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.CompletionStage;
 import org.apache.camel.ProducerTemplate;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -80,8 +79,11 @@ final class ContinuousPekkoStreamsConsumerRunner {
     ConsumerSettings<String, String> consumerSettings =
         ConsumerSettings.create(system, new StringDeserializer(), new StringDeserializer())
             .withBootstrapServers(sourceUri.bootstrapServers())
-            .withGroupId("fds-pekko-continuous-" + UUID.randomUUID())
+            .withGroupId(
+                com.forwardmeasure.datastreaming.api.ExecutionIdentity.of(
+                    plan, "fds-pekko-continuous-", System.getenv("FDS_EXECUTION_ID")))
             .withProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
+            .withProperty(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed")
             // Real, live-found bug fix (2026-09-25): pekko.kafka.consumer.stop-timeout defaults
             // to 30s (see its own reference.conf comment, confirmed by decompiling the real
             // pekko-connectors-kafka jar, not assumed) - a delay that exists so a plain consumer

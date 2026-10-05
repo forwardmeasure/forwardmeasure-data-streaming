@@ -25,10 +25,18 @@ final class KafkaStreamsExecutionHandle implements ExecutionHandle {
 
   private final String id;
   private final KafkaStreams streams;
+  private final java.util.concurrent.atomic.AtomicReference<Throwable> failure =
+      new java.util.concurrent.atomic.AtomicReference<>();
 
   KafkaStreamsExecutionHandle(String id, KafkaStreams streams) {
     this.id = Objects.requireNonNull(id, "id");
     this.streams = Objects.requireNonNull(streams, "streams");
+    streams.setUncaughtExceptionHandler(
+        error -> {
+          failure.compareAndSet(null, error);
+          return org.apache.kafka.streams.errors.StreamsUncaughtExceptionHandler
+              .StreamThreadExceptionResponse.SHUTDOWN_CLIENT;
+        });
   }
 
   @Override
@@ -40,6 +48,11 @@ final class KafkaStreamsExecutionHandle implements ExecutionHandle {
   public boolean isRunning() {
     KafkaStreams.State state = streams.state();
     return state != KafkaStreams.State.NOT_RUNNING && state != KafkaStreams.State.ERROR;
+  }
+
+  @Override
+  public java.util.Optional<Throwable> failure() {
+    return java.util.Optional.ofNullable(failure.get());
   }
 
   @Override

@@ -18,18 +18,18 @@ package com.forwardmeasure.datastreaming.executor.kafkastreams;
 
 import com.forwardmeasure.datastreaming.api.ExecutionPlan;
 import com.forwardmeasure.datastreaming.api.KafkaConnectorUri;
+import com.forwardmeasure.datastreaming.api.MergePolicy;
 import com.forwardmeasure.datastreaming.api.SourcePlan;
+import com.forwardmeasure.datastreaming.core.CorrelationMerge;
 import com.forwardmeasure.datastreaming.mappers.FieldMappingEngine;
 import com.forwardmeasure.datastreaming.mappers.MapSourceRow;
 import com.forwardmeasure.datastreaming.mappers.OpenSearchSinkRowWriter;
 import com.forwardmeasure.datastreaming.mappers.SinkRowWriter;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
-import java.util.UUID;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.StreamsBuilder;
@@ -98,7 +98,9 @@ final class ContinuousKafkaStreamsCorrelationRunner {
               + sources.size());
     }
     String blockingField = plan.blockingField();
-    String applicationId = "fds-kafka-streams-correlation-" + UUID.randomUUID();
+    String applicationId =
+        com.forwardmeasure.datastreaming.api.ExecutionIdentity.of(
+            plan, "fds-kafka-streams-correlation-", System.getenv("FDS_EXECUTION_ID"));
     String bootstrapServers =
         KafkaConnectorUri.parse(sources.get(0).source().uri()).bootstrapServers();
 
@@ -113,8 +115,9 @@ final class ContinuousKafkaStreamsCorrelationRunner {
     streamsConfigOverrides.forEach(props::put);
 
     KafkaStreams streams = new KafkaStreams(topology, props);
+    var handle = new KafkaStreamsExecutionHandle(applicationId, streams);
     streams.start();
-    return new KafkaStreamsExecutionHandle(applicationId, streams);
+    return handle;
   }
 
   private Topology buildTopology(
@@ -125,7 +128,10 @@ final class ContinuousKafkaStreamsCorrelationRunner {
 
     List<SourcePlan> byTrustDescending =
         sources.stream()
-            .sorted(Comparator.comparingDouble(SourcePlan::trustWeight).reversed())
+            .sorted(
+                Comparator.comparingDouble(SourcePlan::trustWeight)
+                    .reversed()
+                    .thenComparing(SourcePlan::sourceKey))
             .toList();
 
     KTable<String, Map<String, Object>> merged = null;
@@ -137,7 +143,7 @@ final class ContinuousKafkaStreamsCorrelationRunner {
               ? table
               : merged.outerJoin(
                   table,
-                  ContinuousKafkaStreamsCorrelationRunner::mergeOuterJoin,
+                  (left, right) -> mergeOuterJoin(left, right, plan.mergePolicy()),
                   Materialized.with(Serdes.String(), recordSerde));
     }
 
@@ -171,15 +177,8 @@ final class ContinuousKafkaStreamsCorrelationRunner {
   }
 
   private static Map<String, Object> mergeOuterJoin(
-      Map<String, Object> mergedSoFar, Map<String, Object> nextSource) {
-    Map<String, Object> merged =
-        mergedSoFar == null ? new LinkedHashMap<>() : new LinkedHashMap<>(mergedSoFar);
-    if (nextSource != null) {
-      for (Map.Entry<String, Object> field : nextSource.entrySet()) {
-        merged.putIfAbsent(field.getKey(), field.getValue());
-      }
-    }
-    return merged;
+      Map<String, Object> mergedSoFar, Map<String, Object> nextSource, MergePolicy policy) {
+    return CorrelationMerge.merge(java.util.Arrays.asList(mergedSoFar, nextSource), policy);
   }
 
   private static String normalizeBlockingKey(Map<String, Object> mapped, String blockingField) {

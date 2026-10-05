@@ -61,7 +61,10 @@ public final class SparkStageRunner {
             SparkIngestionRunner.sparkExecutorConfigFromEnv());
     int exitCode = 0;
     try {
-      if (plan.sources().size() == 1) {
+      if (plan.profile().executionMode()
+          == com.forwardmeasure.datastreaming.api.ExecutionMode.CONTINUOUS) {
+        ContinuousSparkStageRunner.run(spark, plan, kafkaBootstrapServers);
+      } else if (plan.sources().size() == 1) {
         SparkIngestionRunner.IngestionResult result =
             SparkIngestionRunner.run(spark, plan, kafkaBootstrapServers);
         LOGGER.info("SparkStageRunner: single-source recordsWritten={}", result.recordsWritten());

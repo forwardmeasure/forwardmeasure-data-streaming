@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.forwardmeasure.datastreaming.core;
+package com.forwardmeasure.datastreaming.executor.pekko;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -24,6 +24,7 @@ import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
 import com.forwardmeasure.datastreaming.api.DeliverySemantics;
 import com.forwardmeasure.datastreaming.api.ErrorPolicy;
 import com.forwardmeasure.datastreaming.api.FlowControlSpec;
+import com.forwardmeasure.datastreaming.core.IngestionPipeline;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -41,7 +42,7 @@ import org.junit.jupiter.api.Test;
  * alongside wiring {@code flowControl}/{@code failure} for real: this class had never had a single
  * test before, despite being the shared, engine-agnostic backbone every runner builds on.
  */
-class IngestionPipelineTest {
+class PekkoIngestionPipelineTest {
 
   private ActorSystem system;
 
@@ -278,7 +279,7 @@ class IngestionPipelineTest {
       java.util.function.Function<Integer, Integer> transform) {
     Sink<Integer, CompletionStage<List<Integer>>> collectingSink = Sink.seq();
     CompletionStage<List<Integer>> result =
-        IngestionPipeline.run(
+        PekkoIngestionPipeline.run(
             Source.from(input), delivery, errors, transform, collectingSink, system);
     return result.toCompletableFuture().join();
   }

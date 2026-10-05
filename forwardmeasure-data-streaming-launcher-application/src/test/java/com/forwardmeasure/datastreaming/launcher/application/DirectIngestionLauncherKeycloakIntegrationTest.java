@@ -84,8 +84,10 @@ class DirectIngestionLauncherKeycloakIntegrationTest {
     // silently drifting out of sync with the factory again the way it did before this fix.
     String ingestionRunsResourceId =
         DataStreamingAuthorizationResources.ingestionRun(GRANTED_RESOURCE_ID).id();
-    UUID tenantId = UUID.randomUUID();
-    String organizationId = fixture.provisionTenant("datastreaming-org", tenantId, GRANTED_ROLE);
+    var tenantDid =
+        com.forwardmeasure.jpa.tenancy.Did.parse("did:fwmtest:tenant:" + UUID.randomUUID());
+    UUID tenantId = com.forwardmeasure.jpa.tenancy.TenantId.forDid(tenantDid).value();
+    String organizationId = fixture.provisionTenant("datastreaming-org", tenantDid, GRANTED_ROLE);
     fixture.grantResourceAuthorization(
         organizationId,
         "datastreaming-ingestion-run",

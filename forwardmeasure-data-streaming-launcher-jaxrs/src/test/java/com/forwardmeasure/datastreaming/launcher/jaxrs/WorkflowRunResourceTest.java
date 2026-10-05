@@ -27,7 +27,6 @@ import com.forwardmeasure.authzen.AuthorizationRequest;
 import com.forwardmeasure.authzen.AuthorizationService;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowLaunchRequest;
-import com.forwardmeasure.jpa.tenancy.TenantDatabase;
 import com.forwardmeasure.jpa.tenancy.TenantId;
 import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecution;
 import com.forwardmeasure.openworkflow.execution.client.ApiClient;
@@ -61,7 +60,6 @@ final class WorkflowRunResourceTest {
   private static final ActiveOrganization ACTOR =
       new ActiveOrganization(
           new TenantId(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")),
-          TenantDatabase.forAlias("test-tenant"),
           "org-1",
           "actor-1",
           Set.of("reviewer"));

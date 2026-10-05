@@ -1,0 +1,54 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+#  the License. You may obtain a copy of the License at
+# 
+#     https://www.apache.org/licenses/LICENSE-2.0
+# 
+# Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+helmDefaults:
+  wait: true
+  waitForJobs: true
+  timeout: 900
+  atomic: true
+releases:
+  - name: data-streaming-workflow-bundle
+    namespace: {{ .Values.platform.namespaces.openworkflow }}
+    createNamespace: false
+    chart: ../../../../helm-charts/charts/openworkflow-workflow-bundle-helm-chart/helm-chart-sources
+    values:
+      - domain: fds
+        didMethod: {{ .Values.platform.identity.didMethod | quote }}
+        definitions:
+          ingestion.yaml: |
+{{ readFile "../../../forwardmeasure-data-streaming-api/src/main/resources/workflows/ingestion.yaml" | indent 12 }}
+          stop-ingestion.yaml: |
+{{ readFile "../../../forwardmeasure-data-streaming-api/src/main/resources/workflows/stop-ingestion.yaml" | indent 12 }}
+        apiDocuments:
+          ingestion-job.yaml: |
+{{ readFile "../../../forwardmeasure-data-streaming-api/src/main/resources/asyncapi/ingestion-job.yaml" | indent 12 }}
+          ingestion-deployment.yaml: |
+{{ readFile "../../../forwardmeasure-data-streaming-api/src/main/resources/asyncapi/ingestion-deployment.yaml" | indent 12 }}
+        tenants:
+        {{- range .Values.platform.tenants }}
+          - {{ .alias | quote }}
+        {{- end }}
+        registry:
+          apiUrl: {{ .Values.platform.endpoints.registry.apiUrl | quote }}
+        fowf:
+          definitionBaseUrl: {{ .Values.platform.endpoints.openworkflow.definitionBaseUrl | quote }}
+          keycloakTokenUrl: {{ .Values.platform.endpoints.keycloak.tokenUrl | quote }}
+        image:
+          repository: {{ .Values.imageVersions.openworkflowWorkflowPublisher.repository | quote }}
+          tag: {{ .Values.imageVersions.openworkflowWorkflowPublisher.tag | quote }}
+          digest: {{ .Values.imageVersions.openworkflowWorkflowPublisher.digest | quote }}
+        imagePullSecrets:
+          - name: {{ .Values.platform.secrets.imagePull | quote }}
+    labels: {stage: services, component: data-streaming-workflow-bundle}

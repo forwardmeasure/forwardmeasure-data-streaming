@@ -30,6 +30,9 @@ public record SourcePlan(
 
   public SourcePlan {
     Objects.requireNonNull(sourceKey, "sourceKey");
+    if (sourceKey.isBlank()) throw new IllegalArgumentException("sourceKey must not be blank");
+    if (!Double.isFinite(trustWeight))
+      throw new IllegalArgumentException("trustWeight must be finite");
     Objects.requireNonNull(source, "source");
     Objects.requireNonNull(mapper, "mapper");
   }

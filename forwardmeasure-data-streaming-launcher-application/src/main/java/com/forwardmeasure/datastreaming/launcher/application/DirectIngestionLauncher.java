@@ -16,6 +16,7 @@
  */
 package com.forwardmeasure.datastreaming.launcher.application;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forwardmeasure.authzen.ActiveOrganization;
 import com.forwardmeasure.authzen.AuthorizationRequest;
 import com.forwardmeasure.authzen.AuthorizationService;
@@ -32,8 +33,6 @@ import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -70,12 +69,12 @@ import java.util.Optional;
  * guarantee every Job this class launches already has) if it doesn't exist yet. No background
  * thread/watcher is involved - this launcher stays exactly as stateless as it already was; the only
  * new durable state is one small {@link ConfigMap} (created alongside the Spark Job, deleted once
- * the delivery Job succeeds) carrying the delivery stage's own {@link IngestionSpec} YAML, so a
- * later {@link #observe} call - however long after {@link #launch}, even across a launcher-process
- * restart - can re-derive exactly what the delivery Job needs without this class ever persisting
- * anything itself. A caller that only ever launches non-staged plans is completely unaffected -
- * {@link #launch}/{@link #observe}/{@link #cancel}'s own single-Job behavior for those plans is
- * byte-for-byte unchanged from before this feature existed.
+ * the delivery Job succeeds) carrying the complete delivery request (image, command, policy,
+ * resources and deadline), so a later {@link #observe} call - however long after {@link #launch},
+ * even across a launcher-process restart - can re-derive exactly what the delivery Job needs
+ * without this class ever persisting anything itself. A caller that only ever launches non-staged
+ * plans is completely unaffected - {@link #launch}/{@link #observe}/{@link #cancel}'s own
+ * single-Job behavior for those plans is byte-for-byte unchanged from before this feature existed.
  *
  * <p>Requires the {@link #DirectIngestionLauncher(IngestionJobPolicy, AuthorizationService, String,
  * String, String, String, List, Map, String, String, String) fullest constructor} (real {@code
@@ -92,16 +91,19 @@ import java.util.Optional;
 public final class DirectIngestionLauncher {
 
   private static final String JOB_NAME_PREFIX = "fds-";
-  private static final String SPEC_ENV_VAR = "INGESTION_SPEC_YAML_BASE64";
-  private static final String SPEC_FILE_PATH = "/tmp/ingestion-spec.yaml";
   private static final String KAFKA_BOOTSTRAP_SERVERS_ENV_VAR = "KAFKA_BOOTSTRAP_SERVERS";
   private static final String SPARK_HANDOFF_TOPIC_ENV_VAR = "SPARK_HANDOFF_TOPIC";
   private static final String SPARK_STAGE_SUFFIX = ":spark";
   private static final String DELIVERY_STAGE_SUFFIX = ":delivery";
   private static final String HANDOFF_CONFIGMAP_PREFIX = "fds-handoff-";
-  private static final String HANDOFF_SPEC_YAML_KEY = "delivery-spec.yaml";
+  private static final String HANDOFF_REQUEST_KEY = "delivery-job.json";
+  private static final ObjectMapper JSON =
+      new ObjectMapper()
+          .enable(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
+  private final IngestionJobPolicy policy;
 
   private final EnvConfiguredJobLauncher delegate;
+  private final IngestionLaunchPlanner planner;
   private final AuthorizationService authorization;
   private final String pekkoRunnerImage;
   private final String pekkoRunnerCommand;
@@ -227,6 +229,7 @@ public final class DirectIngestionLauncher {
       String sparkRunnerImage,
       String sparkRunnerCommand,
       String kafkaBootstrapServers) {
+    this.policy = Objects.requireNonNull(policy, "policy");
     this.delegate =
         new EnvConfiguredJobLauncher(
             Objects.requireNonNull(policy, "policy"), JOB_NAME_PREFIX, hostAliases);
@@ -242,6 +245,17 @@ public final class DirectIngestionLauncher {
     this.sparkRunnerImage = sparkRunnerImage;
     this.sparkRunnerCommand = sparkRunnerCommand;
     this.kafkaBootstrapServers = kafkaBootstrapServers;
+    this.planner =
+        new IngestionLaunchPlanner(
+            policy,
+            pekkoRunnerImage,
+            pekkoRunnerCommand,
+            kafkaStreamsRunnerImage,
+            kafkaStreamsRunnerCommand,
+            sparkRunnerImage,
+            sparkRunnerCommand,
+            kafkaBootstrapServers,
+            this.imagePullSecretNames);
   }
 
   /**
@@ -259,6 +273,10 @@ public final class DirectIngestionLauncher {
    *     instance wasn't constructed with real Spark runner settings (a configuration gap this
    *     instance genuinely could be given, unlike the {@code executionMode} case above)
    */
+  public IngestionLaunchPlanner planner() {
+    return planner;
+  }
+
   public String launch(
       KubernetesClient client, DirectLaunchRequest request, ActiveOrganization actor) {
     authorization.requireAuthorized(
@@ -268,6 +286,14 @@ public final class DirectIngestionLauncher {
             AuthorizationAction.INGESTION_RUN_LAUNCH,
             request.correlationId(),
             Map.of()));
+    request =
+        new DirectLaunchRequest(
+            scopedCorrelation(actor, request.correlationId()),
+            request.namespace(),
+            request.ingestionSpec(),
+            request.resourceRequests(),
+            request.resourceLimits(),
+            request.activeDeadlineSeconds());
     IngestionSpec spec = request.ingestionSpec();
     if (spec.executionMode() != ExecutionMode.BOUNDED) {
       throw new UnsupportedOperationException(
@@ -277,7 +303,8 @@ public final class DirectIngestionLauncher {
               + " CONTINUOUS spec dispatches as a Kubernetes Deployment via the fowf workflow"
               + " path instead");
     }
-    ExecutionPlan plan = ExecutionPlanCompiler.compile(spec);
+    policy.authorizeNamespace(request.namespace());
+    ExecutionPlan plan = planner.compile(spec, request.correlationId());
     if (plan.sparkStage().isPresent()) {
       return launchSparkStage(client, request, plan);
     }
@@ -295,40 +322,32 @@ public final class DirectIngestionLauncher {
               + " own javadoc)");
     }
     IngestionSpec deliverySpec = SparkHandoffSpecs.deliveryStageSpec(plan, kafkaBootstrapServers);
-    String deliverySpecYaml;
-    try {
-      deliverySpecYaml = deliverySpec.toYaml();
-    } catch (IOException e) {
-      throw new UncheckedIOException("failed to serialize the derived delivery-stage spec", e);
-    }
-    createHandoffConfigMap(client, request.namespace(), request.correlationId(), deliverySpecYaml);
+    ExecutionPlan deliveryPlan = ExecutionPlanCompiler.compile(deliverySpec);
+    EnvLaunchRequest deliveryRequest =
+        deliveryRequest(
+            request.correlationId() + DELIVERY_STAGE_SUFFIX,
+            request.namespace(),
+            deliverySpec,
+            deliveryPlan,
+            request);
+    policy.authorizeNamespace(request.namespace());
+    policy.authorizeImage(sparkRunnerImage);
+    policy.authorizeImage(deliveryRequest.image());
+    createHandoffConfigMap(client, request, deliveryRequest);
 
     IngestionSpec originalSpec = request.ingestionSpec();
     Map<String, String> env =
-        Map.of(
-            SPEC_ENV_VAR,
-            encodeSpecYaml(originalSpec),
-            KAFKA_BOOTSTRAP_SERVERS_ENV_VAR,
-            kafkaBootstrapServers,
-            // Real, live-found bug fix (2026-09-25): the Spark pod recompiles its own
-            // ExecutionPlan fresh from the (base64/YAML round-tripped) spec above, which
-            // ExecutionPlanCompiler.resolveSparkStage derives handoffTopic from independently, via
-            // spec.hashCode() - not guaranteed to agree with the handoffTopic this method already
-            // computed (via `plan`, straight from the in-memory spec) for the delivery Job's own
-            // ConfigMap. This launcher is the single source of truth for the topic both stages must
-            // agree on, so it hands the Spark pod its own already-computed value explicitly - see
-            // SparkIngestionRunner#withHandoffTopicOverride's own javadoc for the live failure this
-            // closes (Spark wrote 5 real rows to its own re-derived topic while the delivery Job's
-            // consumer, reading this launcher's independently-derived topic name, read zero).
-            SPARK_HANDOFF_TOPIC_ENV_VAR,
-            plan.sparkStage().get().handoffTopic());
+        new java.util.LinkedHashMap<>(IngestionLaunchPlanner.environment(originalSpec, plan));
+    env.put("FDS_EXECUTION_ID", request.correlationId());
+    env.put(KAFKA_BOOTSTRAP_SERVERS_ENV_VAR, kafkaBootstrapServers);
+    env.put(SPARK_HANDOFF_TOPIC_ENV_VAR, plan.sparkStage().orElseThrow().handoffTopic());
     EnvLaunchRequest envRequest =
         new EnvLaunchRequest(
             request.correlationId() + SPARK_STAGE_SUFFIX,
             request.namespace(),
             sparkRunnerImage,
             List.of("sh", "-c"),
-            List.of(reconstructSpecAndRunCommand(sparkRunnerCommand)),
+            List.of(IngestionLaunchPlanner.command(sparkRunnerCommand)),
             env,
             request.resourceRequests(),
             request.resourceLimits(),
@@ -344,6 +363,15 @@ public final class DirectIngestionLauncher {
       IngestionSpec spec,
       ExecutionPlan plan,
       DirectLaunchRequest request) {
+    return delegate.launch(client, deliveryRequest(correlationId, namespace, spec, plan, request));
+  }
+
+  private EnvLaunchRequest deliveryRequest(
+      String correlationId,
+      String namespace,
+      IngestionSpec spec,
+      ExecutionPlan plan,
+      DirectLaunchRequest request) {
     String image;
     String command;
     if (plan.profile().deliveryEngine() == DeliveryEngineKind.KAFKA_STREAMS) {
@@ -353,19 +381,20 @@ public final class DirectIngestionLauncher {
       image = pekkoRunnerImage;
       command = pekkoRunnerCommand;
     }
-    EnvLaunchRequest envRequest =
-        new EnvLaunchRequest(
-            correlationId,
-            namespace,
-            image,
-            List.of("sh", "-c"),
-            List.of(reconstructSpecAndRunCommand(command)),
-            Map.of(SPEC_ENV_VAR, encodeSpecYaml(spec)),
-            request == null ? Map.of() : request.resourceRequests(),
-            request == null ? Map.of() : request.resourceLimits(),
-            request == null ? null : request.activeDeadlineSeconds(),
-            imagePullSecretNames);
-    return delegate.launch(client, envRequest);
+    Map<String, String> env =
+        new java.util.LinkedHashMap<>(IngestionLaunchPlanner.environment(spec, plan));
+    env.put("FDS_EXECUTION_ID", correlationId);
+    return new EnvLaunchRequest(
+        correlationId,
+        namespace,
+        image,
+        List.of("sh", "-c"),
+        List.of(IngestionLaunchPlanner.command(command)),
+        env,
+        request.resourceRequests(),
+        request.resourceLimits(),
+        request.activeDeadlineSeconds(),
+        imagePullSecretNames);
   }
 
   /**
@@ -391,6 +420,7 @@ public final class DirectIngestionLauncher {
             correlationId,
             Map.of()));
 
+    correlationId = scopedCorrelation(actor, correlationId);
     Optional<KubernetesJobObservation> sparkObservation =
         delegate.observe(client, namespace, correlationId + SPARK_STAGE_SUFFIX);
     if (sparkObservation.isEmpty()) {
@@ -420,11 +450,12 @@ public final class DirectIngestionLauncher {
    */
   private KubernetesJobObservation reconcileDeliveryJob(
       KubernetesClient client, String namespace, String correlationId) {
-    String deliverySpecYaml = readHandoffConfigMap(client, namespace, correlationId);
-    IngestionSpec deliverySpec = IngestionSpec.parseYaml(deliverySpecYaml);
-    ExecutionPlan deliveryPlan = ExecutionPlanCompiler.compile(deliverySpec);
-    launchDeliveryJob(
-        client, correlationId + DELIVERY_STAGE_SUFFIX, namespace, deliverySpec, deliveryPlan, null);
+    EnvLaunchRequest delivery = readHandoffConfigMap(client, namespace, correlationId);
+    if (!namespace.equals(delivery.namespace())
+        || !(correlationId + DELIVERY_STAGE_SUFFIX).equals(delivery.correlationId())) {
+      throw new IllegalStateException("Spark handoff belongs to a different run");
+    }
+    delegate.launch(client, delivery);
     return delegate
         .observe(client, namespace, correlationId + DELIVERY_STAGE_SUFFIX)
         .orElse(KubernetesJobObservation.running(0, 1, 0));
@@ -439,6 +470,7 @@ public final class DirectIngestionLauncher {
             AuthorizationAction.INGESTION_RUN_CANCEL,
             correlationId,
             Map.of()));
+    correlationId = scopedCorrelation(actor, correlationId);
     delegate.cancel(client, namespace, correlationId);
     delegate.cancel(client, namespace, correlationId + SPARK_STAGE_SUFFIX);
     delegate.cancel(client, namespace, correlationId + DELIVERY_STAGE_SUFFIX);
@@ -454,19 +486,40 @@ public final class DirectIngestionLauncher {
    * successful run's own real output/side effects come from) - use {@link #observe} to learn which
    * stage is actually active right now rather than assuming this name is already running.
    */
+  static String scopedCorrelation(ActiveOrganization actor, String correlationId) {
+    return actor.tenantId() + ":" + correlationId;
+  }
+
+  public static String deterministicJobName(ActiveOrganization actor, String correlationId) {
+    return deterministicJobName(scopedCorrelation(actor, correlationId));
+  }
+
   public static String deterministicJobName(String correlationId) {
     return KubernetesJobLifecycle.deterministicName(JOB_NAME_PREFIX, correlationId);
   }
 
   private void createHandoffConfigMap(
-      KubernetesClient client, String namespace, String correlationId, String deliverySpecYaml) {
+      KubernetesClient client, DirectLaunchRequest request, EnvLaunchRequest delivery) {
+    String namespace = request.namespace();
+    String correlationId = request.correlationId();
+    Map<String, String> data;
+    try {
+      data =
+          Map.of(
+              HANDOFF_REQUEST_KEY,
+              JSON.writeValueAsString(delivery),
+              "original-request.json",
+              JSON.writeValueAsString(request));
+    } catch (IOException failure) {
+      throw new UncheckedIOException("Cannot serialize Spark handoff", failure);
+    }
     ConfigMap configMap =
         new ConfigMapBuilder()
             .withNewMetadata()
             .withName(handoffConfigMapName(correlationId))
             .withNamespace(namespace)
             .endMetadata()
-            .addToData(HANDOFF_SPEC_YAML_KEY, deliverySpecYaml)
+            .withData(data)
             .build();
     try {
       client.configMaps().inNamespace(namespace).resource(configMap).create();
@@ -474,12 +527,20 @@ public final class DirectIngestionLauncher {
       if (conflict.getCode() != 409) {
         throw conflict;
       }
-      // Already exists - a retried launch() call for the same correlationId, same real
-      // idempotency guarantee KubernetesJobLifecycle.launch already gives every Job.
+      ConfigMap existing =
+          client
+              .configMaps()
+              .inNamespace(namespace)
+              .withName(handoffConfigMapName(correlationId))
+              .get();
+      if (existing == null || !Objects.equals(existing.getData(), configMap.getData())) {
+        throw new IllegalArgumentException(
+            "Correlation id already belongs to a different ingestion spec");
+      }
     }
   }
 
-  private String readHandoffConfigMap(
+  private EnvLaunchRequest readHandoffConfigMap(
       KubernetesClient client, String namespace, String correlationId) {
     ConfigMap configMap =
         client
@@ -493,16 +554,15 @@ public final class DirectIngestionLauncher {
               + correlationId
               + "' - the Spark stage's own launch() call should have created one");
     }
-    String yaml = configMap.getData().get(HANDOFF_SPEC_YAML_KEY);
-    if (yaml == null) {
-      throw new IllegalStateException(
-          "DirectIngestionLauncher: handoff ConfigMap for correlationId '"
-              + correlationId
-              + "' has no '"
-              + HANDOFF_SPEC_YAML_KEY
-              + "' key");
+    String json = configMap.getData().get(HANDOFF_REQUEST_KEY);
+    if (json == null) {
+      throw new IllegalStateException("Spark handoff is missing its planned delivery request");
     }
-    return yaml;
+    try {
+      return JSON.readValue(json, EnvLaunchRequest.class);
+    } catch (IOException failure) {
+      throw new UncheckedIOException("Cannot read Spark handoff", failure);
+    }
   }
 
   private void deleteHandoffConfigMap(
@@ -516,32 +576,5 @@ public final class DirectIngestionLauncher {
 
   private static String handoffConfigMapName(String correlationId) {
     return KubernetesJobLifecycle.deterministicName(HANDOFF_CONFIGMAP_PREFIX, correlationId);
-  }
-
-  /**
-   * The pod's own container reconstructs the spec from the env var - a plain shell one-liner, not a
-   * ConfigMap/volume mount: {@code KubernetesJobSpec} (the shared library's own contract)
-   * deliberately has no volume-mounting concept, since the two real callers (this launcher and
-   * fowf's executor) have never needed one; an env var is well within Kubernetes' real size limits
-   * for an {@code IngestionSpec} document (sources/transforms/sink/delivery config, typically a few
-   * KB).
-   */
-  private static String reconstructSpecAndRunCommand(String runnerCommand) {
-    return "echo \"$"
-        + SPEC_ENV_VAR
-        + "\" | base64 -d > "
-        + SPEC_FILE_PATH
-        + " && exec "
-        + runnerCommand
-        + " "
-        + SPEC_FILE_PATH;
-  }
-
-  private static String encodeSpecYaml(IngestionSpec spec) {
-    try {
-      return Base64.getEncoder().encodeToString(spec.toYaml().getBytes(StandardCharsets.UTF_8));
-    } catch (IOException e) {
-      throw new UncheckedIOException("failed to serialize IngestionSpec to YAML", e);
-    }
   }
 }

@@ -58,3 +58,5 @@ list of file paths per environment, passed through to each sub-helmfile explicit
 helmfiles:
   - path: helmfiles/launcher.yaml.gotmpl
     values: {{ toYaml $envFiles | nindent 6 }}
+  - path: helmfiles/workflows.yaml.gotmpl
+    values: {{ toYaml $envFiles | nindent 6 }}

@@ -24,7 +24,7 @@
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-core</artifactId></dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-mappers</artifactId></dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-camel</artifactId></dependency>
-    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-jdbc</artifactId></dependency>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-jdbc</artifactId><optional>true</optional></dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-object-storage</artifactId></dependency>
     <dependency>
       <!-- DeliveryEngine/ExecutionHandle - PekkoStreamsDeliveryEngine's own real interfaces. -->

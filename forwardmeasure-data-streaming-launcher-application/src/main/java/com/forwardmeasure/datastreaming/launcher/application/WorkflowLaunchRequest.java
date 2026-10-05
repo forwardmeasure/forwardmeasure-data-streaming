@@ -35,11 +35,27 @@ import java.util.UUID;
  * {@code Idempotency-Key}/{@code X-Correlation-ID} headers.
  */
 public record WorkflowLaunchRequest(
-    UUID revisionId, Object input, String idempotencyKey, String correlationId) {
+    UUID revisionId,
+    Object input,
+    String idempotencyKey,
+    String correlationId,
+    DirectLaunchRequest ingestion) {
+
+  public WorkflowLaunchRequest(
+      UUID revisionId, Object input, String idempotencyKey, String correlationId) {
+    this(revisionId, input, idempotencyKey, correlationId, null);
+  }
 
   public WorkflowLaunchRequest {
     Objects.requireNonNull(revisionId, "revisionId");
-    Objects.requireNonNull(input, "input");
+    if ((input == null) == (ingestion == null)) {
+      throw new IllegalArgumentException(
+          "Specify exactly one of workflow input or planned ingestion");
+    }
+    if (ingestion != null && !Objects.equals(correlationId, ingestion.correlationId())) {
+      throw new IllegalArgumentException(
+          "Planned ingestion correlationId must match the workflow request");
+    }
     Objects.requireNonNull(idempotencyKey, "idempotencyKey");
     Objects.requireNonNull(correlationId, "correlationId");
   }

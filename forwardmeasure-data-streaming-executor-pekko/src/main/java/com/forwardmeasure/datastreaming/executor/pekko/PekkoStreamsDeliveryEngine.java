@@ -89,7 +89,7 @@ public final class PekkoStreamsDeliveryEngine implements DeliveryEngine {
     try {
       ExecutionHandle handle =
           new PekkoStreamsDeliveryEngine(system).execute(plan, spec.executionMode());
-      if (handle.isRunning()) {
+      if (spec.executionMode() == ExecutionMode.CONTINUOUS) {
         awaitShutdown(handle);
       }
       LOGGER.info("PekkoStreamsDeliveryEngine: run completed, id={}", handle.id());
@@ -112,14 +112,28 @@ public final class PekkoStreamsDeliveryEngine implements DeliveryEngine {
    */
   private static void awaitShutdown(ExecutionHandle handle) throws InterruptedException {
     CountDownLatch latch = new CountDownLatch(1);
-    Runtime.getRuntime()
-        .addShutdownHook(
-            new Thread(
-                () -> {
-                  handle.stop();
-                  latch.countDown();
-                }));
-    latch.await();
+    Thread hook =
+        new Thread(
+            () -> {
+              handle.stop();
+              latch.countDown();
+            });
+    Runtime.getRuntime().addShutdownHook(hook);
+    try {
+      while (!latch.await(1, java.util.concurrent.TimeUnit.SECONDS)) {
+        if (!handle.isRunning()) {
+          throw new IllegalStateException(
+              "Continuous ingestion stopped unexpectedly", handle.failure().orElse(null));
+        }
+      }
+    } finally {
+      handle.stop();
+      try {
+        Runtime.getRuntime().removeShutdownHook(hook);
+      } catch (IllegalStateException shuttingDown) {
+        /* JVM shutdown already owns the hook. */
+      }
+    }
   }
 
   private static String requiredEnv(String name) {

@@ -258,17 +258,11 @@ class WorkflowContinuousMatrixMicronautKafkaStreamsSmokeTest implements TestProp
         new com.forwardmeasure.openworkflow.definition.management.client.ApiClient();
     authorApiClient.setBasePath(baseUrl);
     authorApiClient.setBearerToken(fixture.keycloak().mintUserToken());
-    var reviewerApiClient =
-        new com.forwardmeasure.openworkflow.definition.management.client.ApiClient();
-    reviewerApiClient.setBasePath(baseUrl);
-    reviewerApiClient.setBearerToken(fixture.provisionReviewerToken(ROLE));
 
     WorkflowsApi workflows = new WorkflowsApi(authorApiClient);
     WorkflowDefinitionsApi definitions = new WorkflowDefinitionsApi(authorApiClient);
     WorkflowDefinitionGovernanceApi governance =
         new WorkflowDefinitionGovernanceApi(authorApiClient);
-    WorkflowDefinitionGovernanceApi reviewerGovernance =
-        new WorkflowDefinitionGovernanceApi(reviewerApiClient);
 
     Workflow workflow =
         workflows.createWorkflow(
@@ -293,13 +287,9 @@ class WorkflowContinuousMatrixMicronautKafkaStreamsSmokeTest implements TestProp
         Boolean.TRUE.equals(validation.getValid()),
         "expected the real workflow document to compile cleanly: " + validation.getViolations());
 
-    WorkflowDefinition submitted =
-        governance.submitWorkflowDefinition(
-            ifMatch(created.getRevision()), workflow.getId(), created.getId());
-
     WorkflowDefinition published =
-        reviewerGovernance.publishWorkflowDefinition(
-            ifMatch(submitted.getRevision()), workflow.getId(), created.getId());
+        governance.publishWorkflowDefinition(
+            ifMatch(created.getRevision()), workflow.getId(), created.getId());
     assertEquals("PUBLISHED", published.getStatus().name());
     return published;
   }

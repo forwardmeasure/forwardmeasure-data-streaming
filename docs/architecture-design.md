@@ -7,6 +7,11 @@
 against each rule and report pass or fail with evidence. The current code is not an authority for any
 rule here.
 
+Implementation update (2026-10-05): the five repair areas now have production changes and authored
+regressions; see [the current handover](../CODEX_HANDOVER.md). The BUG/NOT ASSESSED labels below
+retain the dated assessment rather than claiming executed verification. Nonempty TransformGraph
+is rejected before dispatch; executable source mapper field transforms remain supported.
+
 ---
 
 ## 0. How to use this document
@@ -217,7 +222,10 @@ FDS is the org's metadata-driven data-movement product:
   Bulk partitioned extraction stays on Spark's JDBC reader.
   - **Source:** [D:5] [U:2026-10-04]
   - **Check:** review `-connector-jdbc`.
-  - **State:** BUG until triaged. `JpaPagingSource` uses `EntityManager` directly.
+  - **State:** The specific `JpaPagingSource` finding is withdrawn after source review on
+    2026-10-05: it accepts `AbstractBaseRepository` and calls `repository.page(...)`.
+    `EntityManager` appears only in Javadoc. The broader connector rule is not yet verified;
+    the real Pekko dependency in this class remains covered by SIND-02.
 - **SCON-03**: Camel connectivity is one generic module, parameterized by URI, rather than one module
   per protocol. It is bridged into Pekko through `camel-reactive-streams`.
   - **Source:** [D:5, D:6]
@@ -337,7 +345,7 @@ FDS is the org's metadata-driven data-movement product:
 | SDUR-01 | Pekko correlation state is not durable | `ContinuousPekkoStreamsCorrelationRunner.java:106-107` |
 | SINV-05, SINV-01 | Spark-staged specs cannot run through a fowf workflow | `WorkflowIngestionLauncher` has no planner use; `docs/fowf-workflow-spark-staged-dispatch-undesigned-2026-09-25.md` |
 | SSEC-03 | Launcher API is not contract-first | hand-written `IngestionRunResource` and `WorkflowRunResource`; no generator configuration |
-| SCON-02 | `EntityManager` outside a repository | `JpaPagingSource` |
+| SCON-02 | Original finding withdrawn by 2026-10-05 source review | `JpaPagingSource` uses `AbstractBaseRepository.page`; `EntityManager` is Javadoc only |
 
 ## 5. Open questions
 
@@ -352,6 +360,13 @@ This is the same procedure as fowf §7:
 3. Never count compilation, a test against fakes, or an earlier document's claim as a pass.
 
 ## 7. Fix sequence for FDS
+
+The active deployment work is tracked in FOWF's
+[deployment completion plan](../../forwardmeasure-openworkflow/docs/rehabilitation/completion-work.md),
+packets D2–D5 and D7. That plan confirms five repair areas below, withdraws the specific SCON-02
+finding, and follows the latest user order: write functional and test code, deploy, then execute
+tests. Test execution is not a deployment gate.
+It does not remove either delivery engine or change this document's accepted architecture.
 
 FDS is second in the cross-product order (fowf, then FDS, then FEI). It relies on fowf's engine-neutral
 operation adapters and its Kubernetes Job and Deployment protocols, so it starts after fowf's fix

@@ -17,46 +17,16 @@
 package com.forwardmeasure.datastreaming.core;
 
 import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
-import com.forwardmeasure.datastreaming.api.DeliverySemantics;
 import com.forwardmeasure.datastreaming.api.ErrorPolicy;
 import java.time.Duration;
-import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
 import java.util.function.Supplier;
-import org.apache.pekko.actor.ActorSystem;
-import org.apache.pekko.stream.OverflowStrategy;
-import org.apache.pekko.stream.javadsl.Sink;
-import org.apache.pekko.stream.javadsl.Source;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * The small, engine-agnostic domain type behind every bounded ingestion run: source → concurrent
- * transform → sink, wired with Pekko Streams' native backpressure (D4). Deliberately knows nothing
- * about Camel, JDBC, CSV, or any specific mapping engine - callers supply an already-row-level
- * {@link Source} (an executor assembles that from whatever connector Publisher it has, doing any
- * format-specific flattening - e.g. one file into many CSV rows - upstream of this method), a plain
- * transform function, and a {@link Sink}. This is the piece that directly replaces {@code
- * SimpleSourceIngestionWorker}'s sequential {@code for} loop: {@code concurrency.preferred}
- * (clamped to {@code concurrency.maximum} when set) bounds real concurrent execution instead of one
- * record at a time.
- *
- * <p><b>{@code flowControl}/{@code failure}, wired for real 2026-09-13</b> - closing a real gap:
- * these fields (now carried on {@link DeliverySemantics}/{@link ErrorPolicy} rather than the old,
- * deleted {@code ExecutionSpec}) parsed from YAML and did nothing before this. Two real,
- * previously-silent bugs this closes, not just missing features: with no {@code failure} handling
- * at all, a single malformed record (any {@code NamedTransform} throwing - including simply naming
- * an unregistered transform) or a single transient sink failure used to crash the *entire* run, on
- * Pekko - {@link org.apache.pekko.stream.javadsl.Flow#mapAsyncUnordered} fails the whole stream on
- * the first failed {@code CompletionStage}, and nothing here ever caught one. {@code
- * flowControl.maxInFlightRecords} bounds how many records may be buffered ahead of the transform
- * stage (via {@link Source#buffer}) - a real, separate concern from {@code concurrency}, which only
- * bounds how many transforms run *concurrently*, not how many may be queued waiting.
- */
+/** Shared concurrency and failure policies; execution engines own their stream operators. */
 public final class IngestionPipeline {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(IngestionPipeline.class);
@@ -108,36 +78,6 @@ public final class IngestionPipeline {
   }
 
   /**
-   * Runs {@code source} through {@code transform} (bounded by {@code delivery}'s own {@code
-   * concurrency}/{@code flowControl}, with {@code errors.malformedRecord()} deciding what happens
-   * to a row that fails to transform) and into {@code sink}.
-   */
-  public static <S, T, Mat> Mat run(
-      Source<S, ?> source,
-      DeliverySemantics delivery,
-      ErrorPolicy errors,
-      Function<S, T> transform,
-      Sink<T, Mat> sink,
-      ActorSystem system) {
-    int parallelism = effectiveParallelism(delivery.concurrency());
-    Integer maxInFlight =
-        delivery.flowControl() == null ? null : delivery.flowControl().maxInFlightRecords();
-    MalformedRecordPolicy malformedRecordPolicy = MalformedRecordPolicy.from(errors);
-
-    Source<S, ?> flowControlled =
-        maxInFlight == null ? source : source.buffer(maxInFlight, OverflowStrategy.backpressure());
-
-    return flowControlled
-        .mapAsyncUnordered(
-            parallelism,
-            item ->
-                CompletableFuture.supplyAsync(
-                    () -> mapOrHandle(item, transform, malformedRecordPolicy)))
-        .mapConcat(mapped -> mapped.isPresent() ? List.of(mapped.get()) : List.of())
-        .runWith(sink, system);
-  }
-
-  /**
    * Public so both engines' own runners can size a sink's own concurrency identically to what this
    * class uses internally for the transform stage - {@code concurrency.preferred}, clamped to
    * {@code concurrency.maximum} when set.
@@ -146,21 +86,6 @@ public final class IngestionPipeline {
     int preferred = concurrency.preferred();
     Integer maximum = concurrency.maximum();
     return maximum == null ? preferred : Math.min(preferred, maximum);
-  }
-
-  private static <S, T> Optional<T> mapOrHandle(
-      S item, Function<S, T> transform, MalformedRecordPolicy policy) {
-    try {
-      return Optional.of(transform.apply(item));
-    } catch (RuntimeException failure) {
-      switch (policy) {
-        case FAIL -> throw failure;
-        case DEAD_LETTER ->
-            LOGGER.error("IngestionPipeline: malformed record dead-lettered: {}", item, failure);
-        case SKIP -> LOGGER.warn("IngestionPipeline: malformed record skipped: {}", item, failure);
-      }
-      return Optional.empty();
-    }
   }
 
   /**
@@ -189,7 +114,12 @@ public final class IngestionPipeline {
 
   private static <T> CompletionStage<T> retryAsync(
       Supplier<CompletionStage<T>> attempt, int attemptsLeft, Duration backoff) {
-    CompletableFuture<T> stage = attempt.get().toCompletableFuture();
+    CompletableFuture<T> stage;
+    try {
+      stage = attempt.get().toCompletableFuture();
+    } catch (RuntimeException failure) {
+      stage = CompletableFuture.failedFuture(failure);
+    }
     if (attemptsLeft <= 1) {
       return stage;
     }

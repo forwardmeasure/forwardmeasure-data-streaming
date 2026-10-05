@@ -16,9 +16,11 @@
  */
 package com.forwardmeasure.datastreaming.executor.pekko;
 
+import com.forwardmeasure.datastreaming.api.MergePolicy;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.connector.camel.CamelBridge;
+import com.forwardmeasure.datastreaming.core.CorrelationMerge;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline.MalformedRecordPolicy;
 import com.forwardmeasure.datastreaming.mappers.FieldMappingEngine;
 import com.forwardmeasure.datastreaming.mappers.SourceRow;
@@ -126,6 +128,11 @@ public final class PekkoCorrelationEngine {
    * weight. {@code sources} must not be empty.
    */
   public static List<Map<String, Object>> correlate(List<List<PekkoCorrelationRecord>> sources) {
+    return correlate(sources, MergePolicy.defaults());
+  }
+
+  public static List<Map<String, Object>> correlate(
+      List<List<PekkoCorrelationRecord>> sources, MergePolicy policy) {
     if (sources.isEmpty()) {
       throw new IllegalArgumentException("sources must not be empty");
     }
@@ -137,22 +144,21 @@ public final class PekkoCorrelationEngine {
     }
     List<Map<String, Object>> merged = new ArrayList<>();
     for (List<PekkoCorrelationRecord> group : grouped.values()) {
-      merged.add(mergeGroup(group));
+      merged.add(mergeGroup(group, policy));
     }
     return merged;
   }
 
-  private static Map<String, Object> mergeGroup(List<PekkoCorrelationRecord> group) {
+  private static Map<String, Object> mergeGroup(
+      List<PekkoCorrelationRecord> group, MergePolicy policy) {
     List<PekkoCorrelationRecord> sorted = new ArrayList<>(group);
-    sorted.sort(Comparator.comparingDouble(PekkoCorrelationRecord::trustWeight).reversed());
+    sorted.sort(
+        Comparator.comparingDouble(PekkoCorrelationRecord::trustWeight)
+            .reversed()
+            .thenComparing(PekkoCorrelationRecord::sourceKey));
 
-    Map<String, Object> merged = new LinkedHashMap<>();
-    for (PekkoCorrelationRecord record : sorted) {
-      for (Map.Entry<String, Object> field : record.mappedFields().entrySet()) {
-        merged.putIfAbsent(field.getKey(), field.getValue());
-      }
-    }
-    return merged;
+    return CorrelationMerge.merge(
+        sorted.stream().map(PekkoCorrelationRecord::mappedFields).toList(), policy);
   }
 
   private static String normalizeBlockingKey(String value) {

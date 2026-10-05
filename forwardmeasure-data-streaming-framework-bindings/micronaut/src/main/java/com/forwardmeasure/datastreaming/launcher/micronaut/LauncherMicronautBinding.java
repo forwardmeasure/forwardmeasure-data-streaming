@@ -253,8 +253,10 @@ public class LauncherMicronautBinding {
 
   @Singleton
   WorkflowIngestionLauncher workflowIngestionLauncher(
-      WorkflowExecutionsApi executionsApi, AuthorizationService authorization) {
-    return new WorkflowIngestionLauncher(executionsApi, authorization);
+      WorkflowExecutionsApi executionsApi,
+      AuthorizationService authorization,
+      DirectIngestionLauncher direct) {
+    return new WorkflowIngestionLauncher(executionsApi, authorization, false, direct.planner());
   }
 
   static Set<String> commaSeparated(String value) {

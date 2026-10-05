@@ -19,7 +19,6 @@ package com.forwardmeasure.datastreaming.executor.pekko;
 import com.forwardmeasure.datastreaming.connector.camel.CamelBridge;
 import com.forwardmeasure.datastreaming.executor.streaming.ExecutionHandle;
 import java.util.Objects;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.apache.pekko.Done;
 import org.apache.pekko.kafka.javadsl.Consumer;
@@ -59,10 +58,18 @@ final class PekkoStreamsExecutionHandle implements ExecutionHandle {
   }
 
   @Override
+  public java.util.Optional<Throwable> failure() {
+    var completion = control.streamCompletion().toCompletableFuture();
+    return completion.isDone()
+        ? java.util.Optional.ofNullable(completion.handle((done, error) -> error).join())
+        : java.util.Optional.empty();
+  }
+
+  @Override
   public void stop() {
     try {
       control
-          .drainAndShutdown(Executors.newSingleThreadExecutor())
+          .drainAndShutdown(java.util.concurrent.ForkJoinPool.commonPool())
           .toCompletableFuture()
           .get(30, TimeUnit.SECONDS);
     } catch (Exception ignored) {

@@ -38,6 +38,12 @@ public record DirectLaunchRequest(
     Objects.requireNonNull(correlationId, "correlationId");
     Objects.requireNonNull(namespace, "namespace");
     Objects.requireNonNull(ingestionSpec, "ingestionSpec");
+    if (correlationId.isBlank() || namespace.isBlank()) {
+      throw new IllegalArgumentException("correlationId and namespace must not be blank");
+    }
+    if (activeDeadlineSeconds != null && activeDeadlineSeconds < 1) {
+      throw new IllegalArgumentException("activeDeadlineSeconds must be positive");
+    }
     resourceRequests = resourceRequests == null ? Map.of() : Map.copyOf(resourceRequests);
     resourceLimits = resourceLimits == null ? Map.of() : Map.copyOf(resourceLimits);
   }

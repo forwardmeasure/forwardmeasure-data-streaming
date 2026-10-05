@@ -23,15 +23,8 @@ import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.RunAccepted;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import jakarta.ws.rs.BadRequestException;
-import jakarta.ws.rs.Consumes;
-import jakarta.ws.rs.GET;
 import jakarta.ws.rs.NotFoundException;
-import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
-import jakarta.ws.rs.PathParam;
-import jakarta.ws.rs.Produces;
-import jakarta.ws.rs.QueryParam;
-import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.util.Objects;
 
@@ -63,7 +56,8 @@ import java.util.Objects;
  * {@code ExecutionsApi}.
  */
 @Path("/ingestion-runs")
-public class IngestionRunResource {
+public class IngestionRunResource
+    implements com.forwardmeasure.datastreaming.launcher.contract.IngestionRunsApi {
 
   private final DirectIngestionLauncher launcher;
   private final KubernetesClient client;
@@ -78,24 +72,35 @@ public class IngestionRunResource {
     this.organizations = Objects.requireNonNull(organizations, "organizations");
   }
 
-  @POST
-  @Consumes(MediaType.APPLICATION_JSON)
-  @Produces(MediaType.APPLICATION_JSON)
+  @Override
+  public Response createIngestionRun(DirectLaunchRequest request) {
+    return create(request);
+  }
+
+  @Override
+  public Response getIngestionRun(String correlationId, String namespace) {
+    return get(correlationId, namespace);
+  }
+
+  @Override
+  public Response cancelIngestionRun(String correlationId, String namespace) {
+    return cancel(correlationId, namespace);
+  }
+
   public Response create(DirectLaunchRequest request) {
     String jobName = launcher.launch(client, request, organizations.current());
     return Response.accepted()
         .header(
             "Location",
-            "/ingestion-runs/" + request.correlationId() + "?namespace=" + request.namespace())
+            jakarta.ws.rs.core.UriBuilder.fromPath("/ingestion-runs/{id}")
+                .resolveTemplate("id", request.correlationId())
+                .queryParam("namespace", request.namespace())
+                .build())
         .entity(new RunAccepted(request.correlationId(), jobName))
         .build();
   }
 
-  @GET
-  @Path("/{correlationId}")
-  @Produces(MediaType.APPLICATION_JSON)
-  public Response get(
-      @PathParam("correlationId") String correlationId, @QueryParam("namespace") String namespace) {
+  public Response get(String correlationId, String namespace) {
     requireNamespace(namespace);
     return launcher
         .observe(client, namespace, correlationId, organizations.current())
@@ -106,10 +111,7 @@ public class IngestionRunResource {
                     "no ingestion run '" + correlationId + "' in namespace '" + namespace + "'"));
   }
 
-  @POST
-  @Path("/{correlationId}/cancel")
-  public Response cancel(
-      @PathParam("correlationId") String correlationId, @QueryParam("namespace") String namespace) {
+  public Response cancel(String correlationId, String namespace) {
     requireNamespace(namespace);
     launcher.cancel(client, namespace, correlationId, organizations.current());
     return Response.noContent().build();

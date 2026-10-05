@@ -31,8 +31,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import org.apache.pekko.actor.ActorSystem;
-import org.apache.pekko.stream.javadsl.Sink;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -71,18 +69,21 @@ class JpaPagingSourceTest {
       EntityManager readManager = entityManagers.createEntityManager();
       repository.bindPersistenceContext(readManager);
 
-      ActorSystem system = ActorSystem.create("jpa-paging-source-test");
       ExecutorService executor = Executors.newFixedThreadPool(4);
       List<String> names;
       try {
-        names =
-            JpaPagingSource.page(repository, PAGE_SIZE, executor)
-                .map(Widget::getName)
-                .runWith(Sink.seq(), system)
-                .toCompletableFuture()
-                .join();
+        names = new java.util.ArrayList<>();
+        int offset = 0;
+        while (true) {
+          var page =
+              JpaPagingSource.page(repository, null, offset, PAGE_SIZE, executor)
+                  .toCompletableFuture()
+                  .join();
+          if (page.isEmpty()) break;
+          names.addAll(page.stream().map(Widget::getName).toList());
+          offset += page.size();
+        }
       } finally {
-        system.terminate();
         executor.shutdown();
         readManager.close();
       }

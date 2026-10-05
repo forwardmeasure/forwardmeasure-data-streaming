@@ -160,7 +160,7 @@ public final class PekkoIngestionRunner {
       Sink<Map<String, Object>, CompletionStage<Done>> sink =
           buildSink(bridge, spec.sink(), spec.delivery(), spec.errors(), objectMapper, processed);
       CompletionStage<Done> resultStage =
-          IngestionPipeline.run(
+          PekkoIngestionPipeline.run(
               source,
               spec.delivery(),
               spec.errors(),
@@ -429,7 +429,8 @@ public final class PekkoIngestionRunner {
     try (CamelBridge bridge = new CamelBridge()) {
       Source<SourceRow, ?> source = rowSource(bridge, sourcePlan.source());
       CompletionStage<R> resultStage =
-          IngestionPipeline.run(source, spec.delivery(), spec.errors(), transform, sink, system);
+          PekkoIngestionPipeline.run(
+              source, spec.delivery(), spec.errors(), transform, sink, system);
       return resultStage.toCompletableFuture().join();
     } catch (CompletionException e) {
       Throwable cause = e.getCause();

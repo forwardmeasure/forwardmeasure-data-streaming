@@ -1,4 +1,20 @@
-# FDS deployment handover — 2026-10-05
+# FDS current handover — 2026-10-06
+
+Implementation checkpoint `c0cbfbc3` on `develop` is committed and pushed. The full installer has
+completed; the launcher is ready in `data-streaming`, and the user sees bootstrapped workflows in
+FOWF Studio. This is not end-to-end ingestion, merge or recovery verification.
+
+Follow the [current Claude handover](../forwardmeasure-openworkflow/CLAUDE_HANDOVER.md) and
+[detailed testing instructions](../forwardmeasure-openworkflow/docs/rehabilitation/claude-testing-instructions-2026-10-06.md).
+Complete the 18 framework/delivery-engine/invocation-mode cells for **each** of WorldCheck and
+Customer Master, plus Spark handoff, merge, recovery, isolation and real deployment coverage.
+Preserve the architecture's matrix definition; compiling tests or counting output rows is not
+acceptance. FDE alignment/integration follows this test-development priority.
+
+The records below retain historical evidence and operator actions. Do not repeat a rebuild or
+initial install solely because an older section says it is pending. No tests were run for this update.
+
+# FDS deployment record — 2026-10-05
 
 ## Workflow bundle payload correction — 2026-10-05, 22:55 America/New_York
 

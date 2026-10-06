@@ -21,45 +21,11 @@ helmDefaults:
   atomic: true
 
 releases:
-  # Real precondition this release closes (environments/gcp-platform-cluster.yaml.gotmpl's own
-  # comment on authorizationClientId/credentialsSecretName): before this Job runs, nothing creates
-  # the "datastreaming" Keycloak client or data-streaming-launcher-credentials - the launcher pod
-  # below would come up but every fowf call it makes would fail authorization/auth closed. A
-  # one-off dedicated chart (not the shared java-microservice chart) because this Job's job is
-  # managing a Kubernetes Secret's own lifecycle (create-if-absent, patch-if-present) against
-  # fowf's shared Keycloak - not deploying a long-running service.
-  #
-  # Deliberately in the SAME sub-helmfile as the launcher release below, not a separate one -
-  # helmfile's own `needs` only resolves within one sub-helmfile's release list (confirmed live:
-  # referencing this release from a separate helmfiles/credentials.yaml.gotmpl produced "depend(s)
-  # on an undefined release" even though the release genuinely exists) - mirrors
-  # forwardmeasure-openworkflow's own helmfiles/security.yaml.gotmpl, which keeps
-  # openworkflow-k2-security and openworkflow-platform-clients (an identical needs relationship)
-  # in one file for the same reason.
-  #
-  # Deliberately self-contained in THIS repo's own namespace, not built as an extension of
-  # forwardmeasure-openworkflow's own openworkflow-platform-clients release (which does the
-  # identical thing for fei's author/publisher identities) - that release's Job runs during fowf's
-  # OWN install step, before forwardmeasure-data-streaming's own namespace/Secret exist at all
-  # (install-platform.sh's real order is platform -> openworkflow -> data-streaming), so it
-  # structurally cannot patch a Secret here yet. Needs only the narrow Keycloak admin credential
-  # (forwardmeasure-platform's own platform-secrets release, identity.dataStreamingCredentialsSecret,
-  # synced into this namespace specifically for this Job - not the full fowf identity bundle).
   - name: data-streaming-credentials
     namespace: {{ .Values.platform.namespaces.dataStreaming }}
     chart: ../releases/data-streaming-credentials
-    values:
-      - keycloak:
-          url: {{ .Values.platform.endpoints.keycloak.url | quote }}
-          realm: {{ .Values.platform.endpoints.keycloak.realm | quote }}
-          clientId: {{ dig "keycloak" "clientId" "openworkflow" .Values | quote }}
-          datastreamingClientId: {{ .Values.authorizationClientId | quote }}
-          # This cluster's tenant, from forwardmeasure-platform's shared cluster file.
-          tenantAlias: {{ (index .Values.platform.tenants 0).alias | quote }}
-        credentialsSecretName: {{ .Values.platform.secrets.dataStreamingKeycloakAdmin | quote }}
-        targetSecretName: {{ .Values.credentialsSecretName | quote }}
-    labels: {stage: credentials, capability: data-streaming-credentials}
-
+    installed: false
+    labels: {stage: launcher, component: retired-client-writer}
   - name: data-streaming-launcher
     namespace: {{ .Values.platform.namespaces.dataStreaming }}
     # Same shared chart forwardmeasure-openworkflow's own execution-management/definition-management
@@ -71,8 +37,6 @@ releases:
     # credentialsSecretName above must already carry authorization-client-secret/fowf-keycloak-
     # client-id/fowf-keycloak-client-secret before this pod starts, or it comes up unable to
     # authenticate to fowf at all - see helmfiles/credentials.yaml.gotmpl.
-    needs:
-      - {{ .Values.platform.namespaces.dataStreaming }}/data-streaming-credentials
     values:
       - serviceAccount:
           create: true
@@ -154,7 +118,7 @@ releases:
               # set under ANY name before - added here with the same defaults fowf's own
               # openworkflow.authorization block uses (application.yaml, engine-pekko/quarkus).
               DATASTREAMING_LAUNCHER_AUTHORIZATION_ISSUER: {{ .Values.platform.endpoints.keycloak.issuer | quote }}
-              DATASTREAMING_LAUNCHER_AUTHORIZATION_CLIENT_ID: {{ .Values.authorizationClientId | quote }}
+              DATASTREAMING_LAUNCHER_AUTHORIZATION_CLIENT_ID: {{ .Values.platform.identity.serviceClients.dataStreaming.clientId | quote }}
               DATASTREAMING_LAUNCHER_AUTHORIZATION_ORGANIZATION_CLIENT_ID: {{ .Values.platform.identity.organizationClientId | quote }}
               DATASTREAMING_LAUNCHER_AUTHORIZATION_REQUEST_TIMEOUT: {{ dig "authorization" "requestTimeout" "PT5S" .Values | quote }}
               DATASTREAMING_LAUNCHER_AUTHORIZATION_DECISION_TTL: {{ dig "authorization" "decisionTtl" "PT5S" .Values | quote }}

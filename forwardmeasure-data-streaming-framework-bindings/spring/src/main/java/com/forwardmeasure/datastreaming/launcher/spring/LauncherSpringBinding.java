@@ -23,7 +23,6 @@ import com.forwardmeasure.authzen.client.AuthzenAuthorizationFactory;
 import com.forwardmeasure.datastreaming.launcher.application.DirectIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.IngestionJobPolicy;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowIngestionLauncher;
-import com.forwardmeasure.datastreaming.launcher.application.auth.KeycloakClientCredentialsTokenSupplier;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.IngestionRunResource;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.WorkflowRunResource;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.mapper.ApiExceptionMapper;
@@ -33,8 +32,7 @@ import com.forwardmeasure.datastreaming.launcher.jaxrs.mapper.AuthorizationUnava
 import com.forwardmeasure.datastreaming.launcher.jaxrs.mapper.NullPointerExceptionMapper;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.mapper.SecurityExceptionMapper;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.mapper.UnsupportedOperationExceptionMapper;
-import com.forwardmeasure.openworkflow.execution.client.ApiClient;
-import com.forwardmeasure.openworkflow.execution.client.api.WorkflowExecutionsApi;
+import com.forwardmeasure.datastreaming.launcher.application.auth.TenantWorkflowExecutions;
 import com.forwardmeasure.platform.server.jaxrs.RequestProblemsFeature;
 import com.forwardmeasure.platform.spring.security.ProblemAccessDeniedHandler;
 import com.forwardmeasure.platform.spring.security.ProblemAuthenticationEntryPoint;
@@ -93,16 +91,12 @@ public class LauncherSpringBinding {
   }
 
   @Bean
-  WorkflowExecutionsApi executionsApi(
+  TenantWorkflowExecutions executionsApi(
       @Value("${datastreaming.launcher.fowf.base-url}") String baseUrl,
       @Value("${datastreaming.launcher.fowf.keycloak.token-url}") String tokenUrl,
       @Value("${datastreaming.launcher.fowf.keycloak.client-id}") String clientId,
       @Value("${datastreaming.launcher.fowf.keycloak.client-secret}") String clientSecret) {
-    ApiClient apiClient = new ApiClient();
-    apiClient.setBasePath(baseUrl);
-    apiClient.setBearerToken(
-        new KeycloakClientCredentialsTokenSupplier(URI.create(tokenUrl), clientId, clientSecret));
-    return new WorkflowExecutionsApi(apiClient);
+    return new TenantWorkflowExecutions(baseUrl, URI.create(tokenUrl), clientId, clientSecret);
   }
 
   /**
@@ -203,7 +197,7 @@ public class LauncherSpringBinding {
 
   @Bean
   WorkflowIngestionLauncher workflowIngestionLauncher(
-      WorkflowExecutionsApi executionsApi,
+      TenantWorkflowExecutions executionsApi,
       AuthorizationService authorization,
       DirectIngestionLauncher direct) {
     return new WorkflowIngestionLauncher(executionsApi, authorization, false, direct.planner());

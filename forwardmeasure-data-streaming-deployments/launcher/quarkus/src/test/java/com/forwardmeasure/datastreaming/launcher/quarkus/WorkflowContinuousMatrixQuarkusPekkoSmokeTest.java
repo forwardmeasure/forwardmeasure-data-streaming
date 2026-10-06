@@ -233,15 +233,11 @@ class WorkflowContinuousMatrixQuarkusPekkoSmokeTest {
           // own producer is eagerly created regardless.
           Map.entry("datastreaming.launcher.k8s.namespaces", NAMESPACE),
           Map.entry("datastreaming.launcher.k8s.images", IMAGE),
-          Map.entry("datastreaming.launcher.k8s.image-pull-secrets", "unused"),
-          Map.entry("datastreaming.launcher.k8s.host-aliases", "unused=127.0.0.1"),
+          // Leave optional pull secrets, host aliases and Spark settings at production defaults.
           Map.entry("datastreaming.launcher.pekko.image", IMAGE),
           Map.entry("datastreaming.launcher.pekko.command", "true #"),
           Map.entry("datastreaming.launcher.kafka-streams.image", IMAGE),
-          Map.entry("datastreaming.launcher.kafka-streams.command", "true #"),
-          Map.entry("datastreaming.launcher.spark.image", "unused"),
-          Map.entry("datastreaming.launcher.spark.command", "unused"),
-          Map.entry("datastreaming.launcher.kafka.bootstrap-servers", "unused"));
+          Map.entry("datastreaming.launcher.kafka-streams.command", "true #"));
     }
 
     @Override

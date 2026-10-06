@@ -23,11 +23,9 @@ import com.forwardmeasure.authzen.client.AuthzenAuthorizationFactory;
 import com.forwardmeasure.datastreaming.launcher.application.DirectIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.IngestionJobPolicy;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowIngestionLauncher;
-import com.forwardmeasure.datastreaming.launcher.application.auth.KeycloakClientCredentialsTokenSupplier;
+import com.forwardmeasure.datastreaming.launcher.application.auth.TenantWorkflowExecutions;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.IngestionRunResource;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.WorkflowRunResource;
-import com.forwardmeasure.openworkflow.execution.client.ApiClient;
-import com.forwardmeasure.openworkflow.execution.client.api.WorkflowExecutionsApi;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.quarkus.arc.profile.UnlessBuildProfile;
@@ -37,6 +35,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -62,17 +61,13 @@ public class LauncherQuarkusBinding {
 
   @Produces
   @ApplicationScoped
-  WorkflowExecutionsApi executionsApi(
+  TenantWorkflowExecutions executionsApi(
       @ConfigProperty(name = "datastreaming.launcher.fowf.base-url") String baseUrl,
       @ConfigProperty(name = "datastreaming.launcher.fowf.keycloak.token-url") String tokenUrl,
       @ConfigProperty(name = "datastreaming.launcher.fowf.keycloak.client-id") String clientId,
       @ConfigProperty(name = "datastreaming.launcher.fowf.keycloak.client-secret")
           String clientSecret) {
-    ApiClient apiClient = new ApiClient();
-    apiClient.setBasePath(baseUrl);
-    apiClient.setBearerToken(
-        new KeycloakClientCredentialsTokenSupplier(URI.create(tokenUrl), clientId, clientSecret));
-    return new WorkflowExecutionsApi(apiClient);
+    return new TenantWorkflowExecutions(baseUrl, URI.create(tokenUrl), clientId, clientSecret);
   }
 
   /**
@@ -147,15 +142,14 @@ public class LauncherQuarkusBinding {
       @ConfigProperty(name = "datastreaming.launcher.kafka-streams.image") String kafkaStreamsImage,
       @ConfigProperty(name = "datastreaming.launcher.kafka-streams.command")
           String kafkaStreamsCommand,
-      @ConfigProperty(name = "datastreaming.launcher.k8s.image-pull-secrets") String pullSecrets,
-      @ConfigProperty(name = "datastreaming.launcher.k8s.host-aliases", defaultValue = "")
-          String hostAliases,
-      @ConfigProperty(name = "datastreaming.launcher.spark.image", defaultValue = "")
-          String sparkImage,
-      @ConfigProperty(name = "datastreaming.launcher.spark.command", defaultValue = "")
-          String sparkCommand,
-      @ConfigProperty(name = "datastreaming.launcher.kafka.bootstrap-servers", defaultValue = "")
-          String kafkaBootstrapServers) {
+      @ConfigProperty(name = "datastreaming.launcher.k8s.image-pull-secrets")
+          Optional<String> pullSecrets,
+      @ConfigProperty(name = "datastreaming.launcher.k8s.host-aliases")
+          Optional<String> hostAliases,
+      @ConfigProperty(name = "datastreaming.launcher.spark.image") Optional<String> sparkImage,
+      @ConfigProperty(name = "datastreaming.launcher.spark.command") Optional<String> sparkCommand,
+      @ConfigProperty(name = "datastreaming.launcher.kafka.bootstrap-servers")
+          Optional<String> kafkaBootstrapServers) {
     return new DirectIngestionLauncher(
         policy,
         authorization,
@@ -163,17 +157,17 @@ public class LauncherQuarkusBinding {
         pekkoCommand,
         kafkaStreamsImage,
         kafkaStreamsCommand,
-        commaSeparatedList(pullSecrets),
-        commaSeparatedMap(hostAliases),
-        blankToNull(sparkImage),
-        blankToNull(sparkCommand),
-        blankToNull(kafkaBootstrapServers));
+        commaSeparatedList(pullSecrets.orElse("")),
+        commaSeparatedMap(hostAliases.orElse("")),
+        blankToNull(sparkImage.orElse(null)),
+        blankToNull(sparkCommand.orElse(null)),
+        blankToNull(kafkaBootstrapServers.orElse(null)));
   }
 
   @Produces
   @ApplicationScoped
   WorkflowIngestionLauncher workflowIngestionLauncher(
-      WorkflowExecutionsApi executionsApi,
+      TenantWorkflowExecutions executionsApi,
       AuthorizationService authorization,
       DirectIngestionLauncher direct) {
     return new WorkflowIngestionLauncher(executionsApi, authorization, false, direct.planner());

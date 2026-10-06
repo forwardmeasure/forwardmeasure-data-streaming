@@ -34,14 +34,12 @@ import com.forwardmeasure.datastreaming.launcher.application.DirectLaunchRequest
 import com.forwardmeasure.datastreaming.launcher.application.IngestionJobPolicy;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowLaunchRequest;
-import com.forwardmeasure.datastreaming.launcher.application.auth.KeycloakClientCredentialsTokenSupplier;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.RunAccepted;
 import com.forwardmeasure.openworkflow.common.model.Problem;
 import com.forwardmeasure.openworkflow.common.model.Violation;
 import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecution;
 import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecutionState;
-import com.forwardmeasure.openworkflow.execution.client.ApiClient;
-import com.forwardmeasure.openworkflow.execution.client.api.WorkflowExecutionsApi;
+import com.forwardmeasure.datastreaming.launcher.application.auth.TenantWorkflowExecutions;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
@@ -165,16 +163,12 @@ public class LauncherMicronautBinding {
   }
 
   @Singleton
-  WorkflowExecutionsApi executionsApi(
+  TenantWorkflowExecutions executionsApi(
       @Value("${datastreaming.launcher.fowf.base-url}") String baseUrl,
       @Value("${datastreaming.launcher.fowf.keycloak.token-url}") String tokenUrl,
       @Value("${datastreaming.launcher.fowf.keycloak.client-id}") String clientId,
       @Value("${datastreaming.launcher.fowf.keycloak.client-secret}") String clientSecret) {
-    ApiClient apiClient = new ApiClient();
-    apiClient.setBasePath(baseUrl);
-    apiClient.setBearerToken(
-        new KeycloakClientCredentialsTokenSupplier(URI.create(tokenUrl), clientId, clientSecret));
-    return new WorkflowExecutionsApi(apiClient);
+    return new TenantWorkflowExecutions(baseUrl, URI.create(tokenUrl), clientId, clientSecret);
   }
 
   /**
@@ -253,7 +247,7 @@ public class LauncherMicronautBinding {
 
   @Singleton
   WorkflowIngestionLauncher workflowIngestionLauncher(
-      WorkflowExecutionsApi executionsApi,
+      TenantWorkflowExecutions executionsApi,
       AuthorizationService authorization,
       DirectIngestionLauncher direct) {
     return new WorkflowIngestionLauncher(executionsApi, authorization, false, direct.planner());

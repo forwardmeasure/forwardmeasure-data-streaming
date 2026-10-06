@@ -35,7 +35,10 @@ do:
           endpoint: '@BUNDLE_DID@/ingestion-deployment.yaml'
         channel: ingestion.commands
         message:
-          payload: '${ {action: "delete", namespace: $workflow.input.namespace, name: $workflow.input.deploymentName} }'
+          payload:
+            action: delete
+            namespace: '${ $workflow.input.namespace }'
+            name: '${ $workflow.input.deploymentName }'
   - stopDelivery:
       call: asyncapi
       with:
@@ -43,4 +46,7 @@ do:
           endpoint: '@BUNDLE_DID@/ingestion-deployment.yaml'
         channel: ingestion.commands
         message:
-          payload: '${ {action: "delete", namespace: $workflow.input.namespace, name: ($workflow.input.deploymentName + "-delivery")} }'
+          payload:
+            action: delete
+            namespace: '${ $workflow.input.namespace }'
+            name: '${ ($workflow.input.deploymentName + "-delivery") }'

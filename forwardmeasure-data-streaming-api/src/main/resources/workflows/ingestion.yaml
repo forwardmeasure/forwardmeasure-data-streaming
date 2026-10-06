@@ -84,7 +84,16 @@ do:
           endpoint: '@BUNDLE_DID@/ingestion-deployment.yaml'
         channel: ingestion.commands
         message:
-          payload: '${ $workflow.input.primary }'
+          payload:
+            namespace: '${ $workflow.input.primary.namespace }'
+            name: '${ $workflow.input.primary.name }'
+            image: '${ $workflow.input.primary.image }'
+            command: '${ $workflow.input.primary.command }'
+            args: '${ $workflow.input.primary.args }'
+            env: '${ $workflow.input.primary.env }'
+            replicas: '${ $workflow.input.primary.replicas }'
+            resources: '${ $workflow.input.primary.resources }'
+            imagePullSecretNames: '${ $workflow.input.primary.imagePullSecretNames }'
   - awaitContinuousReadiness:
       if: '${ $workflow.input.continuous }'
       call: asyncapi
@@ -104,7 +113,16 @@ do:
           endpoint: '@BUNDLE_DID@/ingestion-deployment.yaml'
         channel: ingestion.commands
         message:
-          payload: '${ $workflow.input.delivery }'
+          payload:
+            namespace: '${ $workflow.input.delivery.namespace }'
+            name: '${ $workflow.input.delivery.name }'
+            image: '${ $workflow.input.delivery.image }'
+            command: '${ $workflow.input.delivery.command }'
+            args: '${ $workflow.input.delivery.args }'
+            env: '${ $workflow.input.delivery.env }'
+            replicas: '${ $workflow.input.delivery.replicas }'
+            resources: '${ $workflow.input.delivery.resources }'
+            imagePullSecretNames: '${ $workflow.input.delivery.imagePullSecretNames }'
   - awaitContinuousDeliveryReadiness:
       if: '${ $workflow.input.continuous and $workflow.input.hasDelivery }'
       call: asyncapi

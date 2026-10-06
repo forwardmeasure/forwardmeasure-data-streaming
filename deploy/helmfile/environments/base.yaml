@@ -20,7 +20,6 @@
 # forwardmeasure-platform/deploy/helmfile/shared/, loaded last by helmfile.yaml.gotmpl.
 
 imagePullPolicy: IfNotPresent
-
 # Real, sha256-pinned executor images - org policy requires a pinned digest, not a floating tag
 # (AsyncApiKubernetesJobOperationExecutor's own real check). Digests below are current as of
 # 2026-09-26 (rebuilt/repushed the same day the stale-digest "unknown named transform" bug for
@@ -41,14 +40,14 @@ imageVersions:
       micronaut: forwardmeasure/data-streaming-launcher-micronaut
     tag: "1.1.0"
     digests:
-      quarkus: ""
+      quarkus: "sha256:82db774d4eb7284538941938cb1460f464f224c1372bd1ef09a5f26d245577bf"
       spring: ""
       micronaut: ""
   pekko:
     repository: docker.io/forwardmeasure/data-streaming-executor-pekko
     tag: "1.1.0"
-    digest: "sha256:a1eab0f12073b4b2f0215fd350061522ffa01aca08ab259a81e8053ee04a90e3"
+    digest: "sha256:32e0285b59d9c389aaf828e7bd64ebfbbfd244d81ed5e079b282465b48d2bd3e"
   spark:
     repository: docker.io/forwardmeasure/data-streaming-executor-spark
     tag: "1.1.0"
-    digest: "sha256:7ffbf465517c4ac557bfd9f400fbdc8abc73e5944795318a5dece206341cc2dd"
+    digest: "sha256:5fea15a2b464ed5f9e4d9d08f86e875249d474ebb1dad81d612e4701748eb802"

@@ -1,0 +1,16 @@
+{
+  "packId": "data-streaming",
+  "packVersion": "1",
+  "clientId": "datastreaming",
+  "roles": ["ingestion-control"],
+  "resources": [
+    {"type": "datastreaming-ingestion-run", "id": "ingestion-runs", "scopes": ["ingestion-run:launch", "ingestion-run:read", "ingestion-run:cancel"]},
+    {"type": "datastreaming-workflow-run", "id": "workflow-runs", "scopes": ["workflow-run:launch", "workflow-run:read", "workflow-run:cancel"]}
+  ],
+  "resourceGrants": {
+    "ingestion-control": {
+      "ingestion-runs": ["ingestion-run:launch", "ingestion-run:read", "ingestion-run:cancel"],
+      "workflow-runs": ["workflow-run:launch", "workflow-run:read", "workflow-run:cancel"]
+    }
+  }
+}

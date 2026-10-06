@@ -26,6 +26,12 @@
     <maven.javadoc.skip>false</maven.javadoc.skip>
   </properties>
   <dependencies>
+    <dependency>
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-definition</artifactId>
+      <version>${openworkflow.version}</version>
+      <scope>test</scope>
+    </dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
     <dependency>
       <!-- ExecutionPlanCompiler - the planner DirectIngestionLauncher calls to resolve which
@@ -92,7 +98,6 @@
            forwardmeasure-authzen-client's own AuthzenAuthorizationServiceKeycloakIntegrationTest. -->
       <groupId>com.forwardmeasure.authzen</groupId>
       <artifactId>forwardmeasure-authzen-client</artifactId>
-      <scope>test</scope>
     </dependency>
     <dependency>
       <!-- AuthzenKeycloakFixture - real Keycloak 26.7 AuthZEN container, used directly by

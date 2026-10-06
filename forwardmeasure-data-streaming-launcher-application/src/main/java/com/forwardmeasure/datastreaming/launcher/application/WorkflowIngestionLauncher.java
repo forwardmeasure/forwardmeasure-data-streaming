@@ -46,7 +46,9 @@ import java.util.UUID;
  */
 public final class WorkflowIngestionLauncher {
 
-  private final WorkflowExecutionsApi executionsApi;
+  private final java.util.function.Function<
+          com.forwardmeasure.jpa.tenancy.TenantId, WorkflowExecutionsApi>
+      executionsApis;
   private final AuthorizationService authorization;
   private final boolean assertSubjectActor;
   private final IngestionLaunchPlanner planner;
@@ -94,9 +96,29 @@ public final class WorkflowIngestionLauncher {
       boolean assertSubjectActor,
       IngestionLaunchPlanner planner) {
     this.planner = planner;
-    this.executionsApi = Objects.requireNonNull(executionsApi, "executionsApi");
+    Objects.requireNonNull(executionsApi, "executionsApi");
+    this.executionsApis = ignored -> executionsApi;
     this.authorization = Objects.requireNonNull(authorization, "authorization");
     this.assertSubjectActor = assertSubjectActor;
+  }
+
+  public WorkflowIngestionLauncher(
+      com.forwardmeasure.datastreaming.launcher.application.auth.TenantWorkflowExecutions clients,
+      AuthorizationService authorization,
+      boolean assertSubjectActor) {
+    this(clients, authorization, assertSubjectActor, null);
+  }
+
+  public WorkflowIngestionLauncher(
+      com.forwardmeasure.datastreaming.launcher.application.auth.TenantWorkflowExecutions clients,
+      AuthorizationService authorization,
+      boolean assertSubjectActor,
+      IngestionLaunchPlanner planner) {
+    Objects.requireNonNull(clients, "clients");
+    this.executionsApis = clients::forTenant;
+    this.authorization = Objects.requireNonNull(authorization, "authorization");
+    this.assertSubjectActor = assertSubjectActor;
+    this.planner = planner;
   }
 
   /**
@@ -139,8 +161,9 @@ public final class WorkflowIngestionLauncher {
             .revisionId(request.revisionId())
             .input(input)
             .subjectActor(assertSubjectActor ? subjectActorFor(actor) : null);
-    return executionsApi.startWorkflowExecution(
-        request.idempotencyKey(), request.correlationId(), start);
+    return executionsApis
+        .apply(actor.tenantId())
+        .startWorkflowExecution(request.idempotencyKey(), request.correlationId(), start);
   }
 
   /** One-shot status check - fowf's own current {@link WorkflowExecution} resource for this id. */
@@ -153,7 +176,7 @@ public final class WorkflowIngestionLauncher {
             AuthorizationAction.WORKFLOW_RUN_READ,
             executionIdText,
             Map.of()));
-    return executionsApi.getWorkflowExecution(executionId);
+    return executionsApis.apply(actor.tenantId()).getWorkflowExecution(executionId);
   }
 
   /**
@@ -182,7 +205,9 @@ public final class WorkflowIngestionLauncher {
         new WorkflowExecutionControl()
             .reason(reason)
             .subjectActor(assertSubjectActor ? subjectActorFor(actor) : null);
-    return executionsApi.cancelWorkflowExecution(ifMatch, correlationId, executionId, control);
+    return executionsApis
+        .apply(actor.tenantId())
+        .cancelWorkflowExecution(ifMatch, correlationId, executionId, control);
   }
 
   private static SubjectActor subjectActorFor(ActiveOrganization actor) {

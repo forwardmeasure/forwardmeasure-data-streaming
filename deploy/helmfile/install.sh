@@ -30,6 +30,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ENVIRONMENT="${1:?Usage: $0 <configured-environment>}"
 
+# Reconcile every selected release in Helmfile order, including unchanged failed releases.
+# A separate failed-release prepass can retry a dependent before its prerequisite is updated.
+# Honor needs even with stage selectors; do not implicitly include disabled or unselected releases.
+# sync reruns hooks; migrations, identity reconciliation and publication must remain repeatable.
+
 for command in kubectl helm helmfile; do
   command -v "${command}" >/dev/null || {
     echo "Required command is unavailable: ${command}" >&2
@@ -37,4 +42,5 @@ for command in kubectl helm helmfile; do
   }
 done
 
-helmfile --file "${SCRIPT_DIR}/helmfile.yaml.gotmpl" --environment "${ENVIRONMENT}" apply
+helmfile --file "${SCRIPT_DIR}/helmfile.yaml.gotmpl" --environment "${ENVIRONMENT}" \
+  sync --skip-needs=false --wait --wait-for-jobs

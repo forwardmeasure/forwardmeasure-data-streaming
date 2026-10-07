@@ -21,8 +21,8 @@ import com.forwardmeasure.datastreaming.api.KafkaConnectorUri;
 import com.forwardmeasure.datastreaming.api.MergePolicy;
 import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.core.CorrelationMerge;
+import com.forwardmeasure.datastreaming.core.IngestionPipeline;
 import com.forwardmeasure.datastreaming.mappers.FieldMappingEngine;
-import com.forwardmeasure.datastreaming.mappers.MapSourceRow;
 import com.forwardmeasure.datastreaming.mappers.OpenSearchSinkRowWriter;
 import com.forwardmeasure.datastreaming.mappers.SinkRowWriter;
 import java.util.Comparator;
@@ -38,8 +38,6 @@ import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.KTable;
 import org.apache.kafka.streams.kstream.Materialized;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Real, live-found capability gap closed (2026-09-25, same day as the bounded sibling): continuous
@@ -82,8 +80,6 @@ import org.slf4j.LoggerFactory;
  */
 final class ContinuousKafkaStreamsCorrelationRunner {
 
-  private static final Logger LOGGER =
-      LoggerFactory.getLogger(ContinuousKafkaStreamsCorrelationRunner.class);
   private final Map<String, Object> streamsConfigOverrides;
 
   ContinuousKafkaStreamsCorrelationRunner(Map<String, Object> streamsConfigOverrides) {
@@ -104,24 +100,44 @@ final class ContinuousKafkaStreamsCorrelationRunner {
     String bootstrapServers =
         KafkaConnectorUri.parse(sources.get(0).source().uri()).bootstrapServers();
 
-    Topology topology = buildTopology(sources, blockingField, plan);
+    for (SourcePlan source : sources) {
+      if (!bootstrapServers.equals(
+          KafkaConnectorUri.parse(source.source().uri()).bootstrapServers()))
+        throw new IllegalArgumentException(
+            "Continuous Kafka correlation sources must share a Kafka cluster");
+    }
+    SinkRowWriter sinkRowWriter = new OpenSearchSinkRowWriter(plan.destination());
+    try {
+      Topology topology = buildTopology(sources, blockingField, plan, sinkRowWriter);
 
-    Properties props = new Properties();
-    props.put(org.apache.kafka.streams.StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
-    props.put(org.apache.kafka.streams.StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-    props.put(
-        org.apache.kafka.streams.StreamsConfig.PROCESSING_GUARANTEE_CONFIG,
-        org.apache.kafka.streams.StreamsConfig.EXACTLY_ONCE_V2);
-    streamsConfigOverrides.forEach(props::put);
+      Properties props = new Properties();
+      props.put(org.apache.kafka.streams.StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
+      props.put(org.apache.kafka.streams.StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+      props.put(
+          org.apache.kafka.streams.StreamsConfig.PROCESSING_GUARANTEE_CONFIG,
+          org.apache.kafka.streams.StreamsConfig.EXACTLY_ONCE_V2);
+      streamsConfigOverrides.forEach(props::put);
 
-    KafkaStreams streams = new KafkaStreams(topology, props);
-    var handle = new KafkaStreamsExecutionHandle(applicationId, streams);
-    streams.start();
-    return handle;
+      KafkaStreams streams = new KafkaStreams(topology, props);
+      var handle = new KafkaStreamsExecutionHandle(applicationId, streams, sinkRowWriter);
+      try {
+        streams.start();
+      } catch (RuntimeException failure) {
+        handle.stop();
+        throw failure;
+      }
+      return handle;
+    } catch (RuntimeException failure) {
+      sinkRowWriter.close();
+      throw failure;
+    }
   }
 
   private Topology buildTopology(
-      List<SourcePlan> sources, String blockingField, ExecutionPlan plan) {
+      List<SourcePlan> sources,
+      String blockingField,
+      ExecutionPlan plan,
+      SinkRowWriter sinkRowWriter) {
     StreamsBuilder builder = new StreamsBuilder();
     FieldMappingEngine mapper = new FieldMappingEngine();
     StageRecordSerde recordSerde = new StageRecordSerde();
@@ -137,7 +153,13 @@ final class ContinuousKafkaStreamsCorrelationRunner {
     KTable<String, Map<String, Object>> merged = null;
     for (SourcePlan source : byTrustDescending) {
       KTable<String, Map<String, Object>> table =
-          mappedTable(builder, source, blockingField, mapper, recordSerde);
+          mappedTable(
+              builder,
+              source,
+              blockingField,
+              mapper,
+              recordSerde,
+              IngestionPipeline.MalformedRecordPolicy.from(plan.errors()));
       merged =
           merged == null
               ? table
@@ -149,15 +171,13 @@ final class ContinuousKafkaStreamsCorrelationRunner {
 
     // One SinkRowWriter for the whole topology, not per record - same real, already-established
     // reasoning as ContinuousKafkaStreamsConsumerRunner's own identical choice.
-    SinkRowWriter sinkRowWriter = new OpenSearchSinkRowWriter(plan.destination());
     merged
         .toStream()
-        // Real operator visibility into the progressive-refinement behavior this class's own
-        // javadoc documents - a row appearing here with fewer fields than expected is that
-        // behavior working correctly, not a bug; matching this repo's own "heavy, structured,
-        // extractable logging" discipline elsewhere in the codebase.
-        .peek((key, mergedRow) -> LOGGER.debug("merged blockingKey={} row={}", key, mergedRow))
-        .foreach((key, mergedRow) -> sinkRowWriter.write(mergedRow));
+        .foreach(
+            (key, mergedRow) ->
+                IngestionPipeline.withSinkFailureHandlingBlocking(
+                    IngestionPipeline.SinkFailurePolicy.from(plan.errors()),
+                    () -> sinkRowWriter.write(mergedRow)));
     return builder.build();
   }
 
@@ -166,12 +186,15 @@ final class ContinuousKafkaStreamsCorrelationRunner {
       SourcePlan source,
       String blockingField,
       FieldMappingEngine mapper,
-      StageRecordSerde recordSerde) {
+      StageRecordSerde recordSerde,
+      IngestionPipeline.MalformedRecordPolicy policy) {
     KafkaConnectorUri sourceUri = KafkaConnectorUri.parse(source.source().uri());
     KStream<String, Map<String, Object>> mappedKeyedByBlockingField =
-        builder.stream(sourceUri.topic(), Consumed.with(Serdes.String(), recordSerde))
-            .mapValues(record -> mapper.map(new MapSourceRow(record), source.mapper()))
-            .filter((key, mapped) -> normalizeBlockingKey(mapped, blockingField) != null)
+        builder.stream(sourceUri.topic(), Consumed.with(Serdes.String(), Serdes.String()))
+            .mapValues(
+                record ->
+                    KafkaRecordMapping.map(record, source.mapper(), mapper, policy, blockingField))
+            .filter((key, mapped) -> mapped != null)
             .selectKey((key, mapped) -> normalizeBlockingKey(mapped, blockingField));
     return mappedKeyedByBlockingField.toTable(Materialized.with(Serdes.String(), recordSerde));
   }

@@ -207,6 +207,152 @@ class PekkoStreamsDeliveryEngineIntegrationTest {
     }
   }
 
+  @Test
+  void continuousCorrelationSurfacesFatalMappingAndRecoversAfterSkippableMalformedInput(
+      KafkaTestContainer kafka, OpenSearchTestContainer opensearch) throws Exception {
+    for (String policy : List.of("skip", "fail")) {
+      String core = "contract-core-" + UUID.randomUUID();
+      String detail = "contract-detail-" + UUID.randomUUID();
+      createTopic(kafka, core);
+      createTopic(kafka, detail);
+      String index = "correlation-errors-" + policy;
+      var plan =
+          new ExecutionPlan(
+              new com.forwardmeasure.datastreaming.api.ExecutionProfile(
+                  com.forwardmeasure.datastreaming.api.SourceCardinality.CORRELATED,
+                  ExecutionMode.CONTINUOUS,
+                  com.forwardmeasure.datastreaming.api.DeliveryEngineKind.PEKKO_STREAMS),
+              List.of(
+                  correlatedSource("core", kafka, core, "name", "name", 1.0),
+                  correlatedSource("detail", kafka, detail, "position", "role", 0.5)),
+              "uid",
+              java.util.Optional.empty(),
+              null,
+              openSearchSink(opensearch, index),
+              new DeliverySemantics(true, new ConcurrencySpec(1, null), null),
+              new com.forwardmeasure.datastreaming.api.ErrorPolicy(policy, "fail"));
+      var handle = new PekkoStreamsDeliveryEngine(system).execute(plan, ExecutionMode.CONTINUOUS);
+      try {
+        assertTrue(handle.failure().isEmpty());
+        assertTrue(handle.id().startsWith("fds-pekko-correlation-"));
+        produceRaw(kafka, core, "bad", "{not-json");
+        if (policy.equals("fail")) {
+          Instant deadline = Instant.now().plusSeconds(15);
+          while (handle.isRunning() && Instant.now().isBefore(deadline)) Thread.sleep(50);
+          assertFalse(handle.isRunning(), "Fatal mapping must terminate the logical execution");
+          assertTrue(handle.failure().isPresent(), "Failure cause must be observable for recovery");
+        } else {
+          produce(kafka, core, "missing", Map.of("name", "No identity"));
+          produce(kafka, core, "good", Map.of("uid", "good", "name", "Retained Name"));
+          produce(kafka, detail, "good", Map.of("uid", "good", "role", "Enriched Role"));
+          var document =
+              awaitDocumentWithFields(
+                  opensearch, index, "good", Duration.ofSeconds(30), "name", "position");
+          assertEquals("Retained Name", document.path("_source").path("name").asText());
+          assertEquals("Enriched Role", document.path("_source").path("position").asText());
+          assertTrue(handle.isRunning());
+          assertTrue(handle.failure().isEmpty());
+        }
+      } finally {
+        handle.stop();
+        handle.stop();
+        assertFalse(handle.isRunning());
+      }
+    }
+  }
+
+  @Test
+  @org.junit.jupiter.api.Timeout(60)
+  void continuousCorrelationFailsMissingAndBlankKeysWithoutCommittingThem(
+      KafkaTestContainer kafka, OpenSearchTestContainer opensearch) throws Exception {
+    for (Map<String, String> row :
+        List.of(Map.of("name", "Missing"), Map.of("uid", "   ", "name", "Blank"))) {
+      String core = "invalid-key-core-" + UUID.randomUUID();
+      String detail = core + "-detail";
+      createTopic(kafka, core);
+      createTopic(kafka, detail);
+      var plan =
+          new ExecutionPlan(
+              new com.forwardmeasure.datastreaming.api.ExecutionProfile(
+                  com.forwardmeasure.datastreaming.api.SourceCardinality.CORRELATED,
+                  ExecutionMode.CONTINUOUS,
+                  com.forwardmeasure.datastreaming.api.DeliveryEngineKind.PEKKO_STREAMS),
+              List.of(
+                  correlatedSource("core", kafka, core, "name", "name", 1.0),
+                  correlatedSource("detail", kafka, detail, "position", "role", 0.5)),
+              "uid",
+              java.util.Optional.empty(),
+              null,
+              openSearchSink(opensearch, core),
+              new DeliverySemantics(true, new ConcurrencySpec(1, null), null),
+              new com.forwardmeasure.datastreaming.api.ErrorPolicy("fail", "fail"));
+      var handle = new PekkoStreamsDeliveryEngine(system).execute(plan, ExecutionMode.CONTINUOUS);
+      try {
+        produce(kafka, core, "poison", row);
+        Instant deadline = Instant.now().plusSeconds(15);
+        while (handle.isRunning() && Instant.now().isBefore(deadline)) Thread.sleep(50);
+        assertFalse(handle.isRunning(), "Invalid correlation identity must fail execution");
+        assertTrue(handle.failure().isPresent());
+        try (var admin =
+            org.apache.kafka.clients.admin.Admin.create(
+                Map.of("bootstrap.servers", kafka.bootstrapServers()))) {
+          var offsets =
+              admin
+                  .listConsumerGroupOffsets(handle.id() + "-core")
+                  .partitionsToOffsetAndMetadata()
+                  .get();
+          var offset = offsets.get(new org.apache.kafka.common.TopicPartition(core, 0));
+          assertTrue(
+              offset == null || offset.offset() == 0,
+              "Failed correlation input must remain unacknowledged");
+        }
+      } finally {
+        handle.stop();
+      }
+    }
+  }
+
+  @Test
+  void continuousCorrelationRejectsMixedKafkaClustersBeforeCreatingState() {
+    var mapper =
+        new TransformSpec(
+            "party",
+            List.of(new TransformSpec.FieldRule("uid", "uid", null, null, null, false, false)));
+    var first =
+        new SourcePlan(
+            "one",
+            new SourceSpec("kafka", "kafka:first?brokers=127.0.0.1:1", null, null),
+            mapper,
+            1.0);
+    var second =
+        new SourcePlan(
+            "two",
+            new SourceSpec("kafka", "kafka:second?brokers=127.0.0.1:2", null, null),
+            mapper,
+            0.5);
+    var sink = new SinkSpec("opensearch", "http://unused.invalid", "unused", null, null);
+    for (var sources : List.of(List.of(first), List.of(first, second))) {
+      var plan =
+          new ExecutionPlan(
+              new com.forwardmeasure.datastreaming.api.ExecutionProfile(
+                  sources.size() == 1
+                      ? com.forwardmeasure.datastreaming.api.SourceCardinality.SINGLE
+                      : com.forwardmeasure.datastreaming.api.SourceCardinality.CORRELATED,
+                  ExecutionMode.CONTINUOUS,
+                  com.forwardmeasure.datastreaming.api.DeliveryEngineKind.PEKKO_STREAMS),
+              sources,
+              "uid",
+              java.util.Optional.empty(),
+              null,
+              sink,
+              null,
+              null);
+      org.junit.jupiter.api.Assertions.assertThrows(
+          IllegalArgumentException.class,
+          () -> ContinuousPekkoStreamsCorrelationRunner.run(plan, system));
+    }
+  }
+
   private static SourcePlan correlatedSource(
       String sourceKey,
       KafkaTestContainer kafka,
@@ -327,12 +473,17 @@ class PekkoStreamsDeliveryEngineIntegrationTest {
   private static void produce(
       KafkaTestContainer kafka, String topic, String key, Map<String, String> record)
       throws Exception {
+    produceRaw(kafka, topic, key, JSON.writeValueAsString(record));
+  }
+
+  private static void produceRaw(KafkaTestContainer kafka, String topic, String key, String record)
+      throws Exception {
     Properties props = new Properties();
     props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.bootstrapServers());
     props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
     props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
     try (KafkaProducer<String, String> producer = new KafkaProducer<>(props)) {
-      producer.send(new ProducerRecord<>(topic, key, JSON.writeValueAsString(record))).get();
+      producer.send(new ProducerRecord<>(topic, key, record)).get();
     }
   }
 

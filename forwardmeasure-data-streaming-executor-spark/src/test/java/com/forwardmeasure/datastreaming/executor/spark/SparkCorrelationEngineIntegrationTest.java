@@ -18,6 +18,7 @@ package com.forwardmeasure.datastreaming.executor.spark;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
@@ -141,6 +142,60 @@ class SparkCorrelationEngineIntegrationTest {
     assertEquals("Alice Anderson", s1.get("name"));
     Map<String, Object> s2 = findByUid(rows, "S2");
     assertEquals("Bob Baker", s2.get("name"));
+  }
+
+  @Test
+  void malformedMappingAndMissingCorrelationKeysRespectPolicy(@TempDir Path directory)
+      throws Exception {
+    Path csv =
+        writeFile(
+            directory,
+            "sparse.csv",
+            "ID,FULL_NAME\nvalid,Present\n,Missing\nblank,Blank\nreject,Rejected\n");
+    var source = new SourceSpec("file", csv.toString(), null, null);
+    var mapper =
+        new TransformSpec(
+            "party",
+            List.of(
+                new FieldRule("uid", "ID", null, null, "boundary_key", true, false),
+                new FieldRule("name", "FULL_NAME", null, null, null, false, false)));
+    Map<String, com.forwardmeasure.datastreaming.transforms.NamedTransform> transforms =
+        Map.of(
+            "boundary_key",
+            inputs -> {
+              String value = inputs.get("value");
+              if ("reject".equals(value))
+                throw new IllegalArgumentException("rejected provider key");
+              return "blank".equals(value) ? "  " : value;
+            });
+    var config = new SparkSourceConfig("provider", source, mapper, 1.0);
+    for (var policy :
+        List.of(
+            IngestionPipeline.MalformedRecordPolicy.SKIP,
+            IngestionPipeline.MalformedRecordPolicy.DEAD_LETTER)) {
+      var rows =
+          SparkCorrelationEngine.readAndMap(spark, config, "uid", transforms, policy).collect();
+      assertEquals(1, rows.size());
+      assertEquals("VALID", rows.getFirst().blockingKey());
+      var uncorrelated =
+          SparkCorrelationEngine.readAndMapSingleSource(spark, source, mapper, transforms, policy)
+              .collect();
+      assertEquals(
+          3, uncorrelated.size(), "Single-source mapping does not require correlation keys");
+    }
+    assertThrows(
+        Exception.class,
+        () ->
+            SparkCorrelationEngine.readAndMap(
+                    spark, config, "uid", transforms, IngestionPipeline.MalformedRecordPolicy.FAIL)
+                .collect());
+    assertThrows(
+        Exception.class,
+        () ->
+            SparkCorrelationEngine.readAndMapSingleSource(
+                    spark, source, mapper, transforms, IngestionPipeline.MalformedRecordPolicy.FAIL)
+                .collect());
+    assertThrows(IllegalArgumentException.class, () -> SparkCorrelationEngine.correlate(List.of()));
   }
 
   private static Map<String, Object> findByUid(List<Map<String, Object>> merged, String uid) {

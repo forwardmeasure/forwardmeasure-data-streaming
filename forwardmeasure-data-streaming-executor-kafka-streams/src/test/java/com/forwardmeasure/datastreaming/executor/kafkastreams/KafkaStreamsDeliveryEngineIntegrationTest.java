@@ -18,6 +18,7 @@ package com.forwardmeasure.datastreaming.executor.kafkastreams;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -265,7 +266,7 @@ class KafkaStreamsDeliveryEngineIntegrationTest {
         "document '" + id + "' never reported all of " + java.util.Arrays.toString(fields));
   }
 
-  private static SourcePlan correlatedSource(
+  static SourcePlan correlatedSource(
       String sourceKey,
       KafkaTestContainer kafka,
       String topic,
@@ -307,6 +308,355 @@ class KafkaStreamsDeliveryEngineIntegrationTest {
     }
   }
 
+  @Test
+  @Timeout(90)
+  void continuousSkipPolicySurvivesMalformedJsonForSingleAndCorrelatedSources(
+      KafkaTestContainer kafka, OpenSearchTestContainer opensearch) throws Exception {
+    for (String policy : List.of("skip", "dead-letter"))
+      for (boolean correlated : List.of(false, true)) {
+        String topic = "skip-policy-" + UUID.randomUUID();
+        String extra = topic + "-extra";
+        String index = topic;
+        createTopic(kafka, topic);
+        createTopic(kafka, extra);
+        var sources =
+            correlated
+                ? List.of(
+                    kafkaSource(kafka, topic),
+                    correlatedSource("extra", kafka, extra, "country", "country", 0.5))
+                : List.of(kafkaSource(kafka, topic));
+        var spec =
+            new IngestionSpec(
+                sources,
+                correlated ? "uid" : null,
+                null,
+                openSearchSink(opensearch, index),
+                ExecutionMode.CONTINUOUS,
+                null,
+                new com.forwardmeasure.datastreaming.api.ErrorPolicy(policy, "fail"));
+        var handle =
+            new KafkaStreamsDeliveryEngine(Map.of())
+                .execute(ExecutionPlanCompiler.compile(spec), ExecutionMode.CONTINUOUS);
+        try {
+          try (var producer =
+              new org.apache.kafka.clients.producer.KafkaProducer<String, String>(
+                  Map.of("bootstrap.servers", kafka.bootstrapServers()),
+                  new org.apache.kafka.common.serialization.StringSerializer(),
+                  new org.apache.kafka.common.serialization.StringSerializer())) {
+            producer
+                .send(
+                    new org.apache.kafka.clients.producer.ProducerRecord<>(topic, "bad", "{broken"))
+                .get();
+            if (correlated)
+              producer
+                  .send(
+                      new org.apache.kafka.clients.producer.ProducerRecord<>(
+                          topic, "missing", "{\"name\":\"Missing key\"}"))
+                  .get();
+            producer
+                .send(
+                    new org.apache.kafka.clients.producer.ProducerRecord<>(
+                        topic, "K1", "{\"uid\":\"K1\",\"name\":\"Survivor\"}"))
+                .get();
+          }
+          long deadline = System.nanoTime() + Duration.ofSeconds(25).toNanos();
+          while (handle.failure().isEmpty()
+              && getDocument(opensearch, index, "K1").statusCode() != 200
+              && System.nanoTime() < deadline) Thread.sleep(100);
+          assertTrue(
+              handle.failure().isEmpty(),
+              () -> "Skip policy unexpectedly killed worker: " + handle.failure());
+          assertEquals(
+              "Survivor",
+              JSON.readTree(getDocument(opensearch, index, "K1").body())
+                  .path("_source")
+                  .path("name")
+                  .asText());
+        } finally {
+          handle.stop();
+        }
+      }
+  }
+
+  @Test
+  @Timeout(90)
+  void configuredRetriesReachAcknowledgedSinkInEveryDeliveryMode(KafkaTestContainer kafka)
+      throws Exception {
+    var server =
+        com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+    server.start();
+    try {
+      for (var mode : ExecutionMode.values())
+        for (boolean correlated : List.of(false, true)) {
+          String topic = "retry-" + UUID.randomUUID();
+          String extra = topic + "-extra";
+          createTopic(kafka, topic);
+          createTopic(kafka, extra);
+          var attempts = new java.util.concurrent.atomic.AtomicInteger();
+          var body = new java.util.concurrent.atomic.AtomicReference<String>();
+          server.createContext(
+              "/" + topic,
+              exchange -> {
+                body.set(
+                    new String(
+                        exchange.getRequestBody().readAllBytes(),
+                        java.nio.charset.StandardCharsets.UTF_8));
+                exchange.sendResponseHeaders(attempts.incrementAndGet() < 3 ? 429 : 201, -1);
+                exchange.close();
+              });
+          var sources =
+              correlated
+                  ? List.of(
+                      kafkaSource(kafka, topic),
+                      correlatedSource("extra", kafka, extra, "country", "country", 0.5))
+                  : List.of(kafkaSource(kafka, topic));
+          var sink =
+              new SinkSpec(
+                  "opensearch",
+                  "http://127.0.0.1:" + server.getAddress().getPort(),
+                  topic,
+                  null,
+                  null,
+                  Map.of("idField", "uid"));
+          var spec =
+              new IngestionSpec(
+                  sources,
+                  correlated ? "uid" : null,
+                  null,
+                  sink,
+                  mode,
+                  null,
+                  new com.forwardmeasure.datastreaming.api.ErrorPolicy("fail", "retry"));
+          produce(kafka, topic, "K1", Map.of("uid", "K1", "name", "Retry subject"));
+          var handle =
+              new KafkaStreamsDeliveryEngine(Map.of())
+                  .execute(ExecutionPlanCompiler.compile(spec), mode);
+          try {
+            long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+            while (attempts.get() < 3 && handle.failure().isEmpty() && System.nanoTime() < deadline)
+              Thread.sleep(100);
+            assertTrue(
+                handle.failure().isEmpty(),
+                () -> mode + " correlated=" + correlated + " failure=" + handle.failure());
+            assertEquals(3, attempts.get(), mode + " correlated=" + correlated);
+            assertEquals("Retry subject", JSON.readTree(body.get()).path("name").asText());
+          } finally {
+            handle.stop();
+            handle.stop();
+          }
+        }
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  @Timeout(90)
+  void failPolicyPropagatesMalformedSourceWithoutAcknowledgingIt(
+      KafkaTestContainer kafka, OpenSearchTestContainer opensearch) throws Exception {
+    for (var mode : ExecutionMode.values())
+      for (boolean correlated : List.of(false, true)) {
+        String topic = "fatal-" + UUID.randomUUID();
+        String extra = topic + "-extra";
+        createTopic(kafka, topic);
+        createTopic(kafka, extra);
+        var sources =
+            correlated
+                ? List.of(
+                    kafkaSource(kafka, topic),
+                    correlatedSource("extra", kafka, extra, "country", "country", 0.5))
+                : List.of(kafkaSource(kafka, topic));
+        var spec =
+            new IngestionSpec(
+                sources,
+                correlated ? "uid" : null,
+                null,
+                openSearchSink(opensearch, topic),
+                mode,
+                null,
+                new com.forwardmeasure.datastreaming.api.ErrorPolicy("fail", "fail"));
+        try (var producer =
+            new org.apache.kafka.clients.producer.KafkaProducer<String, String>(
+                Map.of("bootstrap.servers", kafka.bootstrapServers()),
+                new org.apache.kafka.common.serialization.StringSerializer(),
+                new org.apache.kafka.common.serialization.StringSerializer())) {
+          producer
+              .send(new org.apache.kafka.clients.producer.ProducerRecord<>(topic, "bad", "{broken"))
+              .get();
+        }
+        var plan = ExecutionPlanCompiler.compile(spec);
+        var engine = new KafkaStreamsDeliveryEngine(Map.of());
+        if (mode == ExecutionMode.BOUNDED) {
+          assertThrows(IllegalArgumentException.class, () -> engine.execute(plan, mode));
+        } else {
+          var handle = engine.execute(plan, mode);
+          try {
+            long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+            while (handle.isRunning() && System.nanoTime() < deadline) Thread.sleep(100);
+            assertFalse(handle.isRunning());
+            assertTrue(handle.failure().isPresent());
+            try (var admin =
+                org.apache.kafka.clients.admin.Admin.create(
+                    Map.of("bootstrap.servers", kafka.bootstrapServers()))) {
+              var offsets =
+                  admin.listConsumerGroupOffsets(handle.id()).partitionsToOffsetAndMetadata().get();
+              var offset = offsets.get(new org.apache.kafka.common.TopicPartition(topic, 0));
+              assertTrue(
+                  offset == null || offset.offset() == 0, "Poison input must not be acknowledged");
+            }
+          } finally {
+            handle.stop();
+            handle.stop();
+          }
+        }
+      }
+  }
+
+  @Test
+  @Timeout(60)
+  void boundedCorrelationRejectsMissingOrBlankKeysUnderFailPolicy(
+      KafkaTestContainer kafka, OpenSearchTestContainer os) throws Exception {
+    for (Map<String, String> row :
+        List.of(
+            Map.<String, String>of("name", "Missing key"),
+            Map.<String, String>of("uid", "   ", "name", "Blank key"))) {
+      String topic = "invalid-correlation-key-" + UUID.randomUUID();
+      String extra = topic + "-extra";
+      createTopic(kafka, topic);
+      createTopic(kafka, extra);
+      produce(kafka, topic, "poison", row);
+      produce(kafka, extra, "valid", Map.of("uid", "valid", "country", "US"));
+      var failure =
+          assertThrows(
+              IllegalArgumentException.class,
+              () ->
+                  BoundedKafkaStreamsCorrelationRunner.run(
+                      List.of(
+                          kafkaSource(kafka, topic),
+                          correlatedSource("extra", kafka, extra, "country", "country", 0.5)),
+                      "uid",
+                      openSearchSink(os, topic),
+                      new com.forwardmeasure.datastreaming.api.ErrorPolicy("fail", "fail"),
+                      new com.forwardmeasure.datastreaming.mappers.FieldMappingEngine(),
+                      com.forwardmeasure.datastreaming.api.MergePolicy.defaults()));
+      assertTrue(failure.getMessage().contains("correlation key"));
+      assertEquals(
+          404,
+          getDocument(os, topic, "valid").statusCode(),
+          "A failed correlated input must not publish the other source as complete output");
+    }
+  }
+
+  @Test
+  @Timeout(60)
+  void boundedMalformedPoliciesWriteOnlyGoodRowsAndPreserveAccounting(
+      KafkaTestContainer kafka, OpenSearchTestContainer os) throws Exception {
+    for (String policy : List.of("skip", "dead-letter")) {
+      String topic = "bounded-policy-" + UUID.randomUUID();
+      String extra = topic + "-extra";
+      createTopic(kafka, topic);
+      createTopic(kafka, extra);
+      try (var producer =
+          new org.apache.kafka.clients.producer.KafkaProducer<String, String>(
+              Map.of("bootstrap.servers", kafka.bootstrapServers()),
+              new org.apache.kafka.common.serialization.StringSerializer(),
+              new org.apache.kafka.common.serialization.StringSerializer())) {
+        for (String raw : List.of("{broken", "null", "{\"uid\":\"valid\",\"name\":\"Accepted\"}"))
+          producer
+              .send(new org.apache.kafka.clients.producer.ProducerRecord<>(topic, "record", raw))
+              .get();
+        producer
+            .send(
+                new org.apache.kafka.clients.producer.ProducerRecord<>(
+                    extra, "missing", "{\"name\":\"No key\"}"))
+            .get();
+      }
+      var errors = new com.forwardmeasure.datastreaming.api.ErrorPolicy(policy, "fail");
+      var source = kafkaSource(kafka, topic);
+      var result =
+          BoundedKafkaStreamsConsumerRunner.run(
+              source,
+              openSearchSink(os, topic),
+              errors,
+              new com.forwardmeasure.datastreaming.mappers.FieldMappingEngine());
+      assertEquals(3, result.recordsRead());
+      assertEquals(1, result.recordsWritten());
+      var correlation =
+          BoundedKafkaStreamsCorrelationRunner.run(
+              List.of(source, correlatedSource("extra", kafka, extra, "country", "country", 0.5)),
+              "uid",
+              openSearchSink(os, topic + "-correlated"),
+              errors,
+              new com.forwardmeasure.datastreaming.mappers.FieldMappingEngine(),
+              com.forwardmeasure.datastreaming.api.MergePolicy.defaults());
+      assertEquals(2, correlation.sourceCount());
+      assertEquals(1, correlation.groupCount());
+      assertEquals(
+          "Accepted",
+          JSON.readTree(getDocument(os, topic + "-correlated", "valid").body())
+              .path("_source")
+              .path("name")
+              .asText());
+    }
+  }
+
+  @Test
+  @Timeout(45)
+  void boundedReadersIgnoreAbortedTransactionsAndFinishAtControlRecordOffsets(
+      KafkaTestContainer kafka, OpenSearchTestContainer os) throws Exception {
+    String topic = "transaction-frontier-" + UUID.randomUUID();
+    String abortedOnly = topic + "-aborted";
+    createTopic(kafka, topic);
+    createTopic(kafka, abortedOnly);
+    try (var producer =
+        new org.apache.kafka.clients.producer.KafkaProducer<String, String>(
+            Map.of("bootstrap.servers", kafka.bootstrapServers(), "transactional.id", topic),
+            new org.apache.kafka.common.serialization.StringSerializer(),
+            new org.apache.kafka.common.serialization.StringSerializer())) {
+      producer.initTransactions();
+      producer.beginTransaction();
+      for (String input : List.of(topic, abortedOnly))
+        producer
+            .send(
+                new org.apache.kafka.clients.producer.ProducerRecord<>(
+                    input, "aborted", "{\"uid\":\"aborted\",\"name\":\"Must not be delivered\"}"))
+            .get();
+      producer.abortTransaction();
+      producer.beginTransaction();
+      producer
+          .send(
+              new org.apache.kafka.clients.producer.ProducerRecord<>(
+                  topic, "committed", "{\"uid\":\"committed\",\"name\":\"Accepted\"}"))
+          .get();
+      producer.commitTransaction();
+    }
+    var mapper = new com.forwardmeasure.datastreaming.mappers.FieldMappingEngine();
+    var result =
+        BoundedKafkaStreamsConsumerRunner.run(
+            kafkaSource(kafka, topic), openSearchSink(os, topic), null, mapper);
+    assertEquals(1, result.recordsRead());
+    assertEquals(1, result.recordsWritten());
+    assertEquals(404, getDocument(os, topic, "aborted").statusCode());
+    assertEquals(200, getDocument(os, topic, "committed").statusCode());
+    var empty =
+        BoundedKafkaStreamsConsumerRunner.run(
+            kafkaSource(kafka, abortedOnly), openSearchSink(os, abortedOnly), null, mapper);
+    assertEquals(0, empty.recordsRead());
+    assertEquals(0, empty.recordsWritten());
+    var correlated =
+        BoundedKafkaStreamsCorrelationRunner.run(
+            List.of(
+                kafkaSource(kafka, topic),
+                correlatedSource("extra", kafka, abortedOnly, "country", "country", 0.5)),
+            "uid",
+            openSearchSink(os, topic + "-correlated"),
+            null,
+            mapper,
+            com.forwardmeasure.datastreaming.api.MergePolicy.defaults());
+    assertEquals(1, correlated.groupCount());
+    assertEquals(404, getDocument(os, topic + "-correlated", "aborted").statusCode());
+  }
+
   private static ExecutionPlan boundedPlan(
       KafkaTestContainer kafka, String topic, OpenSearchTestContainer opensearch, String index) {
     IngestionSpec spec =
@@ -335,7 +685,7 @@ class KafkaStreamsDeliveryEngineIntegrationTest {
     return ExecutionPlanCompiler.compile(spec);
   }
 
-  private static SourcePlan kafkaSource(KafkaTestContainer kafka, String topic) {
+  static SourcePlan kafkaSource(KafkaTestContainer kafka, String topic) {
     return new SourcePlan(
         "single",
         new SourceSpec(
@@ -348,7 +698,7 @@ class KafkaStreamsDeliveryEngineIntegrationTest {
         1.0);
   }
 
-  private static SinkSpec openSearchSink(OpenSearchTestContainer opensearch, String index) {
+  static SinkSpec openSearchSink(OpenSearchTestContainer opensearch, String index) {
     return new SinkSpec(
         "opensearch",
         opensearch.hostEndpoint().toString(),
@@ -358,7 +708,7 @@ class KafkaStreamsDeliveryEngineIntegrationTest {
         Map.of("idField", "uid"));
   }
 
-  private static void createTopic(KafkaTestContainer kafka, String topic) throws Exception {
+  static void createTopic(KafkaTestContainer kafka, String topic) throws Exception {
     Properties props = new Properties();
     props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.bootstrapServers());
     try (Admin admin = Admin.create(props)) {
@@ -366,7 +716,7 @@ class KafkaStreamsDeliveryEngineIntegrationTest {
     }
   }
 
-  private static void produce(
+  static void produce(
       KafkaTestContainer kafka, String topic, String key, Map<String, String> record)
       throws Exception {
     Properties props = new Properties();
@@ -400,7 +750,7 @@ class KafkaStreamsDeliveryEngineIntegrationTest {
     throw new AssertionError("document '" + id + "' never appeared before the deadline");
   }
 
-  private static HttpResponse<String> getDocument(
+  static HttpResponse<String> getDocument(
       OpenSearchTestContainer opensearch, String index, String id) throws Exception {
     URI uri = URI.create(opensearch.hostEndpoint() + "/" + index + "/_doc/" + id);
     HttpRequest request = HttpRequest.newBuilder(uri).GET().build();

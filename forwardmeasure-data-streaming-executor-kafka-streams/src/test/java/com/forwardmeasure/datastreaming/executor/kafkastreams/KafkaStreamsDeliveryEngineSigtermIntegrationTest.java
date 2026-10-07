@@ -17,6 +17,7 @@
 package com.forwardmeasure.datastreaming.executor.kafkastreams;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -106,13 +107,19 @@ class KafkaStreamsDeliveryEngineSigtermIntegrationTest {
     Files.writeString(specFile, spec.toYaml());
 
     Path subprocessLog = Files.createTempFile("kafka-streams-sigterm-subprocess", ".log");
+    var command = new java.util.ArrayList<String>();
+    command.add(javaExecutable());
+    java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments().stream()
+        .filter(argument -> argument.startsWith("-javaagent:") && argument.contains("jacoco"))
+        .forEach(command::add);
+    command.addAll(
+        List.of(
+            "-cp",
+            System.getProperty("java.class.path"),
+            KafkaStreamsDeliveryEngine.class.getName(),
+            specFile.toString()));
     Process process =
-        new ProcessBuilder(
-                javaExecutable(),
-                "-cp",
-                System.getProperty("java.class.path"),
-                KafkaStreamsDeliveryEngine.class.getName(),
-                specFile.toString())
+        new ProcessBuilder(command)
             .redirectOutput(subprocessLog.toFile())
             .redirectErrorStream(true)
             .start();
@@ -131,6 +138,8 @@ class KafkaStreamsDeliveryEngineSigtermIntegrationTest {
 
       boolean exitedOnItsOwn = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
       String subprocessOutput = Files.readString(subprocessLog);
+      assertFalse(
+          subprocessOutput.contains("KafkaStreamsDeliveryEngine: run failed"), subprocessOutput);
       assertTrue(
           exitedOnItsOwn,
           "the subprocess never exited on its own within 30s of SIGTERM - the shutdown hook did"
@@ -149,7 +158,7 @@ class KafkaStreamsDeliveryEngineSigtermIntegrationTest {
           "expected the JVM's own real post-shutdown-hook SIGTERM exit code. Subprocess output:\n"
               + subprocessOutput);
       assertTrue(
-          subprocessOutput.contains("KafkaStreamsDeliveryEngine: run completed"),
+          subprocessOutput.contains("KafkaStreamsDeliveryEngine: shutdown completed"),
           "expected the shutdown hook's own completion log line, printed only after"
               + " handle.stop() (a real, blocking KafkaStreams#close()) returned - its absence"
               + " would mean the process was killed before the hook finished. Subprocess output:\n"
@@ -157,6 +166,7 @@ class KafkaStreamsDeliveryEngineSigtermIntegrationTest {
     } finally {
       if (process.isAlive()) {
         process.destroyForcibly();
+        process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
       }
     }
   }

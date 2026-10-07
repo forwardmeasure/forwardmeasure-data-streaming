@@ -44,6 +44,12 @@ public interface SourceRow {
    * for {@link #get}; a separate, narrower escape hatch a {@code raw: true} {@code FieldRule} opts
    * into explicitly.
    */
+  /** Complete raw record for schema validation, including undeclared fields. */
+  default java.util.Map<String, ?> rawFields() {
+    throw new UnsupportedOperationException(
+        "This source adapter does not expose a complete record");
+  }
+
   default Object getRaw(String fieldName) {
     return get(fieldName);
   }

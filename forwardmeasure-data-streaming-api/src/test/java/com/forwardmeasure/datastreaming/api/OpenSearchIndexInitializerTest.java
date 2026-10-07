@@ -18,6 +18,7 @@ package com.forwardmeasure.datastreaming.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -101,6 +102,43 @@ class OpenSearchIndexInitializerTest {
     OpenSearchIndexInitializer.ensureIndex(opensearch.hostEndpoint().toString(), index, options);
 
     assertTrue(indexExists(opensearch, index));
+  }
+
+  @Test
+  void inlineSettingsAreImmutableAndCannotReuseAnotherOwnersIndex(
+      OpenSearchTestContainer opensearch) throws Exception {
+    String index = "owned-inline-" + java.util.UUID.randomUUID();
+    var settings =
+        (com.fasterxml.jackson.databind.node.ObjectNode) MAPPER.readTree(INDEX_SETTINGS_JSON);
+    ((com.fasterxml.jackson.databind.node.ObjectNode) settings.path("mappings"))
+        .putObject("_meta")
+        .put("tenant_id", "tenant-a");
+    String inline =
+        java.util.Base64.getEncoder()
+            .encodeToString(settings.toString().getBytes(StandardCharsets.UTF_8));
+    var options = Map.of("indexSettingsJsonBase64", inline);
+    OpenSearchIndexInitializer.ensureIndex(opensearch.hostEndpoint().toString(), index, options);
+    OpenSearchIndexInitializer.ensureIndex(opensearch.hostEndpoint().toString(), index, options);
+    ((com.fasterxml.jackson.databind.node.ObjectNode) settings.path("mappings").path("_meta"))
+        .put("tenant_id", "tenant-b");
+    String foreign =
+        java.util.Base64.getEncoder()
+            .encodeToString(settings.toString().getBytes(StandardCharsets.UTF_8));
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            OpenSearchIndexInitializer.ensureIndex(
+                opensearch.hostEndpoint().toString(),
+                index,
+                Map.of("indexSettingsJsonBase64", foreign)));
+    assertEquals(
+        "tenant-a",
+        fetchMapping(opensearch, index)
+            .path(index)
+            .path("mappings")
+            .path("_meta")
+            .path("tenant_id")
+            .asText());
   }
 
   private static boolean indexExists(OpenSearchTestContainer opensearch, String index)

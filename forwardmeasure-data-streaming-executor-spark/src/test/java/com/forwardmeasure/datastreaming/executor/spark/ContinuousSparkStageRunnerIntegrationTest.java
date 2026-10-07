@@ -77,7 +77,9 @@ class ContinuousSparkStageRunnerIntegrationTest {
             null,
             List.of(
                 new TransformSpec.FieldRule("id", "id", null, null, null, null, null),
-                new TransformSpec.FieldRule("name", "name", null, null, null, null, null)));
+                new TransformSpec.FieldRule("name", "name", null, null, null, null, null),
+                new TransformSpec.FieldRule(
+                    "date", "date", null, null, "parse_yyyymmdd", null, null)));
     List<SourcePlan> sources =
         topics.stream()
             .map(
@@ -97,7 +99,7 @@ class ContinuousSparkStageRunnerIntegrationTest {
                 DeliveryEngineKind.PEKKO_STREAMS),
             sources,
             "id",
-            Optional.of(new SparkStagePlan(List.of(), prefix + "-handoff")),
+            Optional.of(new SparkStagePlan(List.of("parse_yyyymmdd"), prefix + "-handoff")),
             null,
             new SinkSpec("kafka", "kafka:unused?brokers=" + brokers, null, null, null, Map.of()),
             null,
@@ -121,7 +123,9 @@ class ContinuousSparkStageRunnerIntegrationTest {
                 new StringDeserializer(),
                 new StringDeserializer())) {
       producer
-          .send(new ProducerRecord<>(topics.get(0), "x", "{\"id\":\"x\",\"name\":\"first\"}"))
+          .send(
+              new ProducerRecord<>(
+                  topics.get(0), "x", "{\"id\":\"x\",\"name\":\"first\",\"date\":\"20240229\"}"))
           .get();
       AtomicBoolean stop = new AtomicBoolean();
       Future<?> first = executor.submit(() -> run(spark, plan, brokers, stop));
@@ -135,12 +139,16 @@ class ContinuousSparkStageRunnerIntegrationTest {
         reader.seekToBeginning(outputs);
         records = awaitRecords(reader, 1);
         assertTrue(records.getFirst().value().contains("first"));
+        assertTrue(records.getFirst().value().contains("2024-02-29"));
+        assertEquals("x", records.getFirst().key());
       } finally {
         stop.set(true);
         first.get(30, TimeUnit.SECONDS);
       }
       producer
-          .send(new ProducerRecord<>(topics.get(1), "x", "{\"id\":\"x\",\"name\":\"second\"}"))
+          .send(
+              new ProducerRecord<>(
+                  topics.get(1), "x", "{\"id\":\"x\",\"name\":\"second\",\"date\":\"20250301\"}"))
           .get();
       AtomicBoolean stopAgain = new AtomicBoolean();
       Future<?> second = executor.submit(() -> run(spark, plan, brokers, stopAgain));
@@ -151,6 +159,8 @@ class ContinuousSparkStageRunnerIntegrationTest {
         while (System.nanoTime() < deadline)
           reader.poll(Duration.ofMillis(200)).forEach(records::add);
         assertEquals(2, records.size());
+        assertTrue(records.getLast().value().contains("2025-03-01"));
+        assertEquals("x", records.getLast().key());
         assertEquals(
             Set.of(outputA, outputB),
             records.stream()

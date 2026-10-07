@@ -262,7 +262,7 @@ public final class PekkoIngestionRunner {
                               exchange.getIn().setHeader(SqlConstants.SQL_QUERY, query);
                               exchange.getIn().setBody(row);
                             })
-                        .<Void>thenApply(ignored -> null));
+                        .thenApply(PekkoIngestionRunner::requireSuccessfulExchange));
           });
     }
     return Sink.foreachAsync(
@@ -315,7 +315,7 @@ public final class PekkoIngestionRunner {
                               exchange.getIn().setHeader(SqlConstants.SQL_QUERY, query);
                               exchange.getIn().setBody(batch);
                             })
-                        .<Void>thenApply(ignored -> null));
+                        .thenApply(PekkoIngestionRunner::requireSuccessfulExchange));
           });
     }
     return Sink.foreachAsync(
@@ -366,11 +366,19 @@ public final class PekkoIngestionRunner {
                 exchange.getIn().setHeader(Exchange.HTTP_METHOD, "PUT");
                 exchange.getIn().setHeader(Exchange.CONTENT_TYPE, "application/json");
               })
-          .thenApply(ignored -> null);
+          .thenApply(PekkoIngestionRunner::requireSuccessfulExchange);
     }
     String sinkUri = sink.uri();
     String json = writeValueAsString(row, objectMapper);
     return producerTemplate.asyncSendBody(sinkUri, json).thenApply(ignored -> null);
+  }
+
+  /** asyncSend completes with an Exchange even when the endpoint rejected the write. */
+  private static Void requireSuccessfulExchange(Exchange exchange) {
+    if (exchange.getException() != null) {
+      throw new CompletionException(exchange.getException());
+    }
+    return null;
   }
 
   /**
@@ -388,7 +396,8 @@ public final class PekkoIngestionRunner {
    */
   private static String openSearchDocumentUri(
       String baseUrl, String index, Object idValue, Map<String, String> options) {
-    String id = URLEncoder.encode(String.valueOf(idValue), StandardCharsets.UTF_8);
+    String id =
+        URLEncoder.encode(String.valueOf(idValue), StandardCharsets.UTF_8).replace("+", "%20");
     StringBuilder uri =
         new StringBuilder(baseUrl).append('/').append(index).append("/_doc/").append(id);
     String user = SecretRefs.resolve(options, "user");

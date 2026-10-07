@@ -41,6 +41,19 @@ public final class CorrelationMerge {
           result.putIfAbsent(field.getKey(), value);
           continue;
         }
+        if (rule.strategy() == MergePolicy.Strategy.OBJECTS) {
+          if (!(value instanceof Map<?, ?> incoming))
+            throw new IllegalArgumentException("OBJECTS merge requires an object");
+          Map<Object, Object> object = new LinkedHashMap<>();
+          if (result.get(field.getKey()) instanceof Map<?, ?> prior) object.putAll(prior);
+          for (var entry : incoming.entrySet()) {
+            List<Object> values = items(object.get(entry.getKey()));
+            values.addAll(items(entry.getValue()));
+            object.put(entry.getKey(), new ArrayList<>(new LinkedHashSet<>(values)));
+          }
+          result.put(field.getKey(), object);
+          continue;
+        }
         List<Object> accumulated = items(result.get(field.getKey()));
         List<Object> incoming = items(value);
         if (rule.strategy() == MergePolicy.Strategy.ALIASES) {

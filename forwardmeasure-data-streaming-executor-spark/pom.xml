@@ -27,6 +27,10 @@
     column-driven JDBC extraction lives here, not in the JDBC connector - see D4/D5 in the design
     plan.</description>
   <properties>
+    <!-- Build runtime/frontend assemblies fresh; cache reuse is reserved for libraries. -->
+    <maven.build.cache.skipCache>true</maven.build.cache.skipCache>
+    <maven.build.cache.skipSave>true</maven.build.cache.skipSave>
+
     <!-- Has real public classes to document (unlike this repo's still-scaffolded modules) - see
          the parent pom's default. -->
     <maven.javadoc.skip>false</maven.javadoc.skip>

@@ -1,4 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements. See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with
+  the License. You may obtain a copy of the License at
+
+      https://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
 <project xmlns="http://maven.apache.org/POM/4.0.0">
   <modelVersion>4.0.0</modelVersion>
   <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-parent</artifactId><version>${revision}</version></parent>
@@ -14,6 +30,10 @@
     entity-intelligence-ingestion runs under) is a bounded, one-shot batch process, not a
     continuously-running topology - see D4 in the design plan.</description>
   <properties>
+    <!-- Build runtime/frontend assemblies fresh; cache reuse is reserved for libraries. -->
+    <maven.build.cache.skipCache>true</maven.build.cache.skipCache>
+    <maven.build.cache.skipSave>true</maven.build.cache.skipSave>
+
     <!-- Has real public classes to document (unlike this repo's still-scaffolded modules) - see
          the parent pom's default. -->
     <maven.javadoc.skip>false</maven.javadoc.skip>
@@ -47,7 +67,7 @@
     </dependency>
     <!-- PekkoIngestionRunner's own CSV-to-rows flattening (today's only real source format) -
          matches fei's own SimpleSourceIngestionWorker pin exactly, not chosen independently. -->
-    <dependency><groupId>org.apache.commons</groupId><artifactId>commons-csv</artifactId><version>1.14.1</version></dependency>
+    <dependency><groupId>org.apache.commons</groupId><artifactId>commons-csv</artifactId></dependency>
     <!-- CamelBridge's own test-scope-only camel-file dependency doesn't propagate here. Real
          (not test-scope) here, unlike the generic -connector-camel module's own deliberate
          "consumer adds whichever component it needs" stance: this module is now also the actual
@@ -79,7 +99,7 @@
          zero-config provider (stdout, no separate config file) appropriate for a plain worker
          jar. Not covered by forwardmeasure-platform's BOM; pinned to match this project's own
          managed slf4j-api 2.0.x line. -->
-    <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-simple</artifactId><version>2.0.18</version></dependency>
+    <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-simple</artifactId></dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
     <!-- Test-only: SqlSourceAndSinkIntegrationTest proves the jdbc/sql path against a real
          Postgres, not mocked, matching this org's own testing convention for anything JDBC-backed
@@ -102,7 +122,10 @@
     <dependency><groupId>io.grpc</groupId><artifactId>grpc-protobuf</artifactId><scope>test</scope></dependency>
     <dependency><groupId>io.grpc</groupId><artifactId>grpc-stub</artifactId><scope>test</scope></dependency>
     <dependency><groupId>io.grpc</groupId><artifactId>grpc-inprocess</artifactId><scope>test</scope></dependency>
-    <dependency><groupId>org.apache.tomcat</groupId><artifactId>annotations-api</artifactId><version>6.0.53</version><scope>test</scope></dependency>
+    <dependency><groupId>org.apache.tomcat</groupId><artifactId>annotations-api</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>com.forwardmeasure.objectstorage</groupId><artifactId>forwardmeasure-object-storage-s3</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-minio</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>org.hibernate.orm</groupId><artifactId>hibernate-core</artifactId><scope>test</scope></dependency>
   </dependencies>
 
   <build>
@@ -130,7 +153,6 @@
              decision-engine-api-language-bindings' own grpc module's real, working configuration. -->
         <groupId>org.xolstice.maven.plugins</groupId>
         <artifactId>protobuf-maven-plugin</artifactId>
-        <version>0.6.1</version>
         <executions>
           <execution>
             <id>generate-test-grpc-java</id>

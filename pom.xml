@@ -44,21 +44,18 @@
   </licenses>
 
   <properties>
+    <!-- Project release identity is local for Maven CI-friendly reactor parent resolution. -->
     <revision>1.1.0</revision>
-    <forwardmeasure-object-storage.version>1.1.0</forwardmeasure-object-storage.version>
-    <forwardmeasure-jpa.version>1.1.0</forwardmeasure-jpa.version>
     <!-- com.forwardmeasure.jpa is a multi-module library (-core/-tenancy/-quarkus/-spring/-
          micronaut/...), not a single "forwardmeasure-jpa" artifact - confirmed by reading its real
          pom.xml before pinning these. This library depends only on -core and -tenancy (framework-
          agnostic); the consuming application's own framework binding pulls in -quarkus/-spring/
          -micronaut as appropriate. -->
 
-    <forwardmeasure-testcontainers.version>1.1.0</forwardmeasure-testcontainers.version>
     <!-- The launcher's two real dependencies on forwardmeasure-openworkflow (fowf): the shared
          Kubernetes-Job-lifecycle library (direct mode) and fowf's own generated Apache-HttpClient
          SDK for /v1/executions (workflow mode) - both first-party sibling artifacts, pinned locally
          per this repo's own established convention, matching fowf's own root pom revision. -->
-    <openworkflow.version>1.1.0</openworkflow.version>
     <!-- Not published to any remote repository - requires a local `mvn install` from
          /home/pn/Documents/code/forwardmeasure/forwardmeasure-authzen (or forwardmeasure-platform's
          reactor.xml, which now aggregates it) before this reactor can resolve it. Real caller
@@ -67,7 +64,6 @@
          this shared library rather than as a third product-local copy (fowf and
          forwardmeasure-entity-intelligence both already had their own; this consolidation is why one
          now exists at all). -->
-    <forwardmeasure-authzen.version>1.1.0</forwardmeasure-authzen.version>
     <!-- Camel and Spark used to be pinned locally here (data-fabric's own real
          org.apache.spark.version=4.2.0 was the source of truth for Spark). Both are now managed
          in forwardmeasure-platform itself instead, the same as Pekko/jandex/mapstruct already
@@ -108,148 +104,14 @@
     <dependencies>
       <!-- This org's own libraries this module deliberately reuses rather than reimplements
            (see the manifesto, Principles 2/3/9, and the plan's D5/D6/D9 decisions). -->
-      <dependency>
-        <groupId>com.forwardmeasure.objectstorage</groupId>
-        <artifactId>forwardmeasure-object-storage-api</artifactId>
-        <version>${forwardmeasure-object-storage.version}</version>
-      </dependency>
-      <dependency>
-        <!-- StorageClientRegistry/StorageConfigGroup - test-only, to build a real StorageClient
-             against a real MinIO container the same way forwardmeasure-object-storage's own
-             S3StorageClientIntegrationTest does. -->
-        <groupId>com.forwardmeasure.objectstorage</groupId>
-        <artifactId>forwardmeasure-object-storage-core</artifactId>
-        <version>${forwardmeasure-object-storage.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.forwardmeasure.objectstorage</groupId>
-        <artifactId>forwardmeasure-object-storage-s3</artifactId>
-        <version>${forwardmeasure-object-storage.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.forwardmeasure.testcontainers</groupId>
-        <artifactId>forwardmeasure-testcontainers-minio</artifactId>
-        <version>${forwardmeasure-testcontainers.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.forwardmeasure.jpa</groupId>
-        <artifactId>forwardmeasure-jpa-core</artifactId>
-        <version>${forwardmeasure-jpa.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.forwardmeasure.jpa</groupId>
-        <artifactId>forwardmeasure-jpa-tenancy</artifactId>
-        <version>${forwardmeasure-jpa.version}</version>
-      </dependency>
-      <dependency>
-        <!-- TenantSchemaMigrator - real Liquibase migration for connector-jdbc's own test schema,
-             not test-scope-only production code (this dependency itself IS test-scope in the
-             consuming module, but the artifact isn't otherwise managed here). -->
-        <groupId>com.forwardmeasure.jpa</groupId>
-        <artifactId>forwardmeasure-jpa-liquibase</artifactId>
-        <version>${forwardmeasure-jpa.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.forwardmeasure.testcontainers</groupId>
-        <artifactId>forwardmeasure-testcontainers-junit-jupiter</artifactId>
-        <version>${forwardmeasure-testcontainers.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.forwardmeasure.testcontainers</groupId>
-        <artifactId>forwardmeasure-testcontainers-postgresql</artifactId>
-        <version>${forwardmeasure-testcontainers.version}</version>
-      </dependency>
-      <dependency>
-        <!-- Added 2026-09-13 for the opensearch sink connector's own real integration tests - the
-             first real consumer of this artifact in this reactor (confirmed by grep before adding
-             it - nothing else here used it, which is why its version was missing at all). -->
-        <groupId>com.forwardmeasure.testcontainers</groupId>
-        <artifactId>forwardmeasure-testcontainers-opensearch</artifactId>
-        <version>${forwardmeasure-testcontainers.version}</version>
-      </dependency>
-      <dependency>
-        <!-- Added 2026-09-21 to replace the ad hoc org.testcontainers:testcontainers-kafka usage
-             every real Kafka-backed test in this reactor previously duplicated on its own. -->
-        <groupId>com.forwardmeasure.testcontainers</groupId>
-        <artifactId>forwardmeasure-testcontainers-kafka</artifactId>
-        <version>${forwardmeasure-testcontainers.version}</version>
-      </dependency>
-      <dependency>
-        <!-- Added 2026-09-21 for the real, full live fowf fixture (Phase D) - fowf's own
-             execution-management/engine/operation-adapter services all validate a real Bearer JWT
-             against a real Keycloak issuer; the first real consumer of this artifact in this
-             reactor (confirmed by grep before adding it). -->
-        <groupId>com.forwardmeasure.testcontainers</groupId>
-        <artifactId>forwardmeasure-testcontainers-keycloak</artifactId>
-        <version>${forwardmeasure-testcontainers.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.forwardmeasure.testcontainers</groupId>
-        <artifactId>forwardmeasure-testcontainers-kubernetes</artifactId>
-        <version>${forwardmeasure-testcontainers.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.forwardmeasure.openworkflow</groupId>
-        <artifactId>openworkflow-kubernetes-job-lifecycle</artifactId>
-        <version>${openworkflow.version}</version>
-      </dependency>
-      <dependency>
-        <!-- RFC 9457 Problem/Violation - the error model every forwardmeasure service returns. -->
-        <groupId>com.forwardmeasure.openworkflow</groupId>
-        <artifactId>openworkflow-common-models</artifactId>
-        <version>${openworkflow.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.forwardmeasure.openworkflow</groupId>
-        <artifactId>openworkflow-execution-client-apachehttp</artifactId>
-        <version>${openworkflow.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.forwardmeasure.openworkflow</groupId>
-        <artifactId>openworkflow-execution-models</artifactId>
-        <version>${openworkflow.version}</version>
-      </dependency>
-      <dependency>
-        <!-- Phase D (2026-09-21) - the real live fowf fixture publishes a real WorkflowDefinition
-             through fowf's own generated definition-management client SDK, mirroring
-             forwardmeasure-entity-intelligence's own real, already-proven
-             WorkflowDefinitionPublisherMain exactly (create -> validate -> submit -> publish). -->
-        <groupId>com.forwardmeasure.openworkflow</groupId>
-        <artifactId>openworkflow-definition-management-client-apachehttp</artifactId>
-        <version>${openworkflow.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.forwardmeasure.openworkflow</groupId>
-        <artifactId>openworkflow-definition-management-models</artifactId>
-        <version>${openworkflow.version}</version>
-      </dependency>
-      <dependency>
-        <!-- Phase D: fowf's own execution-management/definition-management each run a SECOND,
-             server-side AuthZEN check (AuthzenExecutionAuthorizer/WorkflowGovernanceServiceImpl),
-             independent of this launcher's own AuthorizationService check - the real fixture's
-             minted token needs a real grant against fowf's own OpenWorkflowAuthorizationResources/
-             AuthorizationAction vocabulary too, confirmed live 2026-09-21 (a real
-             AuthorizationDeniedException from execution-management itself, not from this repo's
-             own code). -->
-        <groupId>com.forwardmeasure.openworkflow</groupId>
-        <artifactId>openworkflow-authorization-api</artifactId>
-        <version>${openworkflow.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.forwardmeasure.authzen</groupId>
-        <artifactId>forwardmeasure-authzen-api</artifactId>
-        <version>${forwardmeasure-authzen.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.forwardmeasure.authzen</groupId>
-        <artifactId>forwardmeasure-authzen-client</artifactId>
-        <version>${forwardmeasure-authzen.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>com.forwardmeasure.authzen</groupId>
-        <artifactId>forwardmeasure-authzen-testkit</artifactId>
-        <version>${forwardmeasure-authzen.version}</version>
-      </dependency>
+
+
+
+
+
+
+
+
 
       <dependency>
         <groupId>${project.groupId}</groupId>
@@ -311,19 +173,7 @@
         <artifactId>forwardmeasure-data-streaming-executor-kafka-streams</artifactId>
         <version>${project.version}</version>
       </dependency>
-      <dependency>
-        <!-- Not centrally managed in forwardmeasure-platform yet - confirmed absent repo-wide
-             before adding (grep, then a real Maven Central check). Pekko-core here is 1.7.0/
-             Scala 2.13 (platform pom); pekko-connectors-kafka 1.1.0 is the current release on
-             that Scala binary version. Used by forwardmeasure-data-streaming-executor-pekko's own
-             continuous-mode code (merged in 2026-09-21 from the now-retired
-             forwardmeasure-data-streaming-executor-pekko-streaming module) - deliberately using
-             real Kafka transactions/committable offsets, not a weaker guarantee than the Kafka
-             Streams engine's own EOS v2 default. -->
-        <groupId>org.apache.pekko</groupId>
-        <artifactId>pekko-connectors-kafka_${scala.binary.version}</artifactId>
-        <version>1.1.0</version>
-      </dependency>
+
       <dependency>
         <groupId>${project.groupId}</groupId>
         <artifactId>forwardmeasure-data-streaming-launcher-application</artifactId>
@@ -366,8 +216,8 @@
           </configuration>
         </plugin>
         <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-resources-plugin</artifactId></plugin>
-        <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><configuration><useModulePath>false</useModulePath></configuration></plugin>
-        <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-failsafe-plugin</artifactId><configuration><useModulePath>false</useModulePath></configuration></plugin>
+        <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><configuration><useModulePath>false</useModulePath><systemPropertyVariables><openworkflow.image.tag>${forwardmeasure.openworkflow.version}</openworkflow.image.tag></systemPropertyVariables></configuration></plugin>
+        <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-failsafe-plugin</artifactId><configuration><useModulePath>false</useModulePath><systemPropertyVariables><openworkflow.image.tag>${forwardmeasure.openworkflow.version}</openworkflow.image.tag></systemPropertyVariables></configuration></plugin>
         <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-jar-plugin</artifactId></plugin>
         <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-install-plugin</artifactId></plugin>
         <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-deploy-plugin</artifactId></plugin>
@@ -376,7 +226,7 @@
         <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-javadoc-plugin</artifactId><configuration><doclint>all,-missing</doclint></configuration></plugin>
         <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-enforcer-plugin</artifactId></plugin>
         <plugin><groupId>org.jacoco</groupId><artifactId>jacoco-maven-plugin</artifactId></plugin>
-        <plugin><groupId>io.smallrye</groupId><artifactId>jandex-maven-plugin</artifactId><version>${jandex.version}</version></plugin>
+        <plugin><groupId>io.smallrye</groupId><artifactId>jandex-maven-plugin</artifactId></plugin>
         <plugin><groupId>org.codehaus.mojo</groupId><artifactId>flatten-maven-plugin</artifactId></plugin>
       </plugins>
     </pluginManagement>

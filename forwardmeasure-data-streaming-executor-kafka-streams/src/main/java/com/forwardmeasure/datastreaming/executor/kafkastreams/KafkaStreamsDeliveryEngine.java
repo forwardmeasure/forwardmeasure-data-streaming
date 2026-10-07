@@ -132,16 +132,22 @@ public final class KafkaStreamsDeliveryEngine implements DeliveryEngine {
 
   private static void awaitShutdown(ExecutionHandle handle) throws InterruptedException {
     CountDownLatch latch = new CountDownLatch(1);
+    var shutdownRequested = new java.util.concurrent.atomic.AtomicBoolean();
     Thread hook =
         new Thread(
             () -> {
-              handle.stop();
-              latch.countDown();
+              shutdownRequested.set(true);
+              try {
+                handle.stop();
+                LOGGER.info("KafkaStreamsDeliveryEngine: shutdown completed, id={}", handle.id());
+              } finally {
+                latch.countDown();
+              }
             });
     Runtime.getRuntime().addShutdownHook(hook);
     try {
       while (!latch.await(1, java.util.concurrent.TimeUnit.SECONDS)) {
-        if (!handle.isRunning()) {
+        if (!handle.isRunning() && !shutdownRequested.get()) {
           throw new IllegalStateException(
               "Continuous ingestion stopped unexpectedly", handle.failure().orElse(null));
         }

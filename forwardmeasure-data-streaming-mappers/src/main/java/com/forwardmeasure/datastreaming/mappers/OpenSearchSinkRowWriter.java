@@ -75,14 +75,15 @@ public final class OpenSearchSinkRowWriter implements SinkRowWriter {
             + "/"
             + index
             + "/_doc/"
-            + URLEncoder.encode(String.valueOf(idValue), StandardCharsets.UTF_8);
+            + URLEncoder.encode(String.valueOf(idValue), StandardCharsets.UTF_8)
+                .replace("+", "%20");
     String json = writeValueAsString(row);
     putOneDocument(docUri, json);
   }
 
   @Override
   public void close() {
-    // java.net.http.HttpClient has no explicit lifecycle to release here.
+    client.close();
   }
 
   private void putOneDocument(String docUri, String json) {
@@ -97,6 +98,9 @@ public final class OpenSearchSinkRowWriter implements SinkRowWriter {
     try {
       response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
     } catch (IOException | InterruptedException e) {
+      if (e instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
       throw new IllegalStateException("OpenSearchSinkRowWriter: PUT " + docUri + " failed", e);
     }
     if (response.statusCode() >= 300) {

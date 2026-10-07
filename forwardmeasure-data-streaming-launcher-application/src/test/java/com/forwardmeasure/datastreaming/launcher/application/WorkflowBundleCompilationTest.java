@@ -35,9 +35,14 @@ class WorkflowBundleCompilationTest {
   }
 
   private static void compile(String filename) throws IOException {
-    var resources = List.of(protocol("ingestion-job.yaml"), protocol("ingestion-deployment.yaml"));
-    byte[] source = read("/workflows/" + filename)
-        .replace("@BUNDLE_DID@", BUNDLE).getBytes(StandardCharsets.UTF_8);
+    var resources =
+        filename.equals("stop-ingestion.yaml")
+            ? List.of(protocol("ingestion-deployment.yaml"))
+            : List.of(protocol("ingestion-job.yaml"), protocol("ingestion-deployment.yaml"));
+    byte[] source =
+        read("/workflows/" + filename)
+            .replace("@BUNDLE_DID@", BUNDLE)
+            .getBytes(StandardCharsets.UTF_8);
     assertDoesNotThrow(() -> new OpenWorkflowCompiler().compile(source, resources));
   }
 

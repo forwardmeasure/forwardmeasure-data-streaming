@@ -20,8 +20,8 @@ import com.forwardmeasure.datastreaming.api.ExecutionPlan;
 import com.forwardmeasure.datastreaming.api.KafkaConnectorUri;
 import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
+import com.forwardmeasure.datastreaming.core.IngestionPipeline;
 import com.forwardmeasure.datastreaming.mappers.FieldMappingEngine;
-import com.forwardmeasure.datastreaming.mappers.MapSourceRow;
 import com.forwardmeasure.datastreaming.mappers.OpenSearchSinkRowWriter;
 import com.forwardmeasure.datastreaming.mappers.SinkRowWriter;
 import java.util.Map;
@@ -66,36 +66,62 @@ final class ContinuousKafkaStreamsConsumerRunner {
         com.forwardmeasure.datastreaming.api.ExecutionIdentity.of(
             plan, "fds-kafka-streams-", System.getenv("FDS_EXECUTION_ID"));
 
-    Topology topology = buildTopology(source.mapper(), sourceUri.topic(), plan);
+    SinkRowWriter sinkRowWriter = new OpenSearchSinkRowWriter(plan.destination());
+    try {
+      Topology topology = buildTopology(source.mapper(), sourceUri.topic(), plan, sinkRowWriter);
 
-    Properties props = new Properties();
-    props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
-    props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, sourceUri.bootstrapServers());
-    props.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.EXACTLY_ONCE_V2);
-    streamsConfigOverrides.forEach(props::put);
+      Properties props = new Properties();
+      props.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
+      props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, sourceUri.bootstrapServers());
+      props.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.EXACTLY_ONCE_V2);
+      streamsConfigOverrides.forEach(props::put);
 
-    KafkaStreams streams = new KafkaStreams(topology, props);
-    var handle = new KafkaStreamsExecutionHandle(applicationId, streams);
-    streams.start();
-    return handle;
+      KafkaStreams streams = new KafkaStreams(topology, props);
+      var handle = new KafkaStreamsExecutionHandle(applicationId, streams, sinkRowWriter);
+      try {
+        streams.start();
+      } catch (RuntimeException failure) {
+        handle.stop();
+        throw failure;
+      }
+      return handle;
+    } catch (RuntimeException failure) {
+      sinkRowWriter.close();
+      throw failure;
+    }
   }
 
-  private Topology buildTopology(TransformSpec mapperSpec, String inputTopic, ExecutionPlan plan) {
+  private Topology buildTopology(
+      TransformSpec mapperSpec,
+      String inputTopic,
+      ExecutionPlan plan,
+      SinkRowWriter sinkRowWriter) {
     StreamsBuilder builder = new StreamsBuilder();
-    StageRecordSerde recordSerde = new StageRecordSerde();
 
-    KStream<String, Map<String, Object>> input =
-        builder.stream(inputTopic, Consumed.with(Serdes.String(), recordSerde));
+    KStream<String, String> input =
+        builder.stream(inputTopic, Consumed.with(Serdes.String(), Serdes.String()));
 
     KStream<String, Map<String, Object>> mapped =
-        input.mapValues(record -> mapper.map(new MapSourceRow(record), mapperSpec));
+        input
+            .mapValues(
+                record ->
+                    KafkaRecordMapping.map(
+                        record,
+                        mapperSpec,
+                        mapper,
+                        IngestionPipeline.MalformedRecordPolicy.from(plan.errors()),
+                        null))
+            .filter((key, record) -> record != null);
 
     // One SinkRowWriter per stream-thread partition group, not per record - KafkaStreams#foreach
     // runs on the processing thread, so a single shared writer (real HTTP client, real per-call
     // PUT) is safe the same way OpenSearchSinkRowWriter's own single-threaded-per-partition use is
     // in BoundedKafkaStreamsConsumerRunner.
-    SinkRowWriter sinkRowWriter = new OpenSearchSinkRowWriter(plan.destination());
-    mapped.foreach((key, record) -> sinkRowWriter.write(record));
+    mapped.foreach(
+        (key, record) ->
+            IngestionPipeline.withSinkFailureHandlingBlocking(
+                IngestionPipeline.SinkFailurePolicy.from(plan.errors()),
+                () -> sinkRowWriter.write(record)));
     return builder.build();
   }
 }

@@ -66,12 +66,10 @@ public final class PekkoCorrelationEngine {
 
   /**
    * Reads and maps one source, blocking the calling thread until every row is read (the same "run
-   * to completion" style {@code PekkoIngestionRunner#run} already uses). A row that doesn't resolve
-   * {@code blockingField} is skipped unconditionally (there's no key to correlate on, not a
-   * malformed-record situation); a row that fails to *map* at all is handled per {@code
-   * malformedRecordPolicy} (see {@code IngestionPipeline}'s own javadoc for what each value means -
-   * wired in 2026-09-13, replacing what used to be an unconditional skip-and-log here regardless of
-   * {@code execution.failure().malformedRecord()}).
+   * to completion" style {@code PekkoIngestionRunner#run} already uses). Missing or blank
+   * correlation keys and mapping failures follow {@code malformedRecordPolicy}, matching Spark and
+   * Kafka correlation. In particular, FAIL cannot silently publish an incomplete correlated
+   * population.
    */
   public static CompletionStage<List<PekkoCorrelationRecord>> readAndMap(
       CamelBridge bridge,
@@ -95,11 +93,17 @@ public final class PekkoCorrelationEngine {
               }
               Object blockingValue = mapped.get(blockingField);
               if (blockingValue == null) {
-                return List.of();
+                return handleMalformedRow(
+                    sourceKey,
+                    new IllegalArgumentException("Missing correlation key"),
+                    malformedRecordPolicy);
               }
               String blockingKey = normalizeBlockingKey(String.valueOf(blockingValue));
               if (blockingKey.isBlank()) {
-                return List.of();
+                return handleMalformedRow(
+                    sourceKey,
+                    new IllegalArgumentException("Blank correlation key"),
+                    malformedRecordPolicy);
               }
               return List.of(
                   new PekkoCorrelationRecord(blockingKey, sourceKey, trustWeight, mapped));

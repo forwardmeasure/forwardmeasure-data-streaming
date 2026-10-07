@@ -37,6 +37,54 @@ public final class SparkSourceRow implements SourceRow {
   }
 
   @Override
+  public java.util.Map<String, ?> rawFields() {
+    java.util.Map<String, Object> fields = new java.util.LinkedHashMap<>();
+    for (String name : row.schema().fieldNames()) fields.put(name, nativeValue(row.getAs(name)));
+    return fields;
+  }
+
+  @Override
+  public Object getRaw(String fieldName) {
+    try {
+      return nativeValue(row.getAs(fieldName));
+    } catch (IllegalArgumentException absent) {
+      return null;
+    }
+  }
+
+  private static Object nativeValue(Object value) {
+    if (value instanceof Row nested) return new SparkSourceRow(nested).rawFields();
+    if (value instanceof scala.collection.Map<?, ?> map) {
+      java.util.Map<String, Object> values = new java.util.LinkedHashMap<>();
+      var entries = map.iterator();
+      while (entries.hasNext()) {
+        var entry = entries.next();
+        values.put(String.valueOf(entry._1()), nativeValue(entry._2()));
+      }
+      return values;
+    }
+    if (value instanceof scala.collection.Seq<?> sequence) {
+      java.util.List<Object> values = new java.util.ArrayList<>();
+      var entries = sequence.iterator();
+      while (entries.hasNext()) values.add(nativeValue(entries.next()));
+      return values;
+    }
+    if (value instanceof java.util.Map<?, ?> map) {
+      java.util.Map<String, Object> values = new java.util.LinkedHashMap<>();
+      map.forEach((key, item) -> values.put(String.valueOf(key), nativeValue(item)));
+      return values;
+    }
+    if (value instanceof java.util.List<?> list)
+      return list.stream().map(SparkSourceRow::nativeValue).toList();
+    if (value instanceof Object[] array)
+      return java.util.Arrays.stream(array).map(SparkSourceRow::nativeValue).toList();
+    if (value instanceof java.sql.Date date) return date.toLocalDate().toString();
+    if (value instanceof java.time.LocalDate date) return date.toString();
+    if (value instanceof java.sql.Timestamp timestamp) return timestamp.toInstant().toString();
+    return value;
+  }
+
+  @Override
   public String get(String fieldName) {
     int index;
     try {

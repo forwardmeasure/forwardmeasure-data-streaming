@@ -16,18 +16,15 @@
  */
 package com.forwardmeasure.datastreaming.executor.kafkastreams;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forwardmeasure.datastreaming.api.ErrorPolicy;
 import com.forwardmeasure.datastreaming.api.KafkaConnectorUri;
 import com.forwardmeasure.datastreaming.api.MergePolicy;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
 import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.core.CorrelationMerge;
+import com.forwardmeasure.datastreaming.core.IngestionPipeline;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline.MalformedRecordPolicy;
 import com.forwardmeasure.datastreaming.mappers.FieldMappingEngine;
-import com.forwardmeasure.datastreaming.mappers.MapSourceRow;
 import com.forwardmeasure.datastreaming.mappers.OpenSearchSinkRowWriter;
 import com.forwardmeasure.datastreaming.mappers.SinkRowWriter;
 import java.time.Duration;
@@ -74,8 +71,6 @@ final class BoundedKafkaStreamsCorrelationRunner {
 
   private static final Logger LOGGER =
       LoggerFactory.getLogger(BoundedKafkaStreamsCorrelationRunner.class);
-  private static final ObjectMapper JSON = new ObjectMapper();
-  private static final TypeReference<Map<String, Object>> RECORD_TYPE = new TypeReference<>() {};
 
   private BoundedKafkaStreamsCorrelationRunner() {}
 
@@ -113,7 +108,9 @@ final class BoundedKafkaStreamsCorrelationRunner {
     long groupCount = 0;
     try (SinkRowWriter sinkRowWriter = new OpenSearchSinkRowWriter(sink)) {
       for (List<CorrelationRecord> group : grouped.values()) {
-        sinkRowWriter.write(mergeGroup(group, policy));
+        IngestionPipeline.withSinkFailureHandlingBlocking(
+            IngestionPipeline.SinkFailurePolicy.from(errors),
+            () -> sinkRowWriter.write(mergeGroup(group, policy)));
         groupCount++;
       }
     }
@@ -139,6 +136,7 @@ final class BoundedKafkaStreamsCorrelationRunner {
     consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
     consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
     consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+    consumerProps.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
 
     try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProps)) {
       List<TopicPartition> partitions =
@@ -173,7 +171,10 @@ final class BoundedKafkaStreamsCorrelationRunner {
               records.add(mapped);
             }
           }
-          positions.put(partition, record.offset() + 1);
+        }
+        // Poll also advances over aborted transactions and control records that are never returned.
+        for (TopicPartition partition : partitions) {
+          positions.put(partition, consumer.position(partition));
         }
       }
     }
@@ -186,41 +187,12 @@ final class BoundedKafkaStreamsCorrelationRunner {
       String blockingField,
       FieldMappingEngine mapper,
       MalformedRecordPolicy policy) {
-    Map<String, Object> mapped;
-    try {
-      Map<String, Object> raw = JSON.readValue(json, RECORD_TYPE);
-      mapped = mapper.map(new MapSourceRow(raw), source.mapper());
-    } catch (RuntimeException | JsonProcessingException failure) {
-      switch (policy) {
-        case FAIL -> {
-          if (failure instanceof RuntimeException runtimeException) {
-            throw runtimeException;
-          }
-          throw new IllegalArgumentException("Unable to parse or map record", failure);
-        }
-        case DEAD_LETTER ->
-            LOGGER.error(
-                "BoundedKafkaStreamsCorrelationRunner: source '{}' record dead-lettered: {}",
-                source.sourceKey(),
-                json,
-                failure);
-        case SKIP ->
-            LOGGER.warn(
-                "BoundedKafkaStreamsCorrelationRunner: source '{}' record skipped: {}",
-                source.sourceKey(),
-                json,
-                failure);
-      }
+    Map<String, Object> mapped =
+        KafkaRecordMapping.map(json, source.mapper(), mapper, policy, blockingField);
+    if (mapped == null) {
       return null;
     }
-    Object blockingValue = mapped.get(blockingField);
-    if (blockingValue == null) {
-      return null;
-    }
-    String blockingKey = normalizeBlockingKey(String.valueOf(blockingValue));
-    if (blockingKey.isBlank()) {
-      return null;
-    }
+    String blockingKey = normalizeBlockingKey(String.valueOf(mapped.get(blockingField)));
     return new CorrelationRecord(blockingKey, source.sourceKey(), source.trustWeight(), mapped);
   }
 

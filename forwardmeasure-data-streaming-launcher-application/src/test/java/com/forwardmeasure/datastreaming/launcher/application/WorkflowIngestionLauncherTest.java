@@ -76,7 +76,7 @@ final class WorkflowIngestionLauncherTest {
   @BeforeEach
   void start() throws IOException {
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-    server.createContext("/v1/executions", this::respond);
+    server.createContext("/v1/workflow-executions", this::respond);
     server.start();
 
     ApiClient apiClient = new ApiClient();
@@ -103,8 +103,8 @@ final class WorkflowIngestionLauncherTest {
 
     assertEquals("POST", lastMethod.get());
     assertTrue(
-        lastPath.get().startsWith("/v1/executions"),
-        "expected /v1/executions, got " + lastPath.get());
+        lastPath.get().startsWith("/v1/workflow-executions"),
+        "expected /v1/workflow-executions, got " + lastPath.get());
     assertEquals("idem-1", lastIdempotencyKey.get());
     assertEquals("corr-1", lastCorrelationId.get());
     assertEquals("Bearer test-token", lastAuthorization.get());

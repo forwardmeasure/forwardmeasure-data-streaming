@@ -38,6 +38,11 @@ public final class MapSourceRow implements SourceRow {
   }
 
   @Override
+  public java.util.Map<String, ?> rawFields() {
+    return java.util.Collections.unmodifiableMap(row);
+  }
+
+  @Override
   public String get(String fieldName) {
     if (fieldName == null || !row.containsKey(fieldName)) {
       return null;

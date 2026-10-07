@@ -17,6 +17,7 @@
 package com.forwardmeasure.datastreaming.connector.jdbc;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.forwardmeasure.jpa.liquibase.TenantSchemaMigrator;
 import com.forwardmeasure.jpa.tenancy.TenantId;
@@ -92,6 +93,22 @@ class JpaPagingSourceTest {
       for (int i = 0; i < ROW_COUNT; i++) {
         assertEquals("widget-" + i, names.get(i), "row " + i);
       }
+    }
+  }
+
+  @Test
+  void invalidPagingBoundsAreRejectedBeforeSchedulingDatabaseWork() {
+    var repository = new WidgetRepository();
+    java.util.concurrent.Executor mustNotSchedule =
+        work -> {
+          throw new AssertionError("Invalid bounds reached executor");
+        };
+    for (int[] bounds : new int[][] {{-1, 32}, {0, 0}, {0, -1}}) {
+      var failure =
+          assertThrows(
+              IllegalArgumentException.class,
+              () -> JpaPagingSource.page(repository, null, bounds[0], bounds[1], mustNotSchedule));
+      assertEquals("Invalid paging bounds", failure.getMessage());
     }
   }
 

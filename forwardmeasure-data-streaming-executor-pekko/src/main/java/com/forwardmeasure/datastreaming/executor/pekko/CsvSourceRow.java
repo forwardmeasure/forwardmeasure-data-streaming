@@ -33,6 +33,14 @@ public final class CsvSourceRow implements SourceRow {
   }
 
   @Override
+  public java.util.Map<String, ?> rawFields() {
+    // Header maps collapse repeated names; physical column count must not use map size.
+    if (record.size() != record.getParser().getHeaderNames().size())
+      throw new IllegalArgumentException("CSV column count differs from header");
+    return record.toMap();
+  }
+
+  @Override
   public String get(String fieldName) {
     if (fieldName == null || !record.isMapped(fieldName) || !record.isSet(fieldName)) {
       return null;

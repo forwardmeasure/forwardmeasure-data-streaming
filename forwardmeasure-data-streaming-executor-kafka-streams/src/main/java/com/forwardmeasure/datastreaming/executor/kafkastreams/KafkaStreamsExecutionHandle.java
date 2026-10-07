@@ -25,10 +25,17 @@ final class KafkaStreamsExecutionHandle implements ExecutionHandle {
 
   private final String id;
   private final KafkaStreams streams;
+  private final com.forwardmeasure.datastreaming.mappers.SinkRowWriter sink;
+  private final java.util.concurrent.atomic.AtomicBoolean stopped =
+      new java.util.concurrent.atomic.AtomicBoolean();
   private final java.util.concurrent.atomic.AtomicReference<Throwable> failure =
       new java.util.concurrent.atomic.AtomicReference<>();
 
-  KafkaStreamsExecutionHandle(String id, KafkaStreams streams) {
+  KafkaStreamsExecutionHandle(
+      String id,
+      KafkaStreams streams,
+      com.forwardmeasure.datastreaming.mappers.SinkRowWriter sink) {
+    this.sink = Objects.requireNonNull(sink, "sink");
     this.id = Objects.requireNonNull(id, "id");
     this.streams = Objects.requireNonNull(streams, "streams");
     streams.setUncaughtExceptionHandler(
@@ -57,6 +64,12 @@ final class KafkaStreamsExecutionHandle implements ExecutionHandle {
 
   @Override
   public void stop() {
-    streams.close();
+    if (stopped.compareAndSet(false, true)) {
+      try {
+        streams.close();
+      } finally {
+        sink.close();
+      }
+    }
   }
 }

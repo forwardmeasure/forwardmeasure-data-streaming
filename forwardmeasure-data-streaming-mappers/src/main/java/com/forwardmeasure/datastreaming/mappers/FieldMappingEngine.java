@@ -118,22 +118,12 @@ public final class FieldMappingEngine {
       }
     }
 
-    logSampledTransform(row, spec, result);
+    logSampledTransform(result);
     return result;
   }
 
-  /**
-   * Real, greppable {@code record.transformed} milestone at INFO - sampled (the first {@link
-   * #SAMPLE_FIRST_N} rows, then every {@link #SAMPLE_EVERY_M}th) rather than every row, since a
-   * production dataset can be hundreds of thousands of rows and logging every one would drown the
-   * log stream for no added visibility. Logs the before/after side by side so a human reading real
-   * production logs can visually diff a real transform's actual behavior, not just its output.
-   * {@code before} is reconstructed from exactly the source fields {@code spec}'s own rules
-   * reference (raw {@code source()}, template placeholders, named {@code inputs()}) - a targeted
-   * snapshot of what this transform actually read, not an arbitrary full-row dump this engine has
-   * no generic way to produce (see {@link SourceRow}'s own single-field-accessor shape).
-   */
-  private void logSampledTransform(SourceRow row, TransformSpec spec, Map<String, Object> after) {
+  /** Reports sampled output counts without logging source or transformed personal data. */
+  private void logSampledTransform(Map<String, Object> after) {
     if (!LOGGER.isInfoEnabled()) {
       return;
     }
@@ -141,25 +131,7 @@ public final class FieldMappingEngine {
     if (n > SAMPLE_FIRST_N && n % SAMPLE_EVERY_M != 0) {
       return;
     }
-    LOGGER.info("record.transformed n={} before={} after={}", n, inputSnapshot(row, spec), after);
-  }
-
-  private Map<String, String> inputSnapshot(SourceRow row, TransformSpec spec) {
-    Map<String, String> snapshot = new LinkedHashMap<>();
-    for (FieldRule rule : spec.fields()) {
-      if (rule.source() != null) {
-        snapshot.put(rule.source(), row.get(rule.source()));
-      }
-      if (rule.template() != null) {
-        Matcher matcher = TEMPLATE_PLACEHOLDER.matcher(rule.template());
-        while (matcher.find()) {
-          String columnName = matcher.group(1);
-          snapshot.put(columnName, row.get(columnName));
-        }
-      }
-      rule.effectiveInputs().values().forEach(field -> snapshot.put(field, row.get(field)));
-    }
-    return snapshot;
+    LOGGER.info("record.transformed n={} output_fields={}", n, after.size());
   }
 
   /**
@@ -222,20 +194,17 @@ public final class FieldMappingEngine {
   }
 
   private String resolveTemplate(SourceRow row, String template) {
-    StringBuilder result = new StringBuilder(template);
+    StringBuilder result = new StringBuilder();
     Matcher matcher = TEMPLATE_PLACEHOLDER.matcher(template);
     while (matcher.find()) {
-      String placeholder = matcher.group(0);
       String columnName = matcher.group(1);
       String value = row.get(columnName);
       if (value == null || value.isBlank()) {
         return null;
       }
-      int idx = result.indexOf(placeholder);
-      if (idx >= 0) {
-        result.replace(idx, idx + placeholder.length(), value);
-      }
+      matcher.appendReplacement(result, Matcher.quoteReplacement(value));
     }
+    matcher.appendTail(result);
     String resolved = result.toString().trim();
     return resolved.isBlank() ? null : resolved;
   }

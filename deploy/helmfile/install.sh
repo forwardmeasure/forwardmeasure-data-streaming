@@ -29,6 +29,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ENVIRONMENT="${1:?Usage: $0 <configured-environment>}"
+PLATFORM_DEPLOY="$(cd -- "${SCRIPT_DIR}/../../../forwardmeasure-platform/deploy" && pwd)"
+source "${PLATFORM_DEPLOY}/scripts/product-selection.sh"
+python3 "${PLATFORM_DEPLOY}/scripts/check-deployment-transition.py"
 
 # Reconcile every selected release in Helmfile order, including unchanged failed releases.
 # A separate failed-release prepass can retry a dependent before its prerequisite is updated.

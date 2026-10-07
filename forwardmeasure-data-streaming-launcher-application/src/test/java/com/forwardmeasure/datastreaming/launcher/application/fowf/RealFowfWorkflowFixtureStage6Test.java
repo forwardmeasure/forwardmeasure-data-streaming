@@ -30,16 +30,16 @@ import org.testcontainers.containers.GenericContainer;
 /**
  * Stage 6 only: the real {@code openworkflow-operation-adapter-quarkus} image (built locally with
  * the 2026-09-21 {@code AsyncApiKubernetesDeploymentOperationExecutor} schema fix - see {@link
- * RealFowfWorkflowFixture#OPERATION_ADAPTER_IMAGE}'s own javadoc), booted against this fixture's
- * real Postgres/Kafka/Keycloak plus a real, disposable K3s cluster - proves the whole wiring this
- * class's own javadoc documents (the {@code host.docker.internal} kubeconfig rewrite, the deny-by-
- * default policy allowlist, the {@code OPENWORKFLOW_AUTHORIZATION_*} env var convention) actually
- * boots a real process, not just that it compiles. Deliberately narrow, mirroring Stage 3/4's own
- * scope: proves the service can start and reach every real dependency, via a real HTTP call (its
- * health endpoint) rather than only trusting the container's own log-line wait strategy. The full
- * apply+watch dispatch through a real workflow execution is Phase D's own separate, larger final
- * proof (submit via {@code WorkflowIngestionLauncher}, watch a real K8s {@code Deployment} become
- * {@code Available}), not this stage.
+ * RealFowfWorkflowFixture#OPERATION_ADAPTER_KAFKA_IMAGE}'s own javadoc), booted against this
+ * fixture's real Postgres/Kafka/Keycloak plus a real, disposable K3s cluster - proves the whole
+ * wiring this class's own javadoc documents (the {@code host.docker.internal} kubeconfig rewrite,
+ * the deny-by- default policy allowlist, the {@code OPENWORKFLOW_AUTHORIZATION_*} env var
+ * convention) actually boots a real process, not just that it compiles. Deliberately narrow,
+ * mirroring Stage 3/4's own scope: proves the service can start and reach every real dependency,
+ * via a real HTTP call (its health endpoint) rather than only trusting the container's own log-line
+ * wait strategy. The full apply+watch dispatch through a real workflow execution is Phase D's own
+ * separate, larger final proof (submit via {@code WorkflowIngestionLauncher}, watch a real K8s
+ * {@code Deployment} become {@code Available}), not this stage.
  */
 class RealFowfWorkflowFixtureStage6Test {
 

@@ -81,7 +81,21 @@ class IngestionLaunchPlannerTest {
     var spec = heavy();
     var continuous =
         new IngestionSpec(
-            spec.sources(),
+            spec.sources().stream()
+                .map(
+                    source ->
+                        new com.forwardmeasure.datastreaming.api.SourcePlan(
+                            source.sourceKey(),
+                            new com.forwardmeasure.datastreaming.api.SourceSpec(
+                                "kafka",
+                                "kafka:input?brokers=broker:9092",
+                                source.source().format(),
+                                source.source().schema(),
+                                source.source().query(),
+                                source.source().options()),
+                            source.mapper(),
+                            source.trustWeight()))
+                .toList(),
             spec.blockingField(),
             spec.transforms(),
             spec.sink(),

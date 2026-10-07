@@ -63,7 +63,7 @@ class PekkoOpenSearchConnectorIntegrationTest {
     Path sourceCsv = tempDir.resolve("source.csv");
     Files.writeString(
         sourceCsv,
-        "ID,FULL_NAME,CATEGORY\nS1,Alice Anderson,person\nS2,Bob Baker,person\n",
+        "ID,FULL_NAME,CATEGORY\nsource a,Alice Anderson,person\nsource+a,Bob Baker,person\n",
         StandardCharsets.UTF_8);
 
     String index = "party-connector-test";
@@ -108,17 +108,25 @@ class PekkoOpenSearchConnectorIntegrationTest {
       system.terminate();
     }
 
-    JsonNode s1 = fetchDocument(opensearch, index, "S1");
+    JsonNode s1 = fetchDocument(opensearch, index, "source a");
+    assertEquals("source a", s1.path("_id").asText());
     assertEquals("Alice Anderson", s1.path("_source").path("name").asText());
     assertEquals("person", s1.path("_source").path("category").asText());
 
-    JsonNode s2 = fetchDocument(opensearch, index, "S2");
+    JsonNode s2 = fetchDocument(opensearch, index, "source+a");
+    assertEquals("source+a", s2.path("_id").asText());
     assertEquals("Bob Baker", s2.path("_source").path("name").asText());
   }
 
   private static JsonNode fetchDocument(OpenSearchTestContainer opensearch, String index, String id)
       throws Exception {
-    URI uri = URI.create(opensearch.hostEndpoint() + "/" + index + "/_doc/" + id);
+    URI uri =
+        URI.create(
+            opensearch.hostEndpoint()
+                + "/"
+                + index
+                + "/_doc/"
+                + java.net.URLEncoder.encode(id, StandardCharsets.UTF_8).replace("+", "%20"));
     HttpRequest request = HttpRequest.newBuilder(uri).GET().build();
     HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
     assertEquals(

@@ -90,6 +90,7 @@ final class BoundedKafkaStreamsConsumerRunner {
     consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
     consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
     consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+    consumerProps.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
 
     long startMillis = System.currentTimeMillis();
     long recordsRead = 0;
@@ -119,9 +120,9 @@ final class BoundedKafkaStreamsConsumerRunner {
       while (!frontier.allReached(positions)) {
         ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(1));
         for (ConsumerRecord<String, String> record : records) {
-          recordsRead++;
           TopicPartition partition = new TopicPartition(record.topic(), record.partition());
           if (!frontier.reached(partition, record.offset())) {
+            recordsRead++;
             Map<String, Object> mapped =
                 mapOrHandle(record.value(), source.mapper(), mapper, malformedRecordPolicy);
             if (mapped != null) {
@@ -131,7 +132,10 @@ final class BoundedKafkaStreamsConsumerRunner {
             }
             consumer.commitSync(Map.of(partition, new OffsetAndMetadata(record.offset() + 1)));
           }
-          positions.put(partition, record.offset() + 1);
+        }
+        // Poll also advances over aborted transactions and control records that are never returned.
+        for (TopicPartition partition : partitions) {
+          positions.put(partition, consumer.position(partition));
         }
       }
     }

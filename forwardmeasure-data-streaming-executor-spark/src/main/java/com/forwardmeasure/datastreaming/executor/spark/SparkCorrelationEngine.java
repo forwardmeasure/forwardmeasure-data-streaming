@@ -81,6 +81,30 @@ public final class SparkCorrelationEngine {
       String blockingField,
       Map<String, NamedTransform> supplementalTransforms,
       MalformedRecordPolicy malformedRecordPolicy) {
+    return readAndMap(
+        spark,
+        sourceConfig,
+        blockingField,
+        supplementalTransforms,
+        malformedRecordPolicy,
+        row -> {});
+  }
+
+  @FunctionalInterface
+  public interface SourceValidator extends java.io.Serializable {
+    void validate(com.forwardmeasure.datastreaming.mappers.SourceRow row);
+
+    default void afterMapping(
+        com.forwardmeasure.datastreaming.mappers.SourceRow row, Map<String, Object> mapped) {}
+  }
+
+  public static JavaRDD<SparkCorrelationRecord> readAndMap(
+      SparkSession spark,
+      SparkSourceConfig sourceConfig,
+      String blockingField,
+      Map<String, NamedTransform> supplementalTransforms,
+      MalformedRecordPolicy malformedRecordPolicy,
+      SourceValidator validator) {
     Dataset<Row> rawRows = readSource(spark, sourceConfig.source());
     var mapper = sourceConfig.mapper();
     String sourceKey = sourceConfig.sourceKey();
@@ -99,21 +123,28 @@ public final class SparkCorrelationEngine {
                     Row row = rowIterator.next();
                     Map<String, Object> mapped;
                     try {
-                      mapped =
-                          engine.map(
-                              sourceRowFor(connector, row, objectMapper),
-                              mapper,
-                              supplementalTransforms);
+                      var sourceRow = sourceRowFor(connector, row, objectMapper);
+                      validator.validate(sourceRow);
+                      mapped = engine.map(sourceRow, mapper, supplementalTransforms);
                     } catch (RuntimeException mappingFailure) {
                       handleMalformedRow(sourceKey, mappingFailure, malformedRecordPolicy);
                       continue;
                     }
+                    validator.afterMapping(sourceRowFor(connector, row, objectMapper), mapped);
                     Object blockingValue = mapped.get(blockingField);
                     if (blockingValue == null) {
+                      handleMalformedRow(
+                          sourceKey,
+                          new IllegalArgumentException("Missing correlation key"),
+                          malformedRecordPolicy);
                       continue;
                     }
                     String blockingKey = normalizeBlockingKey(String.valueOf(blockingValue));
                     if (blockingKey.isBlank()) {
+                      handleMalformedRow(
+                          sourceKey,
+                          new IllegalArgumentException("Blank correlation key"),
+                          malformedRecordPolicy);
                       continue;
                     }
                     mappedRecords.add(

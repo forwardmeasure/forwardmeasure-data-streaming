@@ -16,6 +16,8 @@
  */
 package com.forwardmeasure.datastreaming.api;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
@@ -25,6 +27,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.Map;
 
@@ -52,40 +55,87 @@ import java.util.Map;
  */
 public final class OpenSearchIndexInitializer {
 
-  private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
+  private static final HttpClient HTTP_CLIENT =
+      HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
+  private static final ObjectMapper JSON = new ObjectMapper();
 
   private OpenSearchIndexInitializer() {}
 
   /**
-   * No-op if {@code options} has no {@code indexSettingsFile} entry, or if {@code index} already
-   * exists (an index's own analysis settings can't be changed after creation, so re-applying the
-   * same document to an already-existing index would either fail or silently do nothing useful -
-   * checking first and skipping is the only safe idempotent behavior for a run that might create
-   * the same index a second time).
+   * Creates an absent index from the admitted settings, or verifies mapping, ownership metadata and
+   * settings before reusing an existing index. With no settings source, initialization is a no-op.
+   * Failed existence checks never authorize creation.
    */
   public static void ensureIndex(String baseUrl, String index, Map<String, String> options) {
     String settingsFile = options.get("indexSettingsFile");
-    if (settingsFile == null || settingsFile.isBlank()) {
+    String inline = options.get("indexSettingsJsonBase64");
+    if ((settingsFile == null || settingsFile.isBlank()) && (inline == null || inline.isBlank()))
       return;
-    }
+    if (settingsFile != null && inline != null)
+      throw new IllegalArgumentException("Choose one index settings source");
+    if (index == null || !index.matches("[a-z0-9][a-z0-9-]{0,254}"))
+      throw new IllegalArgumentException("Invalid index name");
     String authHeader = basicAuthHeader(options);
     String indexUri = baseUrl + "/" + index;
-    if (indexExists(indexUri, authHeader)) {
-      return;
-    }
-    String body;
     try {
-      body = Files.readString(Path.of(settingsFile), StandardCharsets.UTF_8);
-    } catch (IOException e) {
-      throw new UncheckedIOException(
-          "OpenSearchIndexInitializer: failed to read indexSettingsFile '" + settingsFile + "'", e);
+      String body =
+          inline == null
+              ? Files.readString(Path.of(settingsFile), StandardCharsets.UTF_8)
+              : new String(Base64.getDecoder().decode(inline), StandardCharsets.UTF_8);
+      if (body.length() > 1_048_576)
+        throw new IllegalArgumentException("Index settings exceed 1 MiB");
+      JsonNode expected = JSON.readTree(body);
+      if (!indexExists(indexUri, authHeader)) {
+        createIndex(indexUri, body, authHeader);
+        return;
+      }
+      JsonNode mappings = getJson(indexUri + "/_mapping", authHeader).path(index).path("mappings");
+      if (!contains(mappings, expected.path("mappings"))) {
+        throw new IllegalStateException(
+            "Existing index ownership or mapping differs from the admitted contract");
+      }
+      JsonNode settings =
+          getJson(indexUri + "/_settings", authHeader).path(index).path("settings").path("index");
+      JsonNode wanted = expected.path("settings");
+      if (wanted.has("index")) wanted = wanted.path("index");
+      if (!contains(settings, wanted))
+        throw new IllegalStateException(
+            "Existing index settings differ from the admitted contract");
+    } catch (IOException failure) {
+      throw new UncheckedIOException("Cannot prepare index contract", failure);
     }
-    createIndex(indexUri, body, authHeader);
+  }
+
+  private static boolean contains(JsonNode actual, JsonNode expected) {
+    if (expected.isMissingNode()) return true;
+    if (expected.isObject()) {
+      for (var entry : expected.properties())
+        if (!contains(actual.path(entry.getKey()), entry.getValue())) return false;
+      return true;
+    }
+    return expected.isValueNode()
+        ? !actual.isMissingNode() && expected.asText().equals(actual.asText())
+        : expected.equals(actual);
+  }
+
+  private static JsonNode getJson(String uri, String auth) throws IOException {
+    var builder = HttpRequest.newBuilder(URI.create(uri)).timeout(Duration.ofSeconds(30)).GET();
+    if (auth != null) builder.header("Authorization", auth);
+    try {
+      var response = HTTP_CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+      if (response.statusCode() / 100 != 2)
+        throw new IOException("Index inspection HTTP " + response.statusCode());
+      return JSON.readTree(response.body());
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw new IOException("Index inspection interrupted", interrupted);
+    }
   }
 
   private static boolean indexExists(String indexUri, String authHeader) {
     HttpRequest.Builder requestBuilder =
         HttpRequest.newBuilder(URI.create(indexUri))
+            .timeout(Duration.ofSeconds(30))
             .method("HEAD", HttpRequest.BodyPublishers.noBody());
     if (authHeader != null) {
       requestBuilder.header("Authorization", authHeader);
@@ -94,15 +144,19 @@ public final class OpenSearchIndexInitializer {
     try {
       response = HTTP_CLIENT.send(requestBuilder.build(), HttpResponse.BodyHandlers.discarding());
     } catch (IOException | InterruptedException e) {
+      if (e instanceof InterruptedException) Thread.currentThread().interrupt();
       throw new IllegalStateException(
           "OpenSearchIndexInitializer: HEAD " + indexUri + " failed", e);
     }
-    return response.statusCode() == 200;
+    if (response.statusCode() == 200) return true;
+    if (response.statusCode() == 404) return false;
+    throw new IllegalStateException("Index existence check HTTP " + response.statusCode());
   }
 
   private static void createIndex(String indexUri, String body, String authHeader) {
     HttpRequest.Builder requestBuilder =
         HttpRequest.newBuilder(URI.create(indexUri))
+            .timeout(Duration.ofSeconds(30))
             .PUT(HttpRequest.BodyPublishers.ofString(body))
             .header("Content-Type", "application/json");
     if (authHeader != null) {
@@ -112,6 +166,7 @@ public final class OpenSearchIndexInitializer {
     try {
       response = HTTP_CLIENT.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
     } catch (IOException | InterruptedException e) {
+      if (e instanceof InterruptedException) Thread.currentThread().interrupt();
       throw new IllegalStateException("OpenSearchIndexInitializer: PUT " + indexUri + " failed", e);
     }
     if (response.statusCode() >= 300) {

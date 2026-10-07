@@ -26,6 +26,38 @@ import org.junit.jupiter.api.Test;
 
 class CorrelationMergeTest {
   @Test
+  void objectMergeRetainsEverySourcesRawContributions() {
+    var policy =
+        new com.forwardmeasure.datastreaming.api.MergePolicy(
+            1,
+            java.util.Map.of(
+                "raw",
+                new com.forwardmeasure.datastreaming.api.MergePolicy.FieldRule(
+                    com.forwardmeasure.datastreaming.api.MergePolicy.Strategy.OBJECTS,
+                    null,
+                    null,
+                    null)));
+    var result =
+        CorrelationMerge.merge(
+            java.util.List.of(
+                java.util.Map.of(
+                    "raw", java.util.Map.of("a", java.util.List.of(java.util.Map.of("extra", 1)))),
+                java.util.Map.of(
+                    "raw",
+                    java.util.Map.of("b", java.util.List.of(java.util.Map.of("extra", "two")))),
+                java.util.Map.of(
+                    "raw", java.util.Map.of("a", java.util.List.of(java.util.Map.of("extra", 3))))),
+            policy);
+    assertEquals(
+        java.util.Map.of(
+            "a",
+            java.util.List.of(java.util.Map.of("extra", 1), java.util.Map.of("extra", 3)),
+            "b",
+            java.util.List.of(java.util.Map.of("extra", "two"))),
+        result.get("raw"));
+  }
+
+  @Test
   void keepsTrustWinnerAndRetainsNamesAndIdentifiersFromThreeSources() {
     Map<String, Object> high =
         Map.of(
@@ -95,6 +127,55 @@ class CorrelationMergeTest {
                 policy)
             .get("externalIds"));
     assertThrows(IllegalArgumentException.class, () -> new MergePolicy(2, Map.of()));
+  }
+
+  @Test
+  void sparseContributionsAndExplicitTrustKeepIndependentEvidenceWithoutMutation() {
+    var policy =
+        new MergePolicy(
+            1,
+            Map.of(
+                "status", new MergePolicy.FieldRule(MergePolicy.Strategy.TRUST, null, null, null),
+                "ids", new MergePolicy.FieldRule(MergePolicy.Strategy.UNION, null, null, null),
+                "raw", new MergePolicy.FieldRule(MergePolicy.Strategy.OBJECTS, null, null, null),
+                "names",
+                    new MergePolicy.FieldRule(
+                        MergePolicy.Strategy.ALIASES, "name_type", "PRIMARY", "ALIAS")));
+    var sparse = new java.util.HashMap<String, Object>();
+    sparse.put("status", null);
+    sparse.put("names", List.of("untyped", name("A", "PRIMARY")));
+    var result =
+        CorrelationMerge.merge(
+            java.util.Arrays.asList(
+                null,
+                sparse,
+                Map.of(
+                    "status",
+                    "active",
+                    "ids",
+                    "one",
+                    "names",
+                    List.of(name("A", "PRIMARY")),
+                    "raw",
+                    Map.of("a", Map.of("extra", 1))),
+                Map.of(
+                    "status",
+                    "inactive",
+                    "ids",
+                    List.of("one", "two"),
+                    "names",
+                    List.of(name("B", "PRIMARY")),
+                    "raw",
+                    Map.of("a", List.of(Map.of("extra", 1), Map.of("extra", 2))))),
+            policy);
+    assertEquals("active", result.get("status"));
+    assertEquals(List.of("one", "two"), result.get("ids"));
+    assertEquals(List.of("untyped", name("A", "PRIMARY"), name("B", "ALIAS")), result.get("names"));
+    assertEquals(Map.of("a", List.of(Map.of("extra", 1), Map.of("extra", 2))), result.get("raw"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CorrelationMerge.merge(List.of(Map.of("raw", "not an object")), policy));
+    assertEquals(List.of("untyped", name("A", "PRIMARY")), sparse.get("names"));
   }
 
   private static Map<String, String> name(String name, String type) {

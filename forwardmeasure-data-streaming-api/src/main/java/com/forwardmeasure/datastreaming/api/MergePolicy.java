@@ -35,7 +35,8 @@ public record MergePolicy(int version, Map<String, FieldRule> fields) implements
   public enum Strategy {
     TRUST,
     UNION,
-    ALIASES
+    ALIASES,
+    OBJECTS
   }
 
   /** ALIASES preserves the highest-trust primary and demotes later primaries in a list. */

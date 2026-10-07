@@ -83,26 +83,25 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(RealFowfWorkflowFixture.class);
 
-  // Real, already-pushed :1.1.0 tags (updated 2026-09-23) - the fixes this fixture's own dev tag
-  // (dev-fowf-fix-0922) used to isolate as unreviewed local-only builds have since been reviewed
-  // and pushed as the real production 1.1.0 tag: the two-step asyncapi/kubernetes-deployment stall
-  // fix (platform-persistence Liquibase changelog + Cluster Sharding role restriction + AsyncAPI
-  // subscription-blanking/filter fixes), and the correlated-worker/kubernetes-job workflow-bounded
-  // fixes (Pekko's own blankedSubscription full-object-wipe bug, the watch() create-vs-watch race).
-  // All six images are the same real tag, so no local-only-build/shadowing risk applies anymore.
-  private static final String FOWF_DEV_TAG = "1.1.0";
+  // The reactor builds these test-image dependencies before this module. Use the platform's
+  // selected version (passed by Surefire), not a hard-coded or retired combined adapter image.
+  private static final String FOWF_IMAGE_TAG =
+      Objects.requireNonNull(
+          System.getProperty("openworkflow.image.tag"), "openworkflow.image.tag");
   private static final String MIGRATIONS_IMAGE =
-      "forwardmeasure/openworkflow-migrations:" + FOWF_DEV_TAG;
+      "forwardmeasure/openworkflow-migrations:" + FOWF_IMAGE_TAG;
   static final String EXECUTION_MANAGEMENT_IMAGE =
-      "forwardmeasure/openworkflow-execution-management-quarkus:" + FOWF_DEV_TAG;
+      "forwardmeasure/openworkflow-execution-management-quarkus:" + FOWF_IMAGE_TAG;
   static final String ENGINE_KAFKA_STREAMS_IMAGE =
-      "forwardmeasure/openworkflow-engine-kafka-streams-quarkus:" + FOWF_DEV_TAG;
+      "forwardmeasure/openworkflow-engine-kafka-streams-quarkus:" + FOWF_IMAGE_TAG;
   static final String ENGINE_PEKKO_IMAGE =
-      "forwardmeasure/openworkflow-engine-pekko-quarkus:" + FOWF_DEV_TAG;
+      "forwardmeasure/openworkflow-engine-pekko-quarkus:" + FOWF_IMAGE_TAG;
   static final String DEFINITION_MANAGEMENT_IMAGE =
-      "forwardmeasure/openworkflow-definition-management-quarkus:" + FOWF_DEV_TAG;
-  static final String OPERATION_ADAPTER_IMAGE =
-      "forwardmeasure/openworkflow-operation-adapter-quarkus:" + FOWF_DEV_TAG;
+      "forwardmeasure/openworkflow-definition-management-quarkus:" + FOWF_IMAGE_TAG;
+  static final String OPERATION_ADAPTER_KAFKA_IMAGE =
+      "forwardmeasure/openworkflow-operation-adapter-kafka-streams-quarkus:" + FOWF_IMAGE_TAG;
+  static final String OPERATION_ADAPTER_PEKKO_IMAGE =
+      "forwardmeasure/openworkflow-operation-adapter-pekko-quarkus:" + FOWF_IMAGE_TAG;
 
   private static final String POSTGRES_ALIAS = "postgres";
   private static final String KAFKA_ALIAS = "kafka";
@@ -180,84 +179,100 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
     Objects.requireNonNull(tenantAlias, "tenantAlias");
     Objects.requireNonNull(role, "role");
     Network network = Network.newNetwork();
-    PostgreSqlTestContainer postgres =
-        new PostgreSqlTestContainer(
-                PostgreSqlContainerConfiguration.defaults()
-                    .withNetwork(network.getId(), List.of(POSTGRES_ALIAS)))
-            .start();
-    runMigrations(network, postgres, tenantAlias);
-    KafkaTestContainer kafka =
-        new KafkaTestContainer(
-                KafkaContainerConfiguration.defaults()
-                    .withNetwork(network.getId(), List.of(KAFKA_ALIAS)))
-            .start();
+    List<AutoCloseable> started = new java.util.ArrayList<>();
+    started.add(network);
+    try {
+      PostgreSqlTestContainer postgres =
+          new PostgreSqlTestContainer(
+                  PostgreSqlContainerConfiguration.defaults()
+                      .withNetwork(network.getId(), List.of(POSTGRES_ALIAS)))
+              .start();
+      started.add(postgres);
+      runMigrations(network, postgres, tenantAlias);
+      KafkaTestContainer kafka =
+          new KafkaTestContainer(
+                  KafkaContainerConfiguration.defaults()
+                      .withNetwork(network.getId(), List.of(KAFKA_ALIAS)))
+              .start();
 
-    TenantId tenantId = deriveTenantId(tenantAlias);
-    AuthzenKeycloakFixture keycloak = AuthzenKeycloakFixture.start();
-    String organizationId =
-        keycloak.provisionTenant(
-            tenantAlias, new Did("did:web:" + tenantAlias + "." + TENANT_DOMAIN), role);
-    LOGGER.info(
-        "RealFowfWorkflowFixture: provisioned Keycloak Organization '{}' for tenantId={}"
-            + " (matches the real openworkflow-migrations tenant registry row)",
-        organizationId,
-        tenantId.value());
-    // fowf's own services run a SECOND, server-side AuthZEN check independent of this launcher's
-    // own (AuthzenExecutionAuthorizer/WorkflowGovernanceServiceImpl, both confirmed by direct
-    // source read) - real resource type/collection-id pairs from fowf's own
-    // OpenWorkflowAuthorizationResources (the varying execution/definition id is only ever a
-    // resource *property*, never part of the Keycloak resource's own name - same collection-
-    // scoped-not-instance-scoped shape this repo's own DataStreamingAuthorizationResources uses).
-    keycloak.grantResourceAuthorization(
-        organizationId,
-        "openworkflow-execution",
-        "executions",
-        "fixture-execution-permission",
-        role,
-        java.util.Set.of(
-            AuthorizationAction.EXECUTION_START.scope(),
-            AuthorizationAction.EXECUTION_READ.scope(),
-            AuthorizationAction.EXECUTION_LIST.scope(),
-            AuthorizationAction.EXECUTION_PAUSE.scope(),
-            AuthorizationAction.EXECUTION_RESUME.scope(),
-            AuthorizationAction.EXECUTION_CANCEL.scope(),
-            // WorkflowIngestionLauncher (wired 2026-09-26) attaches subjectActor to every real
-            // Start/Control call - fowf's server-side WorkflowExecutionManagementService.
-            // resolveSubjectActor gates this on execution:assert-subject, fail-closed, regardless
-            // of whether the caller already holds EXECUTION_START/etc. Without this grant every
-            // real launch()/observe()/cancel() call 500s with AuthorizationDeniedException.
-            AuthorizationAction.EXECUTION_ASSERT_SUBJECT.scope()));
-    keycloak.grantResourceAuthorization(
-        organizationId,
-        "openworkflow-definition",
-        "definitions",
-        "fixture-definition-permission",
-        role,
-        java.util.Set.of(
-            AuthorizationAction.DEFINITION_CREATE.scope(),
-            AuthorizationAction.DEFINITION_READ.scope(),
-            AuthorizationAction.DEFINITION_LIST.scope(),
-            AuthorizationAction.DEFINITION_VALIDATE.scope(),
-            AuthorizationAction.DEFINITION_PUBLISH.scope()));
-    // A THIRD, real server-side check - independent of the two above - runs inside the
-    // operation-adapter itself (AuthzenOperationSecurityResolver, confirmed by direct source
-    // read), for every operation it dispatches (e.g. this fixture's own kubernetes-deployment
-    // apply/watch steps): OpenWorkflowAuthorizationResources.operation(...) resolves to a
-    // collection-scoped "openworkflow-operation"/"operations" resource (operation_kind is only
-    // ever a resource *property*, matching the execution/definition resources' own shape) and
-    // requires AuthorizationAction.OPERATION_EXECUTE. Without this, any real workflow execution
-    // that reaches a call: asyncapi step fails with "Authorization denied" the moment the
-    // operation-adapter picks it up off Kafka - found live 2026-09-21 driving the first real
-    // end-to-end execution through this fixture.
-    keycloak.grantResourceAuthorization(
-        organizationId,
-        "openworkflow-operation",
-        "operations",
-        "fixture-operation-permission",
-        role,
-        java.util.Set.of(AuthorizationAction.OPERATION_EXECUTE.scope()));
-    return new RealFowfWorkflowFixture(
-        network, postgres, kafka, keycloak, tenantId, organizationId);
+      started.add(kafka);
+      TenantId tenantId = deriveTenantId(tenantAlias);
+      AuthzenKeycloakFixture keycloak = AuthzenKeycloakFixture.start();
+      started.add(keycloak);
+      String organizationId =
+          keycloak.provisionTenant(
+              tenantAlias, new Did("did:web:" + tenantAlias + "." + TENANT_DOMAIN), role);
+      LOGGER.info(
+          "RealFowfWorkflowFixture: provisioned Keycloak Organization '{}' for tenantId={}"
+              + " (matches the real openworkflow-migrations tenant registry row)",
+          organizationId,
+          tenantId.value());
+      // fowf's own services run a SECOND, server-side AuthZEN check independent of this launcher's
+      // own (AuthzenExecutionAuthorizer/WorkflowGovernanceServiceImpl, both confirmed by direct
+      // source read) - real resource type/collection-id pairs from fowf's own
+      // OpenWorkflowAuthorizationResources (the varying execution/definition id is only ever a
+      // resource *property*, never part of the Keycloak resource's own name - same collection-
+      // scoped-not-instance-scoped shape this repo's own DataStreamingAuthorizationResources uses).
+      keycloak.grantResourceAuthorization(
+          organizationId,
+          "openworkflow-execution",
+          "executions",
+          "fixture-execution-permission",
+          role,
+          java.util.Set.of(
+              AuthorizationAction.EXECUTION_START.scope(),
+              AuthorizationAction.EXECUTION_READ.scope(),
+              AuthorizationAction.EXECUTION_LIST.scope(),
+              AuthorizationAction.EXECUTION_PAUSE.scope(),
+              AuthorizationAction.EXECUTION_RESUME.scope(),
+              AuthorizationAction.EXECUTION_CANCEL.scope(),
+              // WorkflowIngestionLauncher (wired 2026-09-26) attaches subjectActor to every real
+              // Start/Control call - fowf's server-side WorkflowExecutionManagementService.
+              // resolveSubjectActor gates this on execution:assert-subject, fail-closed, regardless
+              // of whether the caller already holds EXECUTION_START/etc. Without this grant every
+              // real launch()/observe()/cancel() call 500s with AuthorizationDeniedException.
+              AuthorizationAction.EXECUTION_ASSERT_SUBJECT.scope()));
+      keycloak.grantResourceAuthorization(
+          organizationId,
+          "openworkflow-definition",
+          "definitions",
+          "fixture-definition-permission",
+          role,
+          java.util.Set.of(
+              AuthorizationAction.DEFINITION_CREATE.scope(),
+              AuthorizationAction.DEFINITION_READ.scope(),
+              AuthorizationAction.DEFINITION_LIST.scope(),
+              AuthorizationAction.DEFINITION_VALIDATE.scope(),
+              AuthorizationAction.DEFINITION_PUBLISH.scope()));
+      // A THIRD, real server-side check - independent of the two above - runs inside the
+      // operation-adapter itself (AuthzenOperationSecurityResolver, confirmed by direct source
+      // read), for every operation it dispatches (e.g. this fixture's own kubernetes-deployment
+      // apply/watch steps): OpenWorkflowAuthorizationResources.operation(...) resolves to a
+      // collection-scoped "openworkflow-operation"/"operations" resource (operation_kind is only
+      // ever a resource *property*, matching the execution/definition resources' own shape) and
+      // requires AuthorizationAction.OPERATION_EXECUTE. Without this, any real workflow execution
+      // that reaches a call: asyncapi step fails with "Authorization denied" the moment the
+      // operation-adapter picks it up off Kafka - found live 2026-09-21 driving the first real
+      // end-to-end execution through this fixture.
+      keycloak.grantResourceAuthorization(
+          organizationId,
+          "openworkflow-operation",
+          "operations",
+          "fixture-operation-permission",
+          role,
+          java.util.Set.of(AuthorizationAction.OPERATION_EXECUTE.scope()));
+      return new RealFowfWorkflowFixture(
+          network, postgres, kafka, keycloak, tenantId, organizationId);
+    } catch (RuntimeException | Error failure) {
+      for (AutoCloseable resource : started.reversed()) {
+        try {
+          resource.close();
+        } catch (Exception cleanupFailure) {
+          failure.addSuppressed(cleanupFailure);
+        }
+      }
+      throw failure;
+    }
   }
 
   /**
@@ -294,18 +309,19 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withNetworkAliases(EXECUTION_MANAGEMENT_ALIAS)
             .withExtraHost("host.docker.internal", "host-gateway")
             .withExposedPorts(8080)
-            .withEnv("OPENWORKFLOW_DATABASE_URL", postgres.networkJdbcUrl())
-            .withEnv("OPENWORKFLOW_DATABASE_USERNAME", postgres.username())
-            .withEnv("OPENWORKFLOW_DATABASE_PASSWORD", postgres.password())
+            .withEnv("OPENWORKFLOW_CONTROL_PLANE_DATABASE_URL", postgres.networkJdbcUrl())
+            .withEnv("OPENWORKFLOW_RUNTIME_DATABASE_USERNAME", RUNTIME_DATABASE_USERNAME)
+            .withEnv("OPENWORKFLOW_RUNTIME_DATABASE_PASSWORD", RUNTIME_DATABASE_PASSWORD)
             // forwardmeasure.jpa.tenant-database.{host,port} - a real, SEPARATE config path from
             // the bootstrap quarkus.datasource above (TenantDataSourceRegistry's own per-tenant
             // connection routing) - defaults to localhost:5432 if left unset, which is wrong
             // inside this container (confirmed live: "Connection to localhost:5432 refused" on
             // the first real request). fowf's own real Helm template derives these from
-            // OPENWORKFLOW_DATABASE_URL via a regex at render time; this fixture just sets them
+            // OPENWORKFLOW_CONTROL_PLANE_DATABASE_URL via a regex at render time; this fixture just
+            // sets them
             // directly since it already knows the real values.
-            .withEnv("OPENWORKFLOW_DATABASE_HOST", POSTGRES_ALIAS)
-            .withEnv("OPENWORKFLOW_DATABASE_PORT", "5432")
+            .withEnv("OPENWORKFLOW_TENANT_DATABASE_HOST", POSTGRES_ALIAS)
+            .withEnv("OPENWORKFLOW_TENANT_DATABASE_PORT", "5432")
             .withEnv("OPENWORKFLOW_KEYCLOAK_ISSUER", issuer)
             // A minted token's own "iss" claim reflects whatever host the caller used to reach
             // Keycloak (localhost, from this JVM) - necessarily different from the
@@ -375,8 +391,8 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             // an OPENWORKFLOW_DATABASE_* indirection for them to read.
             .withEnv("FORWARDMEASURE_JPA_TENANT_DATABASE_HOST", POSTGRES_ALIAS)
             .withEnv("FORWARDMEASURE_JPA_TENANT_DATABASE_PORT", "5432")
-            .withEnv("FORWARDMEASURE_JPA_TENANT_DATABASE_USERNAME", postgres.username())
-            .withEnv("FORWARDMEASURE_JPA_TENANT_DATABASE_PASSWORD", postgres.password())
+            .withEnv("FORWARDMEASURE_JPA_TENANT_DATABASE_USERNAME", RUNTIME_DATABASE_USERNAME)
+            .withEnv("FORWARDMEASURE_JPA_TENANT_DATABASE_PASSWORD", RUNTIME_DATABASE_PASSWORD)
             .withEnv("FORWARDMEASURE_JPA_FUNCTIONAL_SCHEMA", "OPENWORKFLOW")
             .withEnv("OPENWORKFLOW_KEYCLOAK_ISSUER", issuer)
             .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", "any")
@@ -472,12 +488,15 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withNetworkAliases(ENGINE_PEKKO_ALIAS)
             .withExtraHost("host.docker.internal", "host-gateway")
             .withExposedPorts(8080)
-            .withEnv("OPENWORKFLOW_DATABASE_URL", postgres.networkJdbcUrl())
-            .withEnv("OPENWORKFLOW_DATABASE_USERNAME", postgres.username())
-            .withEnv("OPENWORKFLOW_DATABASE_PASSWORD", postgres.password())
+            .withEnv("OPENWORKFLOW_CONTROL_PLANE_DATABASE_URL", postgres.networkJdbcUrl())
+            .withEnv("OPENWORKFLOW_RUNTIME_DATABASE_USERNAME", RUNTIME_DATABASE_USERNAME)
+            .withEnv("OPENWORKFLOW_RUNTIME_DATABASE_PASSWORD", RUNTIME_DATABASE_PASSWORD)
             .withEnv("OPENWORKFLOW_PERSISTENCE_ENDPOINT", postgres.networkJdbcUrl())
-            .withEnv("OPENWORKFLOW_PERSISTENCE_USERNAME", postgres.username())
-            .withEnv("OPENWORKFLOW_PERSISTENCE_PASSWORD", postgres.password())
+            .withEnv("OPENWORKFLOW_PERSISTENCE_USERNAME", RUNTIME_DATABASE_USERNAME)
+            .withEnv("OPENWORKFLOW_PERSISTENCE_PASSWORD", RUNTIME_DATABASE_PASSWORD)
+            .withEnv("OPENWORKFLOW_CONTROL_PLANE_DATABASE_URL", postgres.networkJdbcUrl())
+            .withEnv("OPENWORKFLOW_RUNTIME_DATABASE_USERNAME", RUNTIME_DATABASE_USERNAME)
+            .withEnv("OPENWORKFLOW_RUNTIME_DATABASE_PASSWORD", RUNTIME_DATABASE_PASSWORD)
             .withEnv("OPENWORKFLOW_TENANT_REGISTRY_URL", postgres.networkJdbcUrl())
             .withEnv("OPENWORKFLOW_TENANT_REGISTRY_USERNAME", postgres.username())
             .withEnv("OPENWORKFLOW_TENANT_REGISTRY_PASSWORD", postgres.password())
@@ -510,8 +529,8 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             // ("Failed to load config value ... for: forwardmeasure.jpa.functional-schema").
             .withEnv("FORWARDMEASURE_JPA_TENANT_DATABASE_HOST", POSTGRES_ALIAS)
             .withEnv("FORWARDMEASURE_JPA_TENANT_DATABASE_PORT", "5432")
-            .withEnv("FORWARDMEASURE_JPA_TENANT_DATABASE_USERNAME", postgres.username())
-            .withEnv("FORWARDMEASURE_JPA_TENANT_DATABASE_PASSWORD", postgres.password())
+            .withEnv("FORWARDMEASURE_JPA_TENANT_DATABASE_USERNAME", RUNTIME_DATABASE_USERNAME)
+            .withEnv("FORWARDMEASURE_JPA_TENANT_DATABASE_PASSWORD", RUNTIME_DATABASE_PASSWORD)
             .withEnv("FORWARDMEASURE_JPA_FUNCTIONAL_SCHEMA", "OPENWORKFLOW")
             // Real gap found 2026-09-23, live-traced via a real AskTimeoutException retrying
             // forever: without this, engine-pekko and operation-adapter each self-join their own
@@ -576,11 +595,11 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withNetworkAliases(DEFINITION_MANAGEMENT_ALIAS)
             .withExtraHost("host.docker.internal", "host-gateway")
             .withExposedPorts(8080)
-            .withEnv("OPENWORKFLOW_DATABASE_URL", postgres.networkJdbcUrl())
-            .withEnv("OPENWORKFLOW_DATABASE_USERNAME", postgres.username())
-            .withEnv("OPENWORKFLOW_DATABASE_PASSWORD", postgres.password())
-            .withEnv("OPENWORKFLOW_DATABASE_HOST", POSTGRES_ALIAS)
-            .withEnv("OPENWORKFLOW_DATABASE_PORT", "5432")
+            .withEnv("OPENWORKFLOW_CONTROL_PLANE_DATABASE_URL", postgres.networkJdbcUrl())
+            .withEnv("OPENWORKFLOW_RUNTIME_DATABASE_USERNAME", RUNTIME_DATABASE_USERNAME)
+            .withEnv("OPENWORKFLOW_RUNTIME_DATABASE_PASSWORD", RUNTIME_DATABASE_PASSWORD)
+            .withEnv("OPENWORKFLOW_TENANT_DATABASE_HOST", POSTGRES_ALIAS)
+            .withEnv("OPENWORKFLOW_TENANT_DATABASE_PORT", "5432")
             .withEnv("OPENWORKFLOW_KEYCLOAK_ISSUER", issuer)
             .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", "any")
             .withEnv("OPENWORKFLOW_CLIENT_ID", AuthzenKeycloakFixture.AUTHZEN_CLIENT_ID)
@@ -703,7 +722,11 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
     String issuer = hostDockerInternalIssuer();
     String tenant = tenantId.value().toString();
     GenericContainer<?> operationAdapter =
-        new GenericContainer<>(DockerImageName.parse(OPERATION_ADAPTER_IMAGE))
+        new GenericContainer<>(
+                DockerImageName.parse(
+                    joinPekkoCluster
+                        ? OPERATION_ADAPTER_PEKKO_IMAGE
+                        : OPERATION_ADAPTER_KAFKA_IMAGE))
             .withNetwork(existingNetwork(network.getId()))
             .withNetworkAliases(OPERATION_ADAPTER_ALIAS)
             .withExtraHost("host.docker.internal", "host-gateway")
@@ -713,19 +736,16 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
                 KUBECONFIG_CONTAINER_PATH)
             .withEnv("KUBECONFIG", KUBECONFIG_CONTAINER_PATH)
             .withEnv("OPENWORKFLOW_KAFKA_BOOTSTRAP_SERVERS", kafka.networkBootstrapServers())
+            .withEnv("OPENWORKFLOW_CONTROL_PLANE_DATABASE_URL", postgres.networkJdbcUrl())
+            .withEnv("OPENWORKFLOW_RUNTIME_DATABASE_USERNAME", RUNTIME_DATABASE_USERNAME)
+            .withEnv("OPENWORKFLOW_RUNTIME_DATABASE_PASSWORD", RUNTIME_DATABASE_PASSWORD)
             .withEnv("OPENWORKFLOW_TENANT_REGISTRY_URL", postgres.networkJdbcUrl())
             .withEnv("OPENWORKFLOW_TENANT_REGISTRY_USERNAME", postgres.username())
             .withEnv("OPENWORKFLOW_TENANT_REGISTRY_PASSWORD", postgres.password())
-            // Pekko clustering/persistence defaults point at a "postgresql" host that doesn't
-            // exist on this network - overridden to this fixture's own real Postgres even though
-            // this scenario only dispatches through the Kafka runtime, so
-            // PekkoOperationAdapterRuntime
-            // (eagerly started alongside the Kafka one - see OperationAdapterQuarkusBinding's own
-            // eagerlyStartAdapters javadoc) doesn't fail startup trying to reach a nonexistent
-            // host.
+            // Used by the Pekko-specific adapter. Kafka uses its own engine-specific image.
             .withEnv("OPENWORKFLOW_PERSISTENCE_ENDPOINT", postgres.networkJdbcUrl())
-            .withEnv("OPENWORKFLOW_PERSISTENCE_USERNAME", postgres.username())
-            .withEnv("OPENWORKFLOW_PERSISTENCE_PASSWORD", postgres.password())
+            .withEnv("OPENWORKFLOW_PERSISTENCE_USERNAME", RUNTIME_DATABASE_USERNAME)
+            .withEnv("OPENWORKFLOW_PERSISTENCE_PASSWORD", RUNTIME_DATABASE_PASSWORD)
             .withEnv("OPENWORKFLOW_AUTHORIZATION_ISSUER", issuer)
             .withEnv(
                 "OPENWORKFLOW_AUTHORIZATION_CLIENT_ID", AuthzenKeycloakFixture.AUTHZEN_CLIENT_ID)
@@ -745,19 +765,6 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             // Pekko Persistence JDBC (its own outbox/projection wiring) and is equally subject to
             // Slick's default DEBUG-level SQL logging saturating the log capture.
             .withEnv("QUARKUS_LOG_CATEGORY__SLICK__LEVEL", "WARN")
-            // Temporary diagnostic (see fowf's own
-            // kubernetes-job-events-watch-loop-config-refresh-stall-2026-09-24.md "Suggested next
-            // investigation steps" #1): DEBUG already showed the repeated "Trying to configure
-            // client" line but not the HTTP response code that triggers it - TRACE surfaces the
-            // actual request/response fabric8's own TokenRefreshInterceptor reacts to. A per-
-            // category level alone was not enough (real, live-confirmed 2026-09-24: a first attempt
-            // with only the two lines below produced zero TRACE output anywhere - the console
-            // handler's own level was silently capping everything at DEBUG regardless of what any
-            // individual category allowed through) - the console handler's own ceiling has to be
-            // raised too.
-            .withEnv("QUARKUS_LOG_CONSOLE_LEVEL", "TRACE")
-            .withEnv("QUARKUS_LOG_CATEGORY__IO_FABRIC8__LEVEL", "TRACE")
-            .withEnv("QUARKUS_LOG_CATEGORY__IO_VERTX__LEVEL", "TRACE")
             .withLogConsumer(
                 new Slf4jLogConsumer(LOGGER).withPrefix("openworkflow-operation-adapter"))
             .waitingFor(
@@ -885,9 +892,9 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
     try (GenericContainer<?> migrations =
         new GenericContainer<>(DockerImageName.parse(MIGRATIONS_IMAGE))
             .withNetwork(existingNetwork(network.getId()))
-            .withEnv("OPENWORKFLOW_DATABASE_URL", postgres.networkJdbcUrl())
-            .withEnv("OPENWORKFLOW_DATABASE_USERNAME", postgres.username())
-            .withEnv("OPENWORKFLOW_DATABASE_PASSWORD", postgres.password())
+            .withEnv("OPENWORKFLOW_CONTROL_PLANE_DATABASE_URL", postgres.networkJdbcUrl())
+            .withEnv("OPENWORKFLOW_ADMIN_DATABASE_USERNAME", postgres.username())
+            .withEnv("OPENWORKFLOW_ADMIN_DATABASE_PASSWORD", postgres.password())
             .withEnv("OPENWORKFLOW_RUNTIME_DATABASE_USERNAME", RUNTIME_DATABASE_USERNAME)
             .withEnv("OPENWORKFLOW_RUNTIME_DATABASE_PASSWORD", RUNTIME_DATABASE_PASSWORD)
             .withEnv("OPENWORKFLOW_TENANT_DOMAIN", TENANT_DOMAIN)

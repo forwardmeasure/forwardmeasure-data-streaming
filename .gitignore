@@ -108,3 +108,9 @@ mvn.out
 
 .claude/
 .codex*
+
+# Shared Maven cache policy; retain local-only Maven files outside these two entries.
+!.mvn/
+.mvn/*
+!.mvn/extensions.xml
+!.mvn/maven-build-cache-config.xml

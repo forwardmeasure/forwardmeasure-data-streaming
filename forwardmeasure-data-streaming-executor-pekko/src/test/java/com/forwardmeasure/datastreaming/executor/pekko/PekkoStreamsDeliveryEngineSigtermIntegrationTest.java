@@ -17,6 +17,7 @@
 package com.forwardmeasure.datastreaming.executor.pekko;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -96,16 +97,7 @@ class PekkoStreamsDeliveryEngineSigtermIntegrationTest {
     Files.writeString(specFile, spec.toYaml());
     Path subprocessLog = Files.createTempFile("pekko-streams-sigterm-subprocess", ".log");
 
-    Process process =
-        new ProcessBuilder(
-                javaExecutable(),
-                "-cp",
-                System.getProperty("java.class.path"),
-                PekkoStreamsDeliveryEngine.class.getName(),
-                specFile.toString())
-            .redirectOutput(subprocessLog.toFile())
-            .redirectErrorStream(true)
-            .start();
+    Process process = start(specFile, subprocessLog);
 
     try {
       produce(kafka, topic, "S1", Map.of("uid", "S1", "name", "Henry Hill"));
@@ -131,6 +123,8 @@ class PekkoStreamsDeliveryEngineSigtermIntegrationTest {
           exitedOnItsOwn,
           elapsedSeconds);
       String subprocessOutput = Files.readString(subprocessLog);
+      assertFalse(
+          subprocessOutput.contains("PekkoStreamsDeliveryEngine: run failed"), subprocessOutput);
       assertTrue(
           exitedOnItsOwn,
           "the subprocess never exited on its own within 30s of SIGTERM - the shutdown hook did"
@@ -142,15 +136,119 @@ class PekkoStreamsDeliveryEngineSigtermIntegrationTest {
           "expected the JVM's own real post-shutdown-hook SIGTERM exit code. Subprocess output:\n"
               + subprocessOutput);
       assertTrue(
-          subprocessOutput.contains("PekkoStreamsDeliveryEngine: run completed"),
+          subprocessOutput.contains("PekkoStreamsDeliveryEngine: shutdown completed"),
           "expected the shutdown hook's own completion log line, printed only after"
               + " handle.stop() returned. Subprocess output:\n"
               + subprocessOutput);
+      Properties adminProperties = new Properties();
+      adminProperties.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.bootstrapServers());
+      String group =
+          com.forwardmeasure.datastreaming.api.ExecutionIdentity.of(
+              com.forwardmeasure.datastreaming.core.ExecutionPlanCompiler.compile(spec),
+              "fds-pekko-continuous-",
+              System.getenv("FDS_EXECUTION_ID"));
+      try (Admin admin = Admin.create(adminProperties)) {
+        var committed =
+            admin
+                .listConsumerGroupOffsets(group)
+                .partitionsToOffsetAndMetadata()
+                .get(10, java.util.concurrent.TimeUnit.SECONDS);
+        assertEquals(
+            1L,
+            committed.get(new org.apache.kafka.common.TopicPartition(topic, 0)).offset(),
+            "Shutdown must commit the acknowledged document before releasing its consumer");
+      }
     } finally {
       if (process.isAlive()) {
         process.destroyForcibly();
+        process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
       }
     }
+  }
+
+  @Test
+  @Timeout(150)
+  void failedDeliveryExitsNonzeroWithoutCommittingItsKafkaOffset(
+      KafkaTestContainer kafka, OpenSearchTestContainer opensearch) throws Exception {
+    String topic = "fds-pekko-failure-" + UUID.randomUUID();
+    createTopic(kafka, topic);
+    String index = "failed-delivery-" + UUID.randomUUID();
+    var blocked =
+        HTTP_CLIENT.send(
+            HttpRequest.newBuilder(URI.create(opensearch.hostEndpoint() + "/" + index))
+                .header("Content-Type", "application/json")
+                .PUT(
+                    HttpRequest.BodyPublishers.ofString(
+                        "{\"settings\":{\"index.blocks.write\":true}}"))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(200, blocked.statusCode(), blocked.body());
+    var spec =
+        new IngestionSpec(
+            List.of(kafkaSource(kafka, topic)),
+            null,
+            null,
+            openSearchSink(opensearch, index),
+            ExecutionMode.CONTINUOUS,
+            new DeliverySemantics(true, new ConcurrencySpec(1, null), null),
+            new com.forwardmeasure.datastreaming.api.ErrorPolicy("fail", "fail"));
+    Path specFile = Files.createTempFile("pekko-streams-failed-spec", ".yaml");
+    Files.writeString(specFile, spec.toYaml());
+    Path log = Files.createTempFile("pekko-streams-failed-subprocess", ".log");
+    Process process = start(specFile, log);
+    try {
+      produce(
+          kafka,
+          topic,
+          "bad",
+          Map.of("uid", "bad", "name", "Valid record rejected by destination"));
+      assertTrue(process.waitFor(45, java.util.concurrent.TimeUnit.SECONDS), Files.readString(log));
+      assertEquals(1, process.exitValue(), Files.readString(log));
+      String output = Files.readString(log);
+      assertTrue(output.contains("Continuous ingestion stopped unexpectedly"), output);
+      assertFalse(output.contains("run completed"), output);
+      var properties = new Properties();
+      properties.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.bootstrapServers());
+      String group =
+          com.forwardmeasure.datastreaming.api.ExecutionIdentity.of(
+              com.forwardmeasure.datastreaming.core.ExecutionPlanCompiler.compile(spec),
+              "fds-pekko-continuous-",
+              System.getenv("FDS_EXECUTION_ID"));
+      try (Admin admin = Admin.create(properties)) {
+        var committed =
+            admin
+                .listConsumerGroupOffsets(group)
+                .partitionsToOffsetAndMetadata()
+                .get(10, java.util.concurrent.TimeUnit.SECONDS);
+        assertTrue(
+            committed.isEmpty()
+                || committed.values().stream().allMatch(offset -> offset.offset() == 0),
+            "A failed delivery must remain available for replay: " + committed);
+      }
+    } finally {
+      if (process.isAlive()) {
+        process.destroyForcibly();
+        process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
+      }
+    }
+  }
+
+  private static Process start(Path spec, Path log) throws Exception {
+    var command = new java.util.ArrayList<String>();
+    command.add(javaExecutable());
+    java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments().stream()
+        .filter(argument -> argument.startsWith("-javaagent:") && argument.contains("jacoco"))
+        .forEach(command::add);
+    command.addAll(
+        List.of(
+            "-cp",
+            System.getProperty("java.class.path"),
+            PekkoStreamsDeliveryEngine.class.getName(),
+            spec.toString()));
+    return new ProcessBuilder(command)
+        .redirectOutput(log.toFile())
+        .redirectErrorStream(true)
+        .start();
   }
 
   private static String javaExecutable() {

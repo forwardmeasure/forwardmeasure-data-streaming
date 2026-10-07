@@ -146,10 +146,15 @@ final class ContinuousPekkoStreamsCorrelationRunner {
       KafkaCorrelationState state,
       ProducerTemplate producer) {
     Map<String, Object> mapped;
+    String key;
     try {
       mapped =
           mapper.map(
               new MapSourceRow(JSON.readValue(record.value(), RECORD_TYPE)), source.mapper());
+      Object value = mapped.get(plan.blockingField());
+      if (value == null) throw new IllegalArgumentException("Missing correlation key");
+      key = String.valueOf(value).strip().toUpperCase(Locale.ROOT);
+      if (key.isBlank()) throw new IllegalArgumentException("Blank correlation key");
     } catch (Exception failure) {
       if (IngestionPipeline.MalformedRecordPolicy.from(plan.errors())
           == IngestionPipeline.MalformedRecordPolicy.FAIL) {
@@ -163,10 +168,6 @@ final class ContinuousPekkoStreamsCorrelationRunner {
           failure);
       return;
     }
-    Object value = mapped.get(plan.blockingField());
-    if (value == null) return;
-    String key = String.valueOf(value).strip().toUpperCase(Locale.ROOT);
-    if (key.isBlank()) return;
     state.updateAndWrite(
         new KafkaCorrelationState.Contribution(
             key, source.sourceKey(), record.topic(), record.partition(), record.offset(), mapped),

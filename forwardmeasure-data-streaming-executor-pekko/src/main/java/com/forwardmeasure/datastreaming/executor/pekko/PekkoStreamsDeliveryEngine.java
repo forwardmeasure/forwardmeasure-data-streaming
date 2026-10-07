@@ -55,12 +55,12 @@ public final class PekkoStreamsDeliveryEngine implements DeliveryEngine {
   public ExecutionHandle execute(ExecutionPlan plan, ExecutionMode mode) {
     Objects.requireNonNull(plan, "plan");
     Objects.requireNonNull(mode, "mode");
+    if (plan.sparkStage().isPresent()) {
+      throw new UnsupportedOperationException(
+          "PekkoStreamsDeliveryEngine: execute the Spark compute stage and supply its delivery"
+              + " handoff plan");
+    }
     if (mode == ExecutionMode.CONTINUOUS) {
-      if (plan.sparkStage().isPresent()) {
-        throw new UnsupportedOperationException(
-            "PekkoStreamsDeliveryEngine: a plan with a Spark compute stage is not dispatched here"
-                + " yet - see this engine's own javadoc");
-      }
       return plan.sources().size() == 1
           ? ContinuousPekkoStreamsConsumerRunner.run(plan, system)
           : ContinuousPekkoStreamsCorrelationRunner.run(plan, system);
@@ -84,7 +84,14 @@ public final class PekkoStreamsDeliveryEngine implements DeliveryEngine {
     IngestionSpec spec = IngestionSpec.load(Path.of(specPath));
     ExecutionPlan plan = ExecutionPlanCompiler.compile(spec);
 
-    ActorSystem system = ActorSystem.create("fds-pekko-streams-delivery-engine");
+    // This entrypoint owns draining. Pekko's parallel JVM hook would stop Kafka actors
+    // before our stream has committed its acknowledged sink writes.
+    ActorSystem system =
+        ActorSystem.create(
+            "fds-pekko-streams-delivery-engine",
+            com.typesafe.config.ConfigFactory.parseString(
+                    "pekko.coordinated-shutdown.run-by-jvm-shutdown-hook=off")
+                .withFallback(com.typesafe.config.ConfigFactory.load()));
     int exitCode = 0;
     try {
       ExecutionHandle handle =
@@ -112,16 +119,22 @@ public final class PekkoStreamsDeliveryEngine implements DeliveryEngine {
    */
   private static void awaitShutdown(ExecutionHandle handle) throws InterruptedException {
     CountDownLatch latch = new CountDownLatch(1);
+    var shutdownRequested = new java.util.concurrent.atomic.AtomicBoolean();
     Thread hook =
         new Thread(
             () -> {
-              handle.stop();
-              latch.countDown();
+              shutdownRequested.set(true);
+              try {
+                handle.stop();
+                LOGGER.info("PekkoStreamsDeliveryEngine: shutdown completed, id={}", handle.id());
+              } finally {
+                latch.countDown();
+              }
             });
     Runtime.getRuntime().addShutdownHook(hook);
     try {
       while (!latch.await(1, java.util.concurrent.TimeUnit.SECONDS)) {
-        if (!handle.isRunning()) {
+        if (!handle.isRunning() && !shutdownRequested.get()) {
           throw new IllegalStateException(
               "Continuous ingestion stopped unexpectedly", handle.failure().orElse(null));
         }

@@ -354,6 +354,60 @@ class PekkoSqlConnectorIntegrationTest {
     }
   }
 
+  @Test
+  void constraintFailuresCannotAcknowledgeSingleOrBatchedSqlDelivery(
+      PostgreSqlTestContainer database) throws Exception {
+    try (var connection = database.dataSource().getConnection();
+        var statement = connection.createStatement()) {
+      statement.execute("create table rejected_sink (id text primary key, name text not null)");
+      statement.execute("insert into rejected_sink values ('existing', 'baseline')");
+    }
+    var system = ActorSystem.create("sql-rejection-contract");
+    try (var bridge = new CamelBridge()) {
+      for (var batching : java.util.Arrays.asList(null, new SinkSpec.BatchingSpec(2, null))) {
+        var spec =
+            new SinkSpec(
+                "jdbc",
+                database.hostJdbcUrl(),
+                "rejected_sink",
+                null,
+                batching,
+                Map.of(
+                    "user",
+                    database.username(),
+                    "password",
+                    database.password(),
+                    "query",
+                    "insert into rejected_sink (id, name) values (:?uid, :?name)"));
+        var sink =
+            PekkoIngestionRunner.buildSink(
+                bridge,
+                spec,
+                DeliverySemantics.defaults(),
+                new com.forwardmeasure.datastreaming.api.ErrorPolicy("fail", "fail"),
+                new com.fasterxml.jackson.databind.ObjectMapper(),
+                new java.util.concurrent.atomic.AtomicLong());
+        org.junit.jupiter.api.Assertions.assertThrows(
+            java.util.concurrent.ExecutionException.class,
+            () ->
+                org.apache.pekko.stream.javadsl.Source.single(
+                        Map.<String, Object>of("uid", "existing", "name", "replacement"))
+                    .runWith(sink, system)
+                    .toCompletableFuture()
+                    .get(10, TimeUnit.SECONDS));
+      }
+      try (var connection = database.dataSource().getConnection();
+          var statement = connection.createStatement();
+          var rows = statement.executeQuery("select name from rejected_sink")) {
+        assertTrue(rows.next());
+        assertEquals("baseline", rows.getString(1));
+        assertFalse(rows.next());
+      }
+    } finally {
+      system.terminate();
+    }
+  }
+
   private static SourceSpec jdbcSource(PostgreSqlTestContainer database, String query) {
     return new SourceSpec(
         "jdbc",

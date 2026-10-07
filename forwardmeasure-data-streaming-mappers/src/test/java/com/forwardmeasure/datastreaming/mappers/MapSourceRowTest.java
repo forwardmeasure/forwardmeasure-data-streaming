@@ -26,6 +26,15 @@ import org.junit.jupiter.api.Test;
 class MapSourceRowTest {
 
   @Test
+  void completeRecordPreservesUnknownColumnsNullsAndNativeTypesForValidation() {
+    Map<String, Object> record = new java.util.LinkedHashMap<>();
+    record.put("unknown_vendor_field", java.util.List.of(12, 34));
+    record.put("explicit_null", null);
+    record.put("blank", "");
+    assertEquals(record, new MapSourceRow(record).rawFields());
+  }
+
+  @Test
   void returnsTheStringifiedValueForAPresentField() {
     SourceRow row = new MapSourceRow(Map.of("ID", "S1", "AGE", 42));
 

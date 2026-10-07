@@ -74,15 +74,19 @@ public final class NamedTransformFunctions {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(NamedTransformFunctions.class);
 
-  private static final DateTimeFormatter YYYYMMDD = DateTimeFormatter.ofPattern("yyyyMMdd");
-  private static final DateTimeFormatter MMDDYYYY = DateTimeFormatter.ofPattern("MM/dd/yyyy");
+  private static final DateTimeFormatter YYYYMMDD =
+      DateTimeFormatter.ofPattern("uuuuMMdd")
+          .withResolverStyle(java.time.format.ResolverStyle.STRICT);
+  private static final DateTimeFormatter MMDDYYYY =
+      DateTimeFormatter.ofPattern("MM/dd/uuuu")
+          .withResolverStyle(java.time.format.ResolverStyle.STRICT);
 
   private static final Pattern IDENTIFIER_PATTERN = Pattern.compile("\\{([A-Z0-9_-]+)}([^;{]+)");
 
   private static final Pattern URL_TOKEN_PATTERN = Pattern.compile("(?i)\\bhttps?://[^\\s;]+");
 
   private static final Pattern TILDE_LOCATION_PATTERN =
-      Pattern.compile("~\\s*([^~,]*?)(?:,\\s*([^~]*))?\\s*~\\s*([^;~]+)");
+      Pattern.compile("~\\s*([^~,]*?)(?:,\\s*([^~]*))?\\s*~\\s*([^;~]*)");
 
   private static final LocaleDisplayNames ICU_DISPLAY_NAMES =
       LocaleDisplayNames.getInstance(ULocale.ENGLISH);

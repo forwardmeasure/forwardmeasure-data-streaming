@@ -93,6 +93,104 @@ class KafkaCorrelationStateIntegrationTest {
     }
   }
 
+  @Test
+  void topicAndPartitionChangesResetOffsetsButSerializationFailureCannotPoisonState(
+      KafkaTestContainer kafka) {
+    var plan = plan(kafka.bootstrapServers());
+    String identity = "fds-offset-contract-" + UUID.randomUUID();
+    var observed = new AtomicReference<Map<String, Object>>();
+    java.util.function.Function<Map<String, Object>, java.util.concurrent.CompletionStage<Void>>
+        sink =
+            value -> {
+              observed.set(value);
+              return CompletableFuture.completedFuture(null);
+            };
+    try (var state = new KafkaCorrelationState(plan, kafka.bootstrapServers(), identity)) {
+      state.updateAndWrite(row("high", 100, "original", "one"), sink);
+      state.updateAndWrite(
+          new KafkaCorrelationState.Contribution(
+              "KEY", "high", "replacement-topic", 0, 0, Map.of("status", "new-topic")),
+          sink);
+      assertEquals("new-topic", observed.get().get("status"));
+      state.updateAndWrite(
+          new KafkaCorrelationState.Contribution(
+              "KEY", "high", "replacement-topic", 1, 0, Map.of("status", "new-partition")),
+          sink);
+      assertEquals("new-partition", observed.get().get("status"));
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              state.updateAndWrite(
+                  new KafkaCorrelationState.Contribution(
+                      "KEY", "high", "replacement-topic", 1, 1, Map.of("bad", new Object())),
+                  sink));
+      state.updateAndWrite(
+          new KafkaCorrelationState.Contribution(
+              "KEY", "high", "replacement-topic", 1, 2, Map.of("status", "recovered")),
+          sink);
+      assertEquals(Map.of("status", "recovered"), observed.get());
+    }
+    try (var restored = new KafkaCorrelationState(plan, kafka.bootstrapServers(), identity)) {
+      restored.updateAndWrite(
+          new KafkaCorrelationState.Contribution(
+              "KEY", "high", "replacement-topic", 1, 1, Map.of("status", "obsolete")),
+          sink);
+      assertEquals(Map.of("status", "recovered"), observed.get());
+    }
+  }
+
+  @Test
+  void unsafeRetentionAndCorruptPersistedStateFailBeforeSourceConsumption(KafkaTestContainer kafka)
+      throws Exception {
+    var plan = plan(kafka.bootstrapServers());
+    var config = new java.util.Properties();
+    config.put(
+        org.apache.kafka.clients.admin.AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG,
+        kafka.bootstrapServers());
+    for (String scenario : List.of("retention", "corrupt")) {
+      String identity = "fds-invalid-state-" + UUID.randomUUID();
+      String topic = identity + "-state-v1";
+      try (var admin = org.apache.kafka.clients.admin.Admin.create(config)) {
+        admin
+            .createTopics(
+                List.of(
+                    new org.apache.kafka.clients.admin.NewTopic(topic, 1, (short) 1)
+                        .configs(
+                            Map.of(
+                                "cleanup.policy",
+                                scenario.equals("retention") ? "delete" : "compact"))))
+            .all()
+            .get(10, java.util.concurrent.TimeUnit.SECONDS);
+      }
+      if (scenario.equals("corrupt")) {
+        config.put(
+            org.apache.kafka.clients.producer.ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
+            org.apache.kafka.common.serialization.StringSerializer.class);
+        config.put(
+            org.apache.kafka.clients.producer.ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
+            org.apache.kafka.common.serialization.StringSerializer.class);
+        try (var producer =
+            new org.apache.kafka.clients.producer.KafkaProducer<String, String>(config)) {
+          producer
+              .send(
+                  new org.apache.kafka.clients.producer.ProducerRecord<>(topic, "bad", "not-json"))
+              .get(10, java.util.concurrent.TimeUnit.SECONDS);
+        }
+      }
+      var failure =
+          assertThrows(
+              IllegalStateException.class,
+              () -> new KafkaCorrelationState(plan, kafka.bootstrapServers(), identity));
+      org.junit.jupiter.api.Assertions.assertTrue(
+          failure
+              .getMessage()
+              .contains(
+                  scenario.equals("retention")
+                      ? "Cannot prepare correlation changelog"
+                      : "Invalid correlation changelog"));
+    }
+  }
+
   private static KafkaCorrelationState.Contribution row(
       String source, long offset, String status, String identifier) {
     return new KafkaCorrelationState.Contribution(

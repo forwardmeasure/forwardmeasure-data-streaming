@@ -49,10 +49,9 @@ import org.testcontainers.utility.DockerImageName;
  * recipe. Built incrementally, stage by stage, each stage live-verified before the next is added -
  * see this class's own stage methods.
  *
- * <p>Real, published fowf Docker images only (the {@code quarkus} framework flavour - the only one
- * with a real, pushed digest as of 2026-09-21; {@code spring}/{@code micronaut} are tag-only,
- * unbuilt): {@code forwardmeasure/openworkflow-{migrations,execution-management,engine-kafka-
- * streams,operation-adapter,definition-management}-quarkus:1.1.0}.
+ * <p>Uses actual locally built FOWF images. Execution-management supports explicit Quarkus,
+ * Spring and Micronaut selection and logs the image ID used. Other service starters currently
+ * select Quarkus; execution-API parity alone is not evidence of engine/framework matrix coverage.
  *
  * <p><b>Tenant identity</b>: fowf's real onboarding convention is DID-first - {@code
  * did:web:<alias>.<domain>} - never an independently-chosen UUID (see {@code
@@ -296,15 +295,45 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
     return startExecutionManagement("kafka-streams");
   }
 
+  /** Packaged service framework and its real readiness endpoint. */
+  public enum Framework {
+    QUARKUS("quarkus", "/q/health/ready"),
+    SPRING("spring", "/actuator/health/readiness"),
+    MICRONAUT("micronaut", "/health/readiness");
+
+    private final String imageSuffix;
+    private final String readinessPath;
+
+    Framework(String imageSuffix, String readinessPath) {
+      this.imageSuffix = imageSuffix;
+      this.readinessPath = readinessPath;
+    }
+  }
+
   /**
    * @param engine {@code "kafka-streams"} or {@code "pekko"} - the one engine execution-management
    *     runs ({@code OPENWORKFLOW_ENGINE_ID}), reached at that engine container's own alias.
    */
   public GenericContainer<?> startExecutionManagement(String engine) {
+    return startExecutionManagement(engine, Framework.QUARKUS);
+  }
+
+  /** Selects the actual packaged execution API; this alone does not select an engine framework. */
+  public GenericContainer<?> startExecutionManagement(String engine, Framework framework) {
+    Objects.requireNonNull(framework, "framework");
     String engineAlias = "pekko".equals(engine) ? ENGINE_PEKKO_ALIAS : ENGINE_KAFKA_STREAMS_ALIAS;
     String issuer = hostDockerInternalIssuer();
     GenericContainer<?> executionManagement =
-        new GenericContainer<>(DockerImageName.parse(EXECUTION_MANAGEMENT_IMAGE))
+        new GenericContainer<>(
+                DockerImageName.parse(
+                    "forwardmeasure/openworkflow-execution-management-"
+                        + framework.imageSuffix
+                        + ":"
+                        + FOWF_IMAGE_TAG))
+            .withImagePullPolicy(image -> false)
+            .withCreateContainerCmdModifier(
+                command -> command.getHostConfig().withMemory(2L * 1024 * 1024 * 1024))
+            .withEnv("JAVA_TOOL_OPTIONS", "-Xmx1g")
             .withNetwork(existingNetwork(network.getId()))
             .withNetworkAliases(EXECUTION_MANAGEMENT_ALIAS)
             .withExtraHost("host.docker.internal", "host-gateway")
@@ -335,10 +364,39 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withLogConsumer(
                 new Slf4jLogConsumer(LOGGER).withPrefix("openworkflow-execution-management"))
             .waitingFor(
-                Wait.forLogMessage(".*started in.*\\n", 1)
+                Wait.forHttp(framework.readinessPath)
+                    .forStatusCode(200)
                     .withStartupTimeout(Duration.ofMinutes(3)));
-    executionManagement.start();
+    String expectedIssuer = keycloak.issuer().toString();
+    if (framework == Framework.SPRING) {
+      executionManagement
+          .withEnv("MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED", "true")
+          .withEnv("SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI", expectedIssuer)
+          .withEnv(
+              "SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI",
+              issuer + "/protocol/openid-connect/certs");
+    } else if (framework == Framework.MICRONAUT) {
+      // Keep the application's expected issuer setting while routing JWKS/AuthZEN over Docker.
+      // Do not add a test-only claims validator: the packaged application must own validation.
+      executionManagement
+          .withEnv("OPENWORKFLOW_KEYCLOAK_ISSUER", expectedIssuer)
+          .withEnv(
+              "JAVA_TOOL_OPTIONS",
+              "-Xmx1g"
+                  + " -Dopenworkflow.authorization.issuer="
+                  + issuer
+                  + " -Dmicronaut.security.token.jwt.signatures.jwks.keycloak.url="
+                  + issuer
+                  + "/protocol/openid-connect/certs");
+    }
+    // Register before startup so failed readiness also closes the partially started container.
     services.add(executionManagement);
+    executionManagement.start();
+    LOGGER.info(
+        "Execution API framework={} image={} imageId={}",
+        framework,
+        executionManagement.getDockerImageName(),
+        executionManagement.getContainerInfo().getImageId());
     return executionManagement;
   }
 

@@ -27,6 +27,8 @@ micronaut:
     authentication: bearer
     token:
       jwt:
+        claims-validators:
+          issuer: "${DATASTREAMING_KEYCLOAK_ISSUER:datastreaming.launcher.authorization.issuer:}"
         signatures:
           jwks:
             keycloak:

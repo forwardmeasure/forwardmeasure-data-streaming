@@ -215,6 +215,22 @@
     </dependency>
     <dependency>
       <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-execution-management-spring-service</artifactId>
+      <version>${forwardmeasure.openworkflow.version}</version>
+      <type>pom</type>
+      <scope>test</scope>
+      <exclusions><exclusion><groupId>*</groupId><artifactId>*</artifactId></exclusion></exclusions>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-execution-management-micronaut-service</artifactId>
+      <version>${forwardmeasure.openworkflow.version}</version>
+      <type>pom</type>
+      <scope>test</scope>
+      <exclusions><exclusion><groupId>*</groupId><artifactId>*</artifactId></exclusion></exclusions>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.openworkflow</groupId>
       <artifactId>openworkflow-definition-management-quarkus-service</artifactId>
       <version>${forwardmeasure.openworkflow.version}</version>
       <type>pom</type>

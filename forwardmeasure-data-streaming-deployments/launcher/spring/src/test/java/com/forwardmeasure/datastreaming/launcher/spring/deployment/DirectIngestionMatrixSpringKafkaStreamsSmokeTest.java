@@ -302,6 +302,16 @@ class DirectIngestionMatrixSpringKafkaStreamsSmokeTest {
   // must verify; this service's own client errors are problems too.
 
   @Test
+  void rejectsAGenuineTokenFromAnUnexpectedIssuer() {
+    assertUnauthorizedProblem(
+        given()
+            .port(port)
+            .header("Authorization", "Bearer " + fixture.mintUserTokenWithAlternateIssuer()),
+        "/ingestion-runs/issuer-check");
+    unknownPath_authenticatedIsNotFound();
+  }
+
+  @Test
   void unknownPath_unauthenticatedIsRejected() {
     assertUnauthorizedProblem(given().port(port), "/no-such-resource");
   }

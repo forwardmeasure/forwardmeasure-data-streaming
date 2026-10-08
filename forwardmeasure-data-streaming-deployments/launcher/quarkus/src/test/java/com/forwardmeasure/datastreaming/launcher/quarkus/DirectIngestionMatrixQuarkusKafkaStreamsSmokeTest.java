@@ -159,6 +159,17 @@ class DirectIngestionMatrixQuarkusKafkaStreamsSmokeTest {
   // must verify; this service's own client errors are problems too.
 
   @Test
+  void rejectsAGenuineTokenFromAnUnexpectedIssuer() {
+    assertUnauthorizedProblem(
+        given()
+            .header(
+                "Authorization",
+                "Bearer " + SmokeResource.fixture.mintUserTokenWithAlternateIssuer()),
+        "/ingestion-runs/issuer-check");
+    unknownPath_authenticatedIsNotFound();
+  }
+
+  @Test
   void unknownPath_unauthenticatedIsRejected() {
     assertUnauthorizedProblem(given(), "/no-such-resource");
   }

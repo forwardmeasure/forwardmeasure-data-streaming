@@ -36,34 +36,44 @@ import java.time.Duration;
 import java.util.Base64;
 import java.util.Map;
 import java.util.stream.Collectors;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.testcontainers.containers.GenericContainer;
 
 /**
- * Stage 3 only: the real {@code openworkflow-execution-management-quarkus} image booted against
+ * Stage 3 only: each real Quarkus, Spring and Micronaut execution-management image booted against
  * this fixture's real Postgres + Keycloak (no engine up yet). Proves the whole request path up to
- * (not including) engine dispatch works for real: HTTP -> Quarkus OIDC bearer-token validation ->
- * {@code QuarkusActiveOrganizationProvider}/tenant resolution -> the real tenant-schema-routed
- * query layer - by making a real, authenticated, read-only call ({@code listExecutions}) and
- * getting a real empty page back, not an auth rejection or a 5xx.
+ * (not including) engine dispatch works for real: HTTP -> production bearer-token validation ->
+ * production active-organization/tenant resolution -> the real tenant-schema-routed query layer -
+ * by making a real, authenticated, read-only call ({@code listExecutions}) and getting a real empty
+ * page back, not an auth rejection or a 5xx.
  */
 class RealFowfWorkflowFixtureStage3Test {
 
   private static final String ROLE = "workflow-run-launcher";
 
-  @Test
+  @ParameterizedTest
+  @EnumSource(RealFowfWorkflowFixture.Framework.class)
   @Timeout(300)
-  void executionManagementAcceptsARealAuthenticatedRequestForTheRealTenant() throws Exception {
+  void executionManagementAcceptsARealAuthenticatedRequestForTheRealTenant(
+      RealFowfWorkflowFixture.Framework framework) throws Exception {
     try (RealFowfWorkflowFixture fixture = RealFowfWorkflowFixture.start("fds-stage3", ROLE)) {
-      GenericContainer<?> executionManagement = fixture.startExecutionManagement();
+      GenericContainer<?> executionManagement =
+          fixture.startExecutionManagement("kafka-streams", framework);
       String baseUrl =
           "http://" + executionManagement.getHost() + ":" + executionManagement.getMappedPort(8080);
 
       ApiClient apiClient = new ApiClient();
       apiClient.setBasePath(baseUrl);
-      apiClient.setBearerToken(fixture.keycloak().mintUserToken());
       WorkflowExecutionsApi executionsApi = new WorkflowExecutionsApi(apiClient);
+
+      var anonymous =
+          assertThrows(
+              ApiException.class,
+              () -> executionsApi.listWorkflowExecutions(null, null, null, null, null, null, null));
+      assertEquals(401, anonymous.getCode(), "Execution queries require an authenticated caller");
+      apiClient.setBearerToken(fixture.keycloak().mintUserToken());
 
       WorkflowExecutionPage page =
           executionsApi.listWorkflowExecutions(null, null, null, null, null, null, null);
@@ -137,11 +147,14 @@ class RealFowfWorkflowFixtureStage3Test {
     }
   }
 
-  @Test
+  @ParameterizedTest
+  @EnumSource(RealFowfWorkflowFixture.Framework.class)
   @Timeout(300)
-  void executionManagementReturnsARealNotFoundForAnUnknownExecution() throws Exception {
+  void executionManagementReturnsARealNotFoundForAnUnknownExecution(
+      RealFowfWorkflowFixture.Framework framework) throws Exception {
     try (RealFowfWorkflowFixture fixture = RealFowfWorkflowFixture.start("fds-stage3b", ROLE)) {
-      GenericContainer<?> executionManagement = fixture.startExecutionManagement();
+      GenericContainer<?> executionManagement =
+          fixture.startExecutionManagement("kafka-streams", framework);
       String baseUrl =
           "http://" + executionManagement.getHost() + ":" + executionManagement.getMappedPort(8080);
 

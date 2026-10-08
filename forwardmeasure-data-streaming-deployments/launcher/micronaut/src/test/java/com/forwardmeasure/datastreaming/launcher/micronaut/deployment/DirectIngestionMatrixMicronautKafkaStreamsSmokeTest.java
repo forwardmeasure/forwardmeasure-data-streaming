@@ -289,6 +289,14 @@ class DirectIngestionMatrixMicronautKafkaStreamsSmokeTest implements TestPropert
   // must verify; this service's own client errors are problems too.
 
   @Test
+  void rejectsAGenuineTokenFromAnUnexpectedIssuer() throws Exception {
+    assertUnauthorizedProblem(
+        HttpRequest.GET("/ingestion-runs/issuer-check")
+            .bearerAuth(fixture.mintUserTokenWithAlternateIssuer()));
+    unknownPath_authenticatedIsNotFound();
+  }
+
+  @Test
   void unknownPath_unauthenticatedIsRejected() throws Exception {
     assertUnauthorizedProblem(HttpRequest.GET("/no-such-resource"));
   }

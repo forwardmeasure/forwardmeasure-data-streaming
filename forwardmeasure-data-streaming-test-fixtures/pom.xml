@@ -37,6 +37,7 @@
     <maven.javadoc.skip>false</maven.javadoc.skip>
   </properties>
   <dependencies>
+    <dependency><groupId>com.forwardmeasure.platform</groupId><artifactId>forwardmeasure-platform-data-contracts</artifactId><scope>test</scope></dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-mappers</artifactId><scope>test</scope></dependency>
     <!-- Test-scope only, to verify boundedFileSpecWithScreening actually compiles to a plan with a

@@ -49,9 +49,6 @@ import java.util.function.Function;
 import org.apache.camel.Exchange;
 import org.apache.camel.ProducerTemplate;
 import org.apache.camel.component.sql.SqlConstants;
-import org.apache.commons.csv.CSVFormat;
-import org.apache.commons.csv.CSVParser;
-import org.apache.commons.csv.CSVRecord;
 import org.apache.pekko.Done;
 import org.apache.pekko.actor.ActorSystem;
 import org.apache.pekko.stream.javadsl.Flow;
@@ -68,14 +65,14 @@ import org.slf4j.LoggerFactory;
  * real, bounded concurrency via {@link IngestionPipeline} - not one record at a time.
  *
  * <p>Source dispatch (see {@link #rowSource}): {@code file} sources dispatch on {@code
- * format.type()} (csv/json today - see {@link #parseTextRows}); {@code jdbc}/{@code sql} sources go
- * through {@code camel-sql} instead, whose rows already arrive Map-shaped, needing no text parsing
- * at all (see {@link #sqlRowSource}). Sink dispatch (see {@link #buildSink}): a {@code jdbc}/{@code
- * sql} sink sends the mapped row as a raw {@code Map} (matching {@code camel-sql}'s own
- * named-parameter binding, which reads named parameters from the body when it converts to a {@code
- * Map} - confirmed by reading {@code camel-sql}'s own {@code SqlHelper#lookupParameter}, not
- * assumed); every other connector still gets the JSON-string body every Camel producer component
- * reliably accepts regardless of which one it is.
+ * format.type()} (CSV/JSON parsed incrementally); {@code jdbc}/{@code sql} sources go through
+ * {@code camel-sql} instead, whose rows already arrive Map-shaped, needing no text parsing at all
+ * (see {@link #sqlRowSource}). Sink dispatch (see {@link #buildSink}): a {@code jdbc}/{@code sql}
+ * sink sends the mapped row as a raw {@code Map} (matching {@code camel-sql}'s own named-parameter
+ * binding, which reads named parameters from the body when it converts to a {@code Map} - confirmed
+ * by reading {@code camel-sql}'s own {@code SqlHelper#lookupParameter}, not assumed); every other
+ * connector still gets the JSON-string body every Camel producer component reliably accepts
+ * regardless of which one it is.
  *
  * <p><b>{@code delivery.flowControl}/{@code errors}/{@code sink.batching}, wired for real
  * 2026-09-13</b> - see {@link IngestionPipeline}'s own javadoc for the two real, previously- silent
@@ -460,9 +457,8 @@ public final class PekkoIngestionRunner {
   /**
    * Dispatches on {@code source.connector()}: {@code jdbc}/{@code sql} goes through {@link
    * #sqlRowSource} (rows already Map-shaped, no text parsing); everything else goes through {@link
-   * #textRowSource} (one Camel exchange's whole body is text, split into rows by {@code
-   * source.format().type()}). Package-visible (not {@code private}) so {@link
-   * PekkoCorrelationEngine} can reuse it as-is.
+   * #textRowSource} (a resource-scoped reader, parsed on downstream demand). Package-visible (not
+   * {@code private}) so {@link PekkoCorrelationEngine} can reuse it as-is.
    */
   static Source<SourceRow, ?> rowSource(CamelBridge bridge, SourceSpec source) {
     if (isSqlConnector(source.connector())) {
@@ -519,106 +515,15 @@ public final class PekkoIngestionRunner {
   }
 
   private static Source<SourceRow, ?> textRowSource(CamelBridge bridge, SourceSpec source) {
-    Publisher<String> contentPublisher = bridge.source(source.uri(), String.class);
-    String formatType = source.format() != null ? source.format().type() : "csv";
-    // Camel's file: consumer is a continuously-scheduled poller with no natural "done" signal to
-    // forward as onComplete() - left unbounded, a run blocking on stream completion (this
-    // pipeline's own design, matching D4's bounded-batch-process goal) would hang forever. take(1)
-    // bounds it here instead, independent of Camel's own completion semantics: today's design is
-    // one URI = one file, so cancelling upstream after that single file-content element is both
-    // correct and what actually stops Camel's polling (a Reactive Streams cancellation propagates
-    // to the underlying consumer/route). Character encoding is deliberately not this class's own
-    // concern - it's already a real, standard camel-file endpoint option (e.g. {@code
-    // file:dir?fileName=x.csv&charset=ISO-8859-1}), applied by Camel itself during its own
-    // byte[]->String body conversion before this method ever sees the content.
-    return Source.fromPublisher(contentPublisher)
-        .take(1)
-        .mapConcat(content -> parseTextRows(content, formatType, source.options()));
-  }
-
-  /**
-   * Format-driven, not connector-driven: adding a format needs one new small parser function
-   * registered here by format name, not a new connector class. Deliberately small (csv/json today)
-   * - unlike {@code camel-sql} rows (already Map-shaped, no parsing needed at all, see {@link
-   * #sqlRowSource}), turning raw file bytes into rows always needs *some* format-specific code
-   * somewhere; the fix here is dispatching on {@code format.type()} instead of always assuming CSV,
-   * not eliminating that code entirely.
-   */
-  private static List<SourceRow> parseTextRows(
-      String content, String formatType, Map<String, String> options) {
-    return switch (formatType) {
-      case "csv" -> parseCsvRows(content, options);
-      case "json", "ndjson", "jsonl" -> parseJsonRows(content);
-      default ->
-          throw new IllegalArgumentException(
-              "PekkoIngestionRunner: unsupported source format '"
-                  + formatType
-                  + "' - only csv/json/ndjson today");
-    };
-  }
-
-  /**
-   * {@code delimiter} (added 2026-09-14, a real gap: the real WorldCheck reference-population
-   * export - see {@code entity-intelligence-specifications}' own checked-in {@code
-   * schema-worldcheck-reference-population.yaml} - is genuinely tab-delimited, not comma, and this
-   * method previously had no way to express that at all) is a single character in {@code
-   * source.options()}, same generic per-source metadata bag every other connector's own options
-   * already use - not a new typed {@code FormatSpec} field, for the same "metadata over a bespoke
-   * Java field" reason {@code SourceSpec#options}'s own javadoc gives. Defaults to comma,
-   * preserving every existing spec that never set it.
-   */
-  private static List<SourceRow> parseCsvRows(String fileContent, Map<String, String> options) {
-    String delimiterOption = options.get("delimiter");
-    char delimiter =
-        delimiterOption == null || delimiterOption.isEmpty() ? ',' : delimiterOption.charAt(0);
-    CSVFormat format =
-        CSVFormat.DEFAULT
-            .builder()
-            .setHeader()
-            .setSkipHeaderRecord(true)
-            .setDelimiter(delimiter)
-            .get();
-    List<SourceRow> rows = new ArrayList<>();
-    try (CSVParser parser = CSVParser.parse(fileContent, format)) {
-      for (CSVRecord record : parser) {
-        rows.add(new CsvSourceRow(record));
-      }
-    } catch (IOException e) {
-      throw new UncheckedIOException(e);
-    }
-    return rows;
-  }
-
-  /**
-   * Accepts both shapes: a single JSON array of objects, or newline-delimited JSON (one object per
-   * line) - decided by the content's own leading character, not a further format-name distinction,
-   * since both are unambiguously "json" to a spec author and the two real shapes in practice.
-   */
-  private static List<SourceRow> parseJsonRows(String content) {
-    ObjectMapper mapper = new ObjectMapper();
-    List<SourceRow> rows = new ArrayList<>();
-    String trimmed = content.strip();
-    try {
-      if (trimmed.startsWith("[")) {
-        List<Map<String, Object>> parsed =
-            mapper.readValue(trimmed, new TypeReference<List<Map<String, Object>>>() {});
-        for (Map<String, Object> row : parsed) {
-          rows.add(new MapSourceRow(row));
-        }
-      } else {
-        for (String line : trimmed.lines().toList()) {
-          if (line.isBlank()) {
-            continue;
-          }
-          Map<String, Object> row =
-              mapper.readValue(line, new TypeReference<Map<String, Object>>() {});
-          rows.add(new MapSourceRow(row));
-        }
-      }
-    } catch (JsonProcessingException e) {
-      throw new UncheckedIOException(e);
-    }
-    return rows;
+    // The resource owns the Camel exchange and parser until EOF, failure or cancellation.
+    // Never convert a file exchange to String or collect its rows before downstream demand.
+    return Source.unfoldResource(
+            () -> StreamingTextRows.open(bridge, source),
+            StreamingTextRows::next,
+            StreamingTextRows::close)
+        .withAttributes(
+            org.apache.pekko.stream.ActorAttributes.dispatcher(
+                "pekko.actor.default-blocking-io-dispatcher"));
   }
 
   /**

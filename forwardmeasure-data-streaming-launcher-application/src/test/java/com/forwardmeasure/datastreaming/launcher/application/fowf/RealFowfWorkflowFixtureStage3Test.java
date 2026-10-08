@@ -17,11 +17,25 @@
 package com.forwardmeasure.datastreaming.launcher.application.fowf;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture;
 import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecutionPage;
 import com.forwardmeasure.openworkflow.execution.client.ApiClient;
 import com.forwardmeasure.openworkflow.execution.client.ApiException;
 import com.forwardmeasure.openworkflow.execution.client.api.WorkflowExecutionsApi;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.Base64;
+import java.util.Map;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.testcontainers.containers.GenericContainer;
@@ -57,6 +71,69 @@ class RealFowfWorkflowFixtureStage3Test {
           0,
           page.getItems().size(),
           "a freshly onboarded tenant must have zero real executions, not an error");
+
+      // Mint another real token from the same Keycloak realm/key through the alternate local
+      // loopback hostname. Only its issuer changes: an invalid signature cannot make this pass.
+      var issuer = fixture.keycloak().issuer();
+      var alternate =
+          new URI(
+              issuer.getScheme(),
+              null,
+              "127.0.0.1".equals(issuer.getHost()) ? "localhost" : "127.0.0.1",
+              issuer.getPort(),
+              issuer.getPath() + "/protocol/openid-connect/token",
+              null,
+              null);
+      String form =
+          Map.of(
+                  "grant_type",
+                  "password",
+                  "client_id",
+                  AuthzenKeycloakFixture.CLIENT_ID,
+                  "username",
+                  AuthzenKeycloakFixture.USERNAME,
+                  "password",
+                  AuthzenKeycloakFixture.PASSWORD)
+              .entrySet()
+              .stream()
+              .map(
+                  entry ->
+                      URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8)
+                          + "="
+                          + URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8))
+              .collect(Collectors.joining("&"));
+      try (var http = HttpClient.newHttpClient()) {
+        var response =
+            http.send(
+                HttpRequest.newBuilder(alternate)
+                    .timeout(Duration.ofSeconds(10))
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .POST(HttpRequest.BodyPublishers.ofString(form))
+                    .build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(
+            200, response.statusCode(), "Alternate hostname must reach the same real token issuer");
+        String otherToken =
+            new ObjectMapper().readTree(response.body()).path("access_token").asText();
+        var claims =
+            new ObjectMapper().readTree(Base64.getUrlDecoder().decode(otherToken.split("\\.")[1]));
+        assertNotEquals(issuer.toString(), claims.path("iss").asText());
+        apiClient.setBearerToken(otherToken);
+        var rejected =
+            assertThrows(
+                ApiException.class,
+                () ->
+                    executionsApi.listWorkflowExecutions(null, null, null, null, null, null, null));
+        assertEquals(
+            401, rejected.getCode(), "A genuine token from an unexpected issuer must be rejected");
+      }
+      apiClient.setBearerToken(fixture.keycloak().mintUserToken());
+      assertEquals(
+          0,
+          executionsApi
+              .listWorkflowExecutions(null, null, null, null, null, null, null)
+              .getItems()
+              .size());
     }
   }
 

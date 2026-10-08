@@ -323,15 +323,9 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withEnv("OPENWORKFLOW_TENANT_DATABASE_HOST", POSTGRES_ALIAS)
             .withEnv("OPENWORKFLOW_TENANT_DATABASE_PORT", "5432")
             .withEnv("OPENWORKFLOW_KEYCLOAK_ISSUER", issuer)
-            // A minted token's own "iss" claim reflects whatever host the caller used to reach
-            // Keycloak (localhost, from this JVM) - necessarily different from the
-            // host.docker.internal address this container itself uses to reach the identical
-            // Keycloak instance (confirmed live: Quarkus OIDC's default strict issuer check
-            // rejects the mismatch outright, "Issuer (iss) claim value ... doesn't match expected
-            // value"). "any" is Quarkus OIDC's own real, documented config for exactly this class
-            // of dev/test hostname mismatch - not a security-relevant relaxation in production,
-            // where there is only ever one real hostname.
-            .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", "any")
+            // Discovery/JWKS use the container-reachable address, while the JWT must retain
+            // the exact issuer used to mint the fixture's real tokens on the host.
+            .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", keycloak.issuer().toString())
             .withEnv("OPENWORKFLOW_CLIENT_ID", AuthzenKeycloakFixture.AUTHZEN_CLIENT_ID)
             .withEnv("OPENWORKFLOW_CLIENT_SECRET", AuthzenKeycloakFixture.AUTHZEN_CLIENT_SECRET)
             .withEnv("OPENWORKFLOW_ORGANIZATION_CLIENT_ID", AuthzenKeycloakFixture.CLIENT_ID)
@@ -395,7 +389,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withEnv("FORWARDMEASURE_JPA_TENANT_DATABASE_PASSWORD", RUNTIME_DATABASE_PASSWORD)
             .withEnv("FORWARDMEASURE_JPA_FUNCTIONAL_SCHEMA", "OPENWORKFLOW")
             .withEnv("OPENWORKFLOW_KEYCLOAK_ISSUER", issuer)
-            .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", "any")
+            .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", keycloak.issuer().toString())
             .withEnv("OPENWORKFLOW_CLIENT_ID", AuthzenKeycloakFixture.AUTHZEN_CLIENT_ID)
             .withEnv("OPENWORKFLOW_CLIENT_SECRET", AuthzenKeycloakFixture.AUTHZEN_CLIENT_SECRET)
             .withEnv("OPENWORKFLOW_ORGANIZATION_CLIENT_ID", AuthzenKeycloakFixture.CLIENT_ID)
@@ -518,7 +512,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
                 "OPENWORKFLOW_CLOUD_EVENTS_PUBLISH_URL",
                 "http://" + CLOUD_EVENTS_STUB_ALIAS + ":8080/")
             .withEnv("OPENWORKFLOW_KEYCLOAK_ISSUER", issuer)
-            .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", "any")
+            .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", keycloak.issuer().toString())
             .withEnv("OPENWORKFLOW_CLIENT_ID", AuthzenKeycloakFixture.AUTHZEN_CLIENT_ID)
             .withEnv("OPENWORKFLOW_CLIENT_SECRET", AuthzenKeycloakFixture.AUTHZEN_CLIENT_SECRET)
             .withEnv("OPENWORKFLOW_ORGANIZATION_CLIENT_ID", AuthzenKeycloakFixture.CLIENT_ID)
@@ -601,7 +595,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withEnv("OPENWORKFLOW_TENANT_DATABASE_HOST", POSTGRES_ALIAS)
             .withEnv("OPENWORKFLOW_TENANT_DATABASE_PORT", "5432")
             .withEnv("OPENWORKFLOW_KEYCLOAK_ISSUER", issuer)
-            .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", "any")
+            .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", keycloak.issuer().toString())
             .withEnv("OPENWORKFLOW_CLIENT_ID", AuthzenKeycloakFixture.AUTHZEN_CLIENT_ID)
             .withEnv("OPENWORKFLOW_CLIENT_SECRET", AuthzenKeycloakFixture.AUTHZEN_CLIENT_SECRET)
             .withEnv("OPENWORKFLOW_ORGANIZATION_CLIENT_ID", AuthzenKeycloakFixture.CLIENT_ID)
@@ -862,8 +856,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
    * kubernetes[.default[.svc...]]} names) never includes {@code host.docker.internal}, so strict
    * TLS hostname verification against the rewritten {@code server:} URL would fail even though the
    * CA and connection are both genuinely trusted - the standard, documented kubeconfig field for
-   * exactly this dev/test hostname-mismatch class of problem, same reasoning as this fixture's own
-   * {@code QUARKUS_OIDC_TOKEN_ISSUER=any} for Keycloak.
+   * this disposable K3s transport. JWT issuer validation remains enabled independently.
    */
   private static String hostDockerInternalKubeconfig(KubernetesTestContainer k3s) {
     String kubeconfig = k3s.kubeConfigYaml();

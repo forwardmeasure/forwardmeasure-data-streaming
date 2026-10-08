@@ -46,8 +46,9 @@ import org.testcontainers.utility.DockerImageName;
 
 /**
  * Real, no-mocks, **spec-only** end-to-end proof: the org's own canonical WorldCheck-to-OpenSearch
- * example (checked in at {@code src/test/resources/specs/worldcheck-to-opensearch.yaml}), loaded
- * via the real {@link IngestionSpec#load} file path and run through {@link
+ * example (checked in at {@code
+ * forwardmeasure-data-streaming-test-fixtures/src/main/resources/fixtures/worldcheck-to-opensearch.yaml}),
+ * loaded via the real {@link IngestionSpec#load} file path and run through {@link
  * PekkoIngestionRunner#run(IngestionSpec, ActorSystem)}, against a real, unsecured OpenSearch node.
  *
  * <p>Rewritten 2026-09-14 to use the REAL WorldCheck file shape and mapping already checked in at
@@ -246,10 +247,10 @@ class PekkoWorldCheckToOpenSearchIntegrationTest {
     try (InputStream in =
         Thread.currentThread()
             .getContextClassLoader()
-            .getResourceAsStream("specs/worldcheck-opensearch-index-settings.json")) {
+            .getResourceAsStream("fixtures/worldcheck-opensearch-index-settings.json")) {
       if (in == null) {
         throw new IllegalStateException(
-            "specs/worldcheck-opensearch-index-settings.json not found on classpath");
+            "fixtures/worldcheck-opensearch-index-settings.json not found on classpath");
       }
       Files.write(target, in.readAllBytes());
     }
@@ -260,10 +261,10 @@ class PekkoWorldCheckToOpenSearchIntegrationTest {
     try (InputStream in =
         Thread.currentThread()
             .getContextClassLoader()
-            .getResourceAsStream("specs/worldcheck-to-opensearch.yaml")) {
+            .getResourceAsStream("fixtures/worldcheck-to-opensearch.yaml")) {
       if (in == null) {
         throw new IllegalStateException(
-            "specs/worldcheck-to-opensearch.yaml not found on classpath");
+            "fixtures/worldcheck-to-opensearch.yaml not found on classpath");
       }
       return new String(in.readAllBytes(), StandardCharsets.UTF_8);
     }

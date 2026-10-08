@@ -1,3 +1,5 @@
+# Historical flat-target FDS runtime fixture. Production FEI contracts are owned by
+# forwardmeasure-entity-intelligence-ingestion-contracts; this is not an alternative FEI mapping.
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements. See the NOTICE file distributed with
 # this work for additional information regarding copyright ownership.
@@ -22,7 +24,7 @@
 # invented, simplified toy - the earlier version was not actually representative of what fei's own
 # SimpleSourceIngestionWorker ingests in production, despite claiming to be.
 #
-# THE ACTUAL SOURCE SCHEMA FILE: this directory's own schema-worldcheck-reference-population.yaml
+# THE ACTUAL SOURCE SCHEMA FILE: legacy/schema-worldcheck-reference-population.yaml
 # is a byte-identical copy of the real one above - every column this spec's own `source:` section
 # assumes (name, delimited-text type, nullability) is documented there field-by-field. `source.schema
 # .ref` below (schema://worldcheck/reference-population/1.0) is still just a plain string today -

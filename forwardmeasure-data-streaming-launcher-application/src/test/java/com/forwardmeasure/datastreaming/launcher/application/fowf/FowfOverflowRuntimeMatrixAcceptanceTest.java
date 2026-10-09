@@ -321,7 +321,11 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
               marker: '${ .marker }'
               length: '${ .blob | length }'
     """
-        .formatted(name, source, wait ? "  - restoreWindow:\n      wait: PT90S" : "", effect);
+        .formatted(
+            UUID.nameUUIDFromBytes(name.getBytes(StandardCharsets.UTF_8)),
+            source,
+            wait ? "  - restoreWindow:\n      wait: PT90S" : "",
+            effect);
   }
 
   private static List<String> objectKeys(GcsEmulatorTestContainer storage) throws Exception {

@@ -932,7 +932,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
         buildOperationAdapter("unused", "unused", 1, pekko)
             .withEnv(
                 "OPENWORKFLOW_HTTP_EGRESS_ALLOWLIST",
-                tenantId.value() + "=" + host + ",host.docker.internal")
+                tenantId.value() + "=" + host + "|host.docker.internal")
             .withEnv("OPENWORKFLOW_ADAPTER_SECRET_DIRECTORY", "/var/run/secrets/openworkflow")
             .withCopyToContainer(
                 Transferable.of(token.getBytes(StandardCharsets.UTF_8), 0444),

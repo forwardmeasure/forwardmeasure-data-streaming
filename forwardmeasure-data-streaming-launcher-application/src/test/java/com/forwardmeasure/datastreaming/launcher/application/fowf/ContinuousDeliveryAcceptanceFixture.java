@@ -175,8 +175,9 @@ public final class ContinuousDeliveryAcceptanceFixture implements AutoCloseable 
     long deadline = System.nanoTime() + Duration.ofSeconds(90).toNanos();
     JsonNode last = JSON.missingNode();
     while (System.nanoTime() < deadline) {
-      last = get("/worldcheck-screening-records/_doc/" + id).path("_source");
-      if (expected.equals(last.path(field).asText())) return last;
+      last = get("/worldcheck-screening-records/_doc/" + id);
+      JsonNode source = last.path("_source");
+      if (expected.equals(source.path(field).asText())) return source;
       Thread.sleep(500);
     }
     throw new AssertionError(
@@ -192,8 +193,19 @@ public final class ContinuousDeliveryAcceptanceFixture implements AutoCloseable 
                     .GET()
                     .build(),
                 HttpResponse.BodyHandlers.ofString());
-    assertTrue(response.statusCode() == 200 || response.statusCode() == 404, response.body());
-    return JSON.readTree(response.body());
+    JsonNode body = JSON.readTree(response.body());
+    // Auto-creation may expose the index before its primary shard has finished recovery.
+    // Keep polling only this specific readiness state, within awaitValue's existing deadline.
+    boolean recoveringShard =
+        response.statusCode() == 503
+            && "no_shard_available_action_exception"
+                .equals(body.path("error").path("type").asText())
+            && "illegal_index_shard_state_exception"
+                .equals(body.path("error").path("caused_by").path("type").asText());
+    assertTrue(
+        response.statusCode() == 200 || response.statusCode() == 404 || recoveringShard,
+        response.body());
+    return body;
   }
 
   private static void configureDisposableDns(RealFowfWorkflowFixture runtime) throws Exception {

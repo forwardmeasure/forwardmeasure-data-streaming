@@ -143,7 +143,8 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
         if (scenario == Scenario.STORAGE_WRITE_FAILURE) {
           // Make the real bucket unavailable. Do not fake a storage client's exception.
           for (String key : objectKeys(storage)) deleteObject(storage, key);
-          storageRequest(storage, "DELETE", "/storage/v1/b/" + BUCKET, null, 204);
+          storageRequest(storage, "DELETE", "/storage/v1/b/" + BUCKET, null, 200, 204);
+          storageRequest(storage, "GET", "/storage/v1/b/" + BUCKET, null, 404);
         }
         UUID revision =
             publish(
@@ -345,7 +346,8 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
   }
 
   private static void deleteObject(GcsEmulatorTestContainer storage, String key) throws Exception {
-    storageRequest(storage, "DELETE", objectPath(key), null, 204);
+    storageRequest(storage, "DELETE", objectPath(key), null, 200, 204);
+    storageRequest(storage, "GET", objectPath(key) + "?alt=media", null, 404);
   }
 
   private static String objectPath(String key) {
@@ -357,7 +359,7 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
   }
 
   private static byte[] storageRequest(
-      GcsEmulatorTestContainer storage, String method, String path, byte[] body, int expected)
+      GcsEmulatorTestContainer storage, String method, String path, byte[] body, int... expected)
       throws Exception {
     var request =
         HttpRequest.newBuilder(URI.create(storage.hostEndpoint() + path))
@@ -370,8 +372,10 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
                     : HttpRequest.BodyPublishers.ofByteArray(body))
             .build();
     var response = HTTP.send(request, HttpResponse.BodyHandlers.ofByteArray());
-    assertEquals(
-        expected, response.statusCode(), new String(response.body(), StandardCharsets.UTF_8));
+    assertTrue(
+        java.util.Arrays.stream(expected).anyMatch(status -> status == response.statusCode()),
+        method + " " + path + " returned " + response.statusCode() + ": "
+            + new String(response.body(), StandardCharsets.UTF_8));
     return response.body();
   }
 }

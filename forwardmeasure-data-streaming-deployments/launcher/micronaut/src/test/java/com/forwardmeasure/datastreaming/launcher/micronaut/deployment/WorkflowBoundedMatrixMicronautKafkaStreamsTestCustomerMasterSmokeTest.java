@@ -83,7 +83,9 @@ class WorkflowBoundedMatrixMicronautKafkaStreamsTestCustomerMasterSmokeTest
 
   @Override
   public Map<String, String> getProperties() {
-    fixture = RealFowfWorkflowFixture.start("fds-micronaut-wf-ks-cm-smoke", ROLE);
+    fixture =
+        RealFowfWorkflowFixture.start(
+            "fds-micronaut-wf-ks-cm-smoke", ROLE, RealFowfWorkflowFixture.Framework.MICRONAUT);
     try (var k8s = fixture.kubernetes().createClient()) {
       k8s.namespaces()
           .resource(

@@ -93,7 +93,9 @@ class WorkflowBoundedMatrixMicronautPekkoSmokeTest implements TestPropertyProvid
 
   @Override
   public Map<String, String> getProperties() {
-    fixture = RealFowfWorkflowFixture.start("fds-micronaut-wf-smoke", ROLE);
+    fixture =
+        RealFowfWorkflowFixture.start(
+            "fds-micronaut-wf-smoke", ROLE, RealFowfWorkflowFixture.Framework.MICRONAUT);
     try (var k8s = fixture.kubernetes().createClient()) {
       k8s.namespaces()
           .resource(

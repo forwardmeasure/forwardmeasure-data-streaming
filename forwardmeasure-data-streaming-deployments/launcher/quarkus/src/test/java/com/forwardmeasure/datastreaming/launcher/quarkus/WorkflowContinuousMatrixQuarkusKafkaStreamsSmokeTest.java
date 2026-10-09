@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.forwardmeasure.datastreaming.launcher.application.AuthorizationAction;
+import com.forwardmeasure.datastreaming.launcher.application.fowf.ContinuousDeliveryAcceptanceFixture;
 import com.forwardmeasure.datastreaming.launcher.application.fowf.RealFowfWorkflowFixture;
 import com.forwardmeasure.openworkflow.definition.management.api.model.CreateWorkflowDefinitionRequest;
 import com.forwardmeasure.openworkflow.definition.management.api.model.CreateWorkflowRequest;
@@ -42,13 +43,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.testcontainers.containers.GenericContainer;
 
-/**
- * The Kafka-Streams-engine sibling of {@code WorkflowContinuousMatrixQuarkusPekkoSmokeTest} - not
- * blocked on `correlated-worker-events-leg-actor-context-gap-2026-09-24.md` (that bug is specific
- * to the `correlated-worker` construct; the 2-step apply/watch `kubernetes-deployment` workflow
- * this test dispatches never uses it), and already proven at the fixture level by {@code
- * RealFowfWorkflowFixtureEndToEndTest}'s own `engine=kafka-streams` parameterization.
- */
+/** Public workflow admission, real worker readiness, and two waves of persisted input. */
 @QuarkusTest
 @QuarkusTestResource(
     value = WorkflowContinuousMatrixQuarkusKafkaStreamsSmokeTest.SmokeResource.class,
@@ -56,8 +51,8 @@ import org.testcontainers.containers.GenericContainer;
 class WorkflowContinuousMatrixQuarkusKafkaStreamsSmokeTest {
 
   @Test
-  @Timeout(300)
-  void realHttpCallThroughFowfAppliesARealDeploymentThatReachesAvailable() throws Exception {
+  @Timeout(600)
+  void realHttpCallThroughFowfDeploysAWorkerThatKeepsIngesting() throws Exception {
     String correlationId = "wf-cont-ks-smoke-" + UUID.randomUUID();
     String token = SmokeResource.fixture.keycloak().mintUserToken();
 
@@ -104,6 +99,7 @@ class WorkflowContinuousMatrixQuarkusKafkaStreamsSmokeTest {
         readyReplicas =
             deployment.getStatus() == null ? null : deployment.getStatus().getReadyReplicas();
         if (Integer.valueOf(1).equals(readyReplicas)) {
+          SmokeResource.delivery.verifyOngoingDelivery();
           return;
         }
         Thread.sleep(500);
@@ -139,16 +135,19 @@ class WorkflowContinuousMatrixQuarkusKafkaStreamsSmokeTest {
     static final String ROLE = "quarkus-workflow-continuous-ks-smoke-role";
     static final String NAMESPACE = "fds-quarkus-workflow-continuous-ks-smoke";
     static final String CORRELATION_NAME = "fds-quarkus-cont-ks-worker";
-    static final String IMAGE =
-        "docker.io/library/busybox@sha256:"
-            + "73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662";
+    static String IMAGE;
+    static ContinuousDeliveryAcceptanceFixture delivery;
 
     static volatile RealFowfWorkflowFixture fixture;
     static volatile WorkflowDefinition published;
 
     @Override
     public Map<String, String> start() {
-      fixture = RealFowfWorkflowFixture.start("fds-quarkus-wf-cont-ks-smoke", ROLE);
+      fixture =
+          RealFowfWorkflowFixture.start(
+              "fds-quarkus-wf-cont-ks-smoke", ROLE, RealFowfWorkflowFixture.Framework.QUARKUS);
+      delivery = new ContinuousDeliveryAcceptanceFixture(fixture, "kafka-streams");
+      IMAGE = delivery.image();
       try (var k8s = fixture.kubernetes().createClient()) {
         k8s.namespaces()
             .resource(
@@ -217,15 +216,16 @@ class WorkflowContinuousMatrixQuarkusKafkaStreamsSmokeTest {
           Map.entry("datastreaming.launcher.k8s.images", IMAGE),
           // Leave optional pull secrets, host aliases and Spark settings at production defaults.
           Map.entry("datastreaming.launcher.pekko.image", IMAGE),
-          Map.entry("datastreaming.launcher.pekko.command", "true #"),
+          Map.entry("datastreaming.launcher.pekko.command", "false"),
           Map.entry("datastreaming.launcher.kafka-streams.image", IMAGE),
-          Map.entry("datastreaming.launcher.kafka-streams.command", "true #"));
+          Map.entry("datastreaming.launcher.kafka-streams.command", "false"));
     }
 
     @Override
     public void stop() {
       if (fixture != null) {
         fixture.close();
+        if (delivery != null) delivery.close();
       }
     }
 
@@ -302,9 +302,9 @@ class WorkflowContinuousMatrixQuarkusKafkaStreamsSmokeTest {
                 payload:
                   namespace: fds-quarkus-workflow-continuous-ks-smoke
                   name: %s
-                  image: docker.io/library/busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+                  image: %s
                   replicas: 1
-                  command: ["sh", "-c", "sleep 300"]
+                  command: %s
         - watchStreamWorker:
             call: asyncapi
             with:
@@ -316,7 +316,13 @@ class WorkflowContinuousMatrixQuarkusKafkaStreamsSmokeTest {
                   amount: 1
                 filter: '${ {namespace: "fds-quarkus-workflow-continuous-ks-smoke", name: "%s", readinessTimeoutSeconds: 120} }'
       """
-          .formatted(asyncApiUrl, CORRELATION_NAME, asyncApiUrl, CORRELATION_NAME);
+          .formatted(
+              asyncApiUrl,
+              CORRELATION_NAME,
+              IMAGE,
+              delivery.commandJson(),
+              asyncApiUrl,
+              CORRELATION_NAME);
     }
 
     private static String asyncApiDocument() {

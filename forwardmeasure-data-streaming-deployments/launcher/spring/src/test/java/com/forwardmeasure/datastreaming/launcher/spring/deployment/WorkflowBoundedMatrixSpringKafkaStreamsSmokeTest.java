@@ -89,7 +89,9 @@ class WorkflowBoundedMatrixSpringKafkaStreamsSmokeTest {
 
   @BeforeAll
   static void startFixtures() throws Exception {
-    fixture = RealFowfWorkflowFixture.start("fds-spring-wf-ks-smoke", ROLE);
+    fixture =
+        RealFowfWorkflowFixture.start(
+            "fds-spring-wf-ks-smoke", ROLE, RealFowfWorkflowFixture.Framework.SPRING);
     try (var k8s = fixture.kubernetes().createClient()) {
       k8s.namespaces()
           .resource(

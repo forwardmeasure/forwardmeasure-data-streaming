@@ -26,8 +26,6 @@ import com.forwardmeasure.datastreaming.testfixtures.WorldCheckFixtures;
 import com.forwardmeasure.testcontainers.kubernetes.KubernetesTestContainer;
 import com.forwardmeasure.testcontainers.opensearch.OpenSearchTestContainer;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
-import io.fabric8.kubernetes.api.model.Secret;
-import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
 import io.quarkus.test.junit.QuarkusTest;
@@ -45,46 +43,12 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-/**
- * The first real, no-mocks proof of Phase G's own core new mechanism (see the repo's own
- * gap-bridging plan) - a real HTTP call against a real, booted Quarkus launcher app dispatches a
- * real Kubernetes Job into a real (Testcontainers-managed) K3s cluster, and that Job's own pod
- * reaches a real, sibling Testcontainers-managed service (OpenSearch) it has no cluster-DNS route
- * to, via the new {@code hostAliases} plumbing this session added to {@code KubernetesJobSpec}/
- * {@code KubernetesJobLifecycle} (fowf) and {@code DirectIngestionLauncher}/{@code
- * EnvConfiguredJobLauncher}/{@code LauncherQuarkusBinding} (this repo).
- *
- * <p><b>Real business-logic proof when Docker Hub credentials are available (2026-09-21)</b>: if
- * {@code DOCKER_HUB_USERNAME}/{@code DOCKER_HUB_TOKEN} are set (same gate {@code
- * DirectIngestionLauncherRealImageIntegrationTest} already uses), this test dispatches the real,
- * private, pushed Pekko executor image and seeds a real (ASCII-only, shell-safe) WorldCheck row -
- * {@code wc-3}, "Acme Holdings" - proving the real {@code FieldMappingEngine} mapping into a real
- * OpenSearch document, not just the plumbing around it. Falls back to a real, public stand-in image
- * ({@code curlimages/curl@sha256:83a505ba2ba62f208ed6e410c268b7b9aa48f0f7b403c8108b9773b44199dbba})
- * when credentials aren't available, so this test still runs in any environment - only the
- * dispatched container's own command/image differs; the real REST -&gt; real Keycloak auth -&gt;
- * real K8s dispatch -&gt; real cross-container reachability plumbing is identical either way. The
- * {@code IngestionSpec} in the request body is always a real, valid WorldCheck spec (from {@link
- * WorldCheckFixtures}) - {@code ExecutionPlanCompiler} still has to really resolve it to {@code
- * PEKKO_STREAMS} for this test to dispatch the right image at all.
- *
- * <p>The dispatched command ends in a real shell {@code #} comment so the extra {@code
- * /tmp/ingestion-spec.yaml} argument {@link
- * com.forwardmeasure.datastreaming.launcher.application.DirectIngestionLauncher}'s own {@code
- * reconstructSpecAndRunCommand} always appends is silently ignored - this stand-in never reads the
- * spec file at all, unlike a real runner. The document id it writes is a fixed constant, not
- * generated per test run - this class has exactly one real test method, so there is no collision
- * risk, and a fixed id keeps the dispatched command a plain string baked once at resource-startup
- * time rather than needing per-test config injection (Quarkus's own {@code
- * QuarkusTestResourceLifecycleManager#start} runs once before any {@code @Test} method).
- */
+/** Real REST admission, selected current executor, and persisted provider output. */
 @QuarkusTest
 @QuarkusTestResource(
     value = DirectIngestionMatrixQuarkusPekkoSmokeTest.SmokeResource.class,
     restrictToAnnotatedClass = true)
 class DirectIngestionMatrixQuarkusPekkoSmokeTest {
-
-  private static final String DOCUMENT_ID = "smoke-doc-1";
 
   @Test
   @Timeout(180)
@@ -93,15 +57,10 @@ class DirectIngestionMatrixQuarkusPekkoSmokeTest {
     String token = SmokeResource.fixture.mintUserToken();
 
     var spec =
-        SmokeResource.realImageMode
-            ? WorldCheckFixtures.boundedFileSpec(
-                "file:/tmp?fileName=source.csv&noop=true&initialDelay=0&delay=100",
-                SmokeResource.openSearchUrlForPod,
-                Path.of(""))
-            : WorldCheckFixtures.boundedFileSpec(
-                "file:/tmp?fileName=unused.csv&noop=true",
-                "http://unused:9200",
-                Path.of("/tmp/unused.json"));
+        WorldCheckFixtures.boundedFileSpec(
+            "file:/tmp?fileName=source.csv&noop=true&initialDelay=0&delay=100",
+            SmokeResource.openSearchUrlForPod,
+            Path.of(""));
 
     Map<String, Object> requestBody =
         Map.of(
@@ -135,9 +94,7 @@ class DirectIngestionMatrixQuarkusPekkoSmokeTest {
     // test JVM's own side) confirms the dispatched pod's own write genuinely happened, not just
     // that the Job phase reported success.
     String documentUri =
-        SmokeResource.realImageMode
-            ? SmokeResource.opensearch.hostEndpoint() + "/worldcheck-screening-records/_doc/wc-3"
-            : SmokeResource.opensearch.hostEndpoint() + "/smoke-index/_doc/" + DOCUMENT_ID;
+        SmokeResource.opensearch.hostEndpoint() + "/worldcheck-screening-records/_doc/wc-3";
     HttpResponse<String> document =
         HttpClient.newHttpClient()
             .send(
@@ -152,10 +109,7 @@ class DirectIngestionMatrixQuarkusPekkoSmokeTest {
     // "names" field at all - "entity_kind":"organization" (via classify_party_kind) is the real,
     // always-present field this row's own mapping actually populates.
     assertTrue(
-        document
-            .body()
-            .contains(
-                SmokeResource.realImageMode ? "\"entity_kind\":\"organization\"" : DOCUMENT_ID),
+        document.body().contains("\"entity_kind\":\"organization\""),
         "unexpected document body: " + document.body());
   }
 
@@ -182,18 +136,8 @@ class DirectIngestionMatrixQuarkusPekkoSmokeTest {
   public static final class SmokeResource implements QuarkusTestResourceLifecycleManager {
     static final String ROLE_NAME = "quarkus-direct-smoke-role";
     static final String NAMESPACE = "fds-quarkus-smoke";
-    static final String CURL_IMAGE =
-        "curlimages/curl@sha256:83a505ba2ba62f208ed6e410c268b7b9aa48f0f7b403c8108b9773b44199dbba";
 
-    /**
-     * Re-pinned 2026-09-21 alongside {@code DirectIngestionLauncherRealImageIntegrationTest} - see
-     * that class's own javadoc for why the digest changed (the real SLF4J-provider fix).
-     */
-    static final String PEKKO_IMAGE =
-        "docker.io/forwardmeasure/data-streaming-executor-pekko@sha256:"
-            + "a1eab0f12073b4b2f0215fd350061522ffa01aca08ab259a81e8053ee04a90e3";
-
-    static final String PULL_SECRET_NAME = "dockerhub-pull-secret";
+    private static String PEKKO_IMAGE;
 
     /**
      * Real WorldCheck row wc-3 ("Acme Holdings") plus the real header line, both extracted directly
@@ -218,11 +162,16 @@ class DirectIngestionMatrixQuarkusPekkoSmokeTest {
     static volatile AuthzenKeycloakFixture fixture;
     static volatile KubernetesTestContainer kubernetes;
     static volatile OpenSearchTestContainer opensearch;
-    static volatile boolean realImageMode;
+
     static volatile String openSearchUrlForPod;
 
     @Override
     public Map<String, String> start() {
+      String executorImage = System.getProperty("fds.acceptance.pekko.image");
+      if (executorImage == null || executorImage.isBlank()) {
+        throw new IllegalStateException(
+            "Set fds.acceptance.pekko.image to the current locally built executor image");
+      }
       fixture = AuthzenKeycloakFixture.start();
       var tenantDid =
           com.forwardmeasure.jpa.tenancy.Did.parse("did:fwmtest:tenant:" + UUID.randomUUID());
@@ -241,22 +190,13 @@ class DirectIngestionMatrixQuarkusPekkoSmokeTest {
 
       kubernetes = new KubernetesTestContainer().start();
       CurrentKubernetesTestContainer.set(kubernetes);
+      PEKKO_IMAGE = kubernetes.loadImageAndPinDigest(executorImage);
       try (var client = kubernetes.createClient()) {
         client
             .namespaces()
             .resource(
                 new NamespaceBuilder().withNewMetadata().withName(NAMESPACE).endMetadata().build())
             .create();
-        String username = System.getenv("DOCKER_HUB_USERNAME");
-        String token = System.getenv("DOCKER_HUB_TOKEN");
-        realImageMode = username != null && token != null;
-        if (realImageMode) {
-          client
-              .secrets()
-              .inNamespace(NAMESPACE)
-              .resource(dockerConfigSecret(username, token))
-              .create();
-        }
       }
 
       opensearch = new OpenSearchTestContainer().start();
@@ -264,17 +204,8 @@ class DirectIngestionMatrixQuarkusPekkoSmokeTest {
       String gatewayIp = dockerBridgeGatewayIp();
       openSearchUrlForPod = "http://host.docker.internal:" + opensearchPort;
 
-      String pekkoImage = realImageMode ? PEKKO_IMAGE : CURL_IMAGE;
-      String pekkoCommand =
-          realImageMode
-              ? realRowSeedAndRunCommand()
-              : "curl -sf -X PUT "
-                  + openSearchUrlForPod
-                  + "/smoke-index/_doc/"
-                  + DOCUMENT_ID
-                  + " -H Content-Type:application/json -d {\\\"marker\\\":\\\""
-                  + DOCUMENT_ID
-                  + "\\\"} #";
+      String pekkoImage = PEKKO_IMAGE;
+      String pekkoCommand = realRowSeedAndRunCommand();
 
       return Map.ofEntries(
           Map.entry("quarkus.oidc.auth-server-url", fixture.issuer().toString()),
@@ -290,16 +221,9 @@ class DirectIngestionMatrixQuarkusPekkoSmokeTest {
               AuthzenKeycloakFixture.AUTHZEN_CLIENT_SECRET),
           Map.entry("datastreaming.launcher.k8s.namespaces", NAMESPACE),
           Map.entry("datastreaming.launcher.k8s.images", pekkoImage),
-          // Quarkus validates every @ConfigProperty-annotated producer parameter at startup,
-          // before any test method runs and regardless of whether the bean is ever actually
-          // injected - a blank "" value (the checked-in application.yml's own real default) fails
-          // that validation outright, the same real gap forwardmeasure-entity-intelligence's own
-          // AuthorizationSmokeResourceTest already documents for an identical reason. The curl
-          // stand-in image is public and needs no real pull secret - "unused" is functionally
-          // inert, only non-blank for Quarkus's own sake; real-image mode uses the real secret.
-          Map.entry(
-              "datastreaming.launcher.k8s.image-pull-secrets",
-              realImageMode ? PULL_SECRET_NAME : "unused"),
+          // Imported digest-pinned images need no registry credentials. Keep the required
+          // configuration nonblank; the referenced unused pull secret is never needed.
+          Map.entry("datastreaming.launcher.k8s.image-pull-secrets", "unused"),
           Map.entry("datastreaming.launcher.k8s.host-aliases", "host.docker.internal=" + gatewayIp),
           // Same blank-default-fails-startup-validation reason - datastreaming.launcher.fowf.* is
           // never actually called by this Direct-REST-only test (WorkflowIngestionLauncher/
@@ -308,8 +232,8 @@ class DirectIngestionMatrixQuarkusPekkoSmokeTest {
           Map.entry("datastreaming.launcher.fowf.keycloak.client-secret", "unused"),
           Map.entry("datastreaming.launcher.pekko.image", pekkoImage),
           Map.entry("datastreaming.launcher.pekko.command", pekkoCommand),
-          Map.entry("datastreaming.launcher.kafka-streams.image", CURL_IMAGE),
-          Map.entry("datastreaming.launcher.kafka-streams.command", "true #"),
+          Map.entry("datastreaming.launcher.kafka-streams.image", "unused"),
+          Map.entry("datastreaming.launcher.kafka-streams.command", "false"),
           // Same blank-default-fails-startup-validation reason - this cell never dispatches a
           // Spark-staged plan, so any non-blank value is sufficient.
           Map.entry("datastreaming.launcher.spark.image", "unused"),
@@ -329,30 +253,6 @@ class DirectIngestionMatrixQuarkusPekkoSmokeTest {
       if (fixture != null) {
         fixture.close();
       }
-    }
-
-    private static Secret dockerConfigSecret(String username, String token) {
-      String auth =
-          Base64.getEncoder()
-              .encodeToString((username + ":" + token).getBytes(StandardCharsets.UTF_8));
-      String dockerConfigJson =
-          "{\"auths\":{\"https://index.docker.io/v1/\":{\"username\":\""
-              + username
-              + "\",\"password\":\""
-              + token
-              + "\",\"auth\":\""
-              + auth
-              + "\"}}}";
-      return new SecretBuilder()
-          .withNewMetadata()
-          .withName(PULL_SECRET_NAME)
-          .withNamespace(NAMESPACE)
-          .endMetadata()
-          .withType("kubernetes.io/dockerconfigjson")
-          .addToData(
-              ".dockerconfigjson",
-              Base64.getEncoder().encodeToString(dockerConfigJson.getBytes(StandardCharsets.UTF_8)))
-          .build();
     }
   }
 

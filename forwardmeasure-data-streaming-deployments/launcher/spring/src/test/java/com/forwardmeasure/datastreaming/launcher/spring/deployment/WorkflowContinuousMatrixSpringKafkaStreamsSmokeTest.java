@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture;
 import com.forwardmeasure.datastreaming.launcher.application.AuthorizationAction;
+import com.forwardmeasure.datastreaming.launcher.application.fowf.ContinuousDeliveryAcceptanceFixture;
 import com.forwardmeasure.datastreaming.launcher.application.fowf.RealFowfWorkflowFixture;
 import com.forwardmeasure.openworkflow.definition.management.api.model.CreateWorkflowDefinitionRequest;
 import com.forwardmeasure.openworkflow.definition.management.api.model.CreateWorkflowRequest;
@@ -52,11 +53,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
 
-/**
- * The Kafka-Streams-engine sibling of {@code WorkflowContinuousMatrixSpringPekkoSmokeTest} - see
- * the Quarkus sibling ({@code WorkflowContinuousMatrixQuarkusKafkaStreamsSmokeTest}) for why this
- * isn't blocked on the `correlated-worker` actor-context bug.
- */
+/** Public workflow admission, real worker readiness, and two waves of persisted input. */
 @SpringBootTest(
     classes = LauncherSpringApplication.class,
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -67,9 +64,8 @@ class WorkflowContinuousMatrixSpringKafkaStreamsSmokeTest {
   private static final String ROLE = "spring-workflow-continuous-ks-smoke-role";
   private static final String NAMESPACE = "fds-spring-workflow-continuous-ks-smoke";
   private static final String CORRELATION_NAME = "fds-spring-cont-ks-worker";
-  private static final String IMAGE =
-      "docker.io/library/busybox@sha256:"
-          + "73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662";
+  static String IMAGE;
+  static ContinuousDeliveryAcceptanceFixture delivery;
 
   private static RealFowfWorkflowFixture fixture;
   private static GenericContainer<?> executionManagement;
@@ -79,7 +75,11 @@ class WorkflowContinuousMatrixSpringKafkaStreamsSmokeTest {
 
   @BeforeAll
   static void startFixtures() throws Exception {
-    fixture = RealFowfWorkflowFixture.start("fds-spring-wf-cont-ks-smoke", ROLE);
+    fixture =
+        RealFowfWorkflowFixture.start(
+            "fds-spring-wf-cont-ks-smoke", ROLE, RealFowfWorkflowFixture.Framework.SPRING);
+    delivery = new ContinuousDeliveryAcceptanceFixture(fixture, "kafka-streams");
+    IMAGE = delivery.image();
     try (var k8s = fixture.kubernetes().createClient()) {
       k8s.namespaces()
           .resource(
@@ -115,6 +115,7 @@ class WorkflowContinuousMatrixSpringKafkaStreamsSmokeTest {
   static void stopFixtures() {
     if (fixture != null) {
       fixture.close();
+      if (delivery != null) delivery.close();
     }
   }
 
@@ -156,14 +157,14 @@ class WorkflowContinuousMatrixSpringKafkaStreamsSmokeTest {
     registry.add("datastreaming.launcher.k8s.image-pull-secrets", () -> "unused");
     registry.add("datastreaming.launcher.k8s.host-aliases", () -> "unused=127.0.0.1");
     registry.add("datastreaming.launcher.pekko.image", () -> IMAGE);
-    registry.add("datastreaming.launcher.pekko.command", () -> "true #");
+    registry.add("datastreaming.launcher.pekko.command", () -> "false");
     registry.add("datastreaming.launcher.kafka-streams.image", () -> IMAGE);
-    registry.add("datastreaming.launcher.kafka-streams.command", () -> "true #");
+    registry.add("datastreaming.launcher.kafka-streams.command", () -> "false");
   }
 
   @Test
-  @Timeout(300)
-  void realHttpCallThroughFowfAppliesARealDeploymentThatReachesAvailable() throws Exception {
+  @Timeout(600)
+  void realHttpCallThroughFowfDeploysAWorkerThatKeepsIngesting() throws Exception {
     String correlationId = "wf-cont-ks-smoke-" + UUID.randomUUID();
     String token = fixture.keycloak().mintUserToken();
 
@@ -211,6 +212,7 @@ class WorkflowContinuousMatrixSpringKafkaStreamsSmokeTest {
         readyReplicas =
             deployment.getStatus() == null ? null : deployment.getStatus().getReadyReplicas();
         if (Integer.valueOf(1).equals(readyReplicas)) {
+          delivery.verifyOngoingDelivery();
           return;
         }
         Thread.sleep(500);
@@ -311,9 +313,9 @@ class WorkflowContinuousMatrixSpringKafkaStreamsSmokeTest {
               payload:
                 namespace: fds-spring-workflow-continuous-ks-smoke
                 name: %s
-                image: docker.io/library/busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+                image: %s
                 replicas: 1
-                command: ["sh", "-c", "sleep 300"]
+                command: %s
       - watchStreamWorker:
           call: asyncapi
           with:
@@ -325,7 +327,13 @@ class WorkflowContinuousMatrixSpringKafkaStreamsSmokeTest {
                 amount: 1
               filter: '${ {namespace: "fds-spring-workflow-continuous-ks-smoke", name: "%s", readinessTimeoutSeconds: 120} }'
     """
-        .formatted(asyncApiUrl, CORRELATION_NAME, asyncApiUrl, CORRELATION_NAME);
+        .formatted(
+            asyncApiUrl,
+            CORRELATION_NAME,
+            IMAGE,
+            delivery.commandJson(),
+            asyncApiUrl,
+            CORRELATION_NAME);
   }
 
   private static String asyncApiDocument() {

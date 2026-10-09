@@ -147,7 +147,9 @@ class WorkflowBoundedMatrixQuarkusKafkaStreamsTestCustomerMasterSmokeTest {
 
     @Override
     public Map<String, String> start() {
-      fixture = RealFowfWorkflowFixture.start("fds-quarkus-wf-ks-cm-smoke", ROLE);
+      fixture =
+          RealFowfWorkflowFixture.start(
+              "fds-quarkus-wf-ks-cm-smoke", ROLE, RealFowfWorkflowFixture.Framework.QUARKUS);
       try (var k8s = fixture.kubernetes().createClient()) {
         k8s.namespaces()
             .resource(

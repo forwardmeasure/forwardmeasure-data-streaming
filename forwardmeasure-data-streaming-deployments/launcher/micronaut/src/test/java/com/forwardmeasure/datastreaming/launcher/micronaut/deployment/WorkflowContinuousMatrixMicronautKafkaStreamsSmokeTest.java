@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture;
 import com.forwardmeasure.datastreaming.launcher.application.AuthorizationAction;
+import com.forwardmeasure.datastreaming.launcher.application.fowf.ContinuousDeliveryAcceptanceFixture;
 import com.forwardmeasure.datastreaming.launcher.application.fowf.RealFowfWorkflowFixture;
 import com.forwardmeasure.openworkflow.definition.management.api.model.CreateWorkflowDefinitionRequest;
 import com.forwardmeasure.openworkflow.definition.management.api.model.CreateWorkflowRequest;
@@ -53,11 +54,7 @@ import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.Timeout;
 import org.testcontainers.containers.GenericContainer;
 
-/**
- * The Kafka-Streams-engine sibling of {@code WorkflowContinuousMatrixMicronautPekkoSmokeTest} - see
- * the Quarkus sibling ({@code WorkflowContinuousMatrixQuarkusKafkaStreamsSmokeTest}) for why this
- * isn't blocked on the `correlated-worker` actor-context bug.
- */
+/** Public workflow admission, real worker readiness, and two waves of persisted input. */
 @MicronautTest(transactional = false)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class WorkflowContinuousMatrixMicronautKafkaStreamsSmokeTest implements TestPropertyProvider {
@@ -65,9 +62,8 @@ class WorkflowContinuousMatrixMicronautKafkaStreamsSmokeTest implements TestProp
   private static final String ROLE = "micronaut-workflow-continuous-ks-smoke-role";
   private static final String NAMESPACE = "fds-micronaut-workflow-continuous-ks-smoke";
   private static final String CORRELATION_NAME = "fds-micronaut-cont-ks-worker";
-  private static final String IMAGE =
-      "docker.io/library/busybox@sha256:"
-          + "73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662";
+  static String IMAGE;
+  static ContinuousDeliveryAcceptanceFixture delivery;
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
   static volatile RealFowfWorkflowFixture fixture;
@@ -79,7 +75,11 @@ class WorkflowContinuousMatrixMicronautKafkaStreamsSmokeTest implements TestProp
 
   @Override
   public Map<String, String> getProperties() {
-    fixture = RealFowfWorkflowFixture.start("fds-micronaut-wf-cont-ks-smoke", ROLE);
+    fixture =
+        RealFowfWorkflowFixture.start(
+            "fds-micronaut-wf-cont-ks-smoke", ROLE, RealFowfWorkflowFixture.Framework.MICRONAUT);
+    delivery = new ContinuousDeliveryAcceptanceFixture(fixture, "kafka-streams");
+    IMAGE = delivery.image();
     try (var k8s = fixture.kubernetes().createClient()) {
       k8s.namespaces()
           .resource(
@@ -148,9 +148,9 @@ class WorkflowContinuousMatrixMicronautKafkaStreamsSmokeTest implements TestProp
         Map.entry("datastreaming.launcher.k8s.image-pull-secrets", "unused"),
         Map.entry("datastreaming.launcher.k8s.host-aliases", "unused=127.0.0.1"),
         Map.entry("datastreaming.launcher.pekko.image", IMAGE),
-        Map.entry("datastreaming.launcher.pekko.command", "true #"),
+        Map.entry("datastreaming.launcher.pekko.command", "false"),
         Map.entry("datastreaming.launcher.kafka-streams.image", IMAGE),
-        Map.entry("datastreaming.launcher.kafka-streams.command", "true #"));
+        Map.entry("datastreaming.launcher.kafka-streams.command", "false"));
   }
 
   @AfterAll
@@ -158,12 +158,13 @@ class WorkflowContinuousMatrixMicronautKafkaStreamsSmokeTest implements TestProp
     CurrentKubernetesTestContainer.clear();
     if (fixture != null) {
       fixture.close();
+      if (delivery != null) delivery.close();
     }
   }
 
   @Test
-  @Timeout(300)
-  void realHttpCallThroughFowfAppliesARealDeploymentThatReachesAvailable() throws Exception {
+  @Timeout(600)
+  void realHttpCallThroughFowfDeploysAWorkerThatKeepsIngesting() throws Exception {
     String correlationId = "wf-cont-ks-smoke-" + UUID.randomUUID();
     String token = fixture.keycloak().mintUserToken();
 
@@ -211,6 +212,7 @@ class WorkflowContinuousMatrixMicronautKafkaStreamsSmokeTest implements TestProp
         readyReplicas =
             deployment.getStatus() == null ? null : deployment.getStatus().getReadyReplicas();
         if (Integer.valueOf(1).equals(readyReplicas)) {
+          delivery.verifyOngoingDelivery();
           return;
         }
         Thread.sleep(500);
@@ -316,9 +318,9 @@ class WorkflowContinuousMatrixMicronautKafkaStreamsSmokeTest implements TestProp
               payload:
                 namespace: fds-micronaut-workflow-continuous-ks-smoke
                 name: %s
-                image: docker.io/library/busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+                image: %s
                 replicas: 1
-                command: ["sh", "-c", "sleep 300"]
+                command: %s
       - watchStreamWorker:
           call: asyncapi
           with:
@@ -330,7 +332,13 @@ class WorkflowContinuousMatrixMicronautKafkaStreamsSmokeTest implements TestProp
                 amount: 1
               filter: '${ {namespace: "fds-micronaut-workflow-continuous-ks-smoke", name: "%s", readinessTimeoutSeconds: 120} }'
     """
-        .formatted(asyncApiUrl, CORRELATION_NAME, asyncApiUrl, CORRELATION_NAME);
+        .formatted(
+            asyncApiUrl,
+            CORRELATION_NAME,
+            IMAGE,
+            delivery.commandJson(),
+            asyncApiUrl,
+            CORRELATION_NAME);
   }
 
   private static String asyncApiDocument() {

@@ -29,8 +29,6 @@ import com.forwardmeasure.testcontainers.kafka.KafkaTestContainer;
 import com.forwardmeasure.testcontainers.kubernetes.KubernetesTestContainer;
 import com.forwardmeasure.testcontainers.opensearch.OpenSearchTestContainer;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
-import io.fabric8.kubernetes.api.model.Secret;
-import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.client.Config;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
@@ -42,7 +40,6 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -65,14 +62,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-/**
- * The Kafka Streams sibling of {@link DirectIngestionMatrixSpringPekkoSmokeTest} - same real
- * plumbing proof, same two real fixes already documented there ({@code JerseyResourceConfiguration}
- * gap, and the explicit {@code @Import} + distinct-bean-name requirements for the {@code
- * KubernetesClient} test override), this time dispatching a {@code kafka}-sourced {@link
- * WorldCheckFixtures#boundedKafkaSpec} - the one real, non-arbitrary trigger {@code
- * ExecutionPlanCompiler} has for resolving {@code KAFKA_STREAMS} in {@code BOUNDED} mode.
- */
+/** Real REST admission, selected current executor, and persisted provider output. */
 @SpringBootTest(
     classes = LauncherSpringApplication.class,
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -81,29 +71,27 @@ class DirectIngestionMatrixSpringKafkaStreamsSmokeTest {
 
   private static final String ROLE_NAME = "spring-kstreams-smoke-role";
   private static final String NAMESPACE = "fds-spring-kstreams-smoke";
-  private static final String DOCUMENT_ID = "smoke-doc-4";
+
   private static final String KAFKA_TOPIC = "worldcheck-rows";
-  private static final String CURL_IMAGE =
-      "curlimages/curl@sha256:83a505ba2ba62f208ed6e410c268b7b9aa48f0f7b403c8108b9773b44199dbba";
 
-  /** Same digest {@code DirectIngestionLauncherKafkaStreamsRealImageIntegrationTest} pins. */
-  private static final String KAFKA_STREAMS_IMAGE =
-      "docker.io/forwardmeasure/data-streaming-executor-kafka-streams@sha256:"
-          + "8d60d48814d13200fe75af38eb00d9034d15468d83f0a4a5c53a111439a3df8e";
-
-  private static final String PULL_SECRET_NAME = "dockerhub-pull-secret";
+  private static String KAFKA_STREAMS_IMAGE;
 
   private static AuthzenKeycloakFixture fixture;
   private static KubernetesTestContainer kubernetes;
   private static OpenSearchTestContainer opensearch;
   private static KafkaTestContainer kafka;
-  private static boolean realImageMode;
+
   private static String openSearchUrlForPod;
 
   @LocalServerPort private int port;
 
   @BeforeAll
   static void startFixtures() {
+    String executorImage = System.getProperty("fds.acceptance.kafka-streams.image");
+    if (executorImage == null || executorImage.isBlank()) {
+      throw new IllegalStateException(
+          "Set fds.acceptance.kafka-streams.image to the current locally built executor image");
+    }
     fixture = AuthzenKeycloakFixture.start();
     var tenantDid =
         com.forwardmeasure.jpa.tenancy.Did.parse("did:fwmtest:tenant:" + UUID.randomUUID());
@@ -121,31 +109,22 @@ class DirectIngestionMatrixSpringKafkaStreamsSmokeTest {
             AuthorizationAction.INGESTION_RUN_READ.scope()));
 
     kubernetes = new KubernetesTestContainer().start();
-    String username = System.getenv("DOCKER_HUB_USERNAME");
-    String token = System.getenv("DOCKER_HUB_TOKEN");
-    realImageMode = username != null && token != null;
+    KAFKA_STREAMS_IMAGE = kubernetes.loadImageAndPinDigest(executorImage);
     try (KubernetesClient client = kubernetes.createClient()) {
       client
           .namespaces()
           .resource(
               new NamespaceBuilder().withNewMetadata().withName(NAMESPACE).endMetadata().build())
           .create();
-      if (realImageMode) {
-        client
-            .secrets()
-            .inNamespace(NAMESPACE)
-            .resource(dockerConfigSecret(username, token))
-            .create();
-      }
     }
 
     opensearch = new OpenSearchTestContainer().start();
-    if (realImageMode) {
-      kafka =
-          new KafkaTestContainer(
-                  KafkaContainerConfiguration.defaults().withHostDockerInternalListener())
-              .start();
-    }
+
+    kafka =
+        new KafkaTestContainer(
+                KafkaContainerConfiguration.defaults().withHostDockerInternalListener())
+            .start();
+
     openSearchUrlForPod = "http://host.docker.internal:" + opensearch.hostEndpoint().getPort();
   }
 
@@ -187,26 +166,15 @@ class DirectIngestionMatrixSpringKafkaStreamsSmokeTest {
     registry.add(
         "datastreaming.launcher.k8s.host-aliases", () -> "host.docker.internal=" + gatewayIp);
 
-    boolean real = realImageMode;
-    String kafkaStreamsImage = real ? KAFKA_STREAMS_IMAGE : CURL_IMAGE;
+    String kafkaStreamsImage = KAFKA_STREAMS_IMAGE;
     registry.add("datastreaming.launcher.k8s.images", () -> kafkaStreamsImage);
-    registry.add(
-        "datastreaming.launcher.k8s.image-pull-secrets", () -> real ? PULL_SECRET_NAME : "unused");
-    registry.add("datastreaming.launcher.pekko.image", () -> CURL_IMAGE);
-    registry.add("datastreaming.launcher.pekko.command", () -> "true #");
+    registry.add("datastreaming.launcher.k8s.image-pull-secrets", () -> "unused");
+    registry.add("datastreaming.launcher.pekko.image", () -> "unused");
+    registry.add("datastreaming.launcher.pekko.command", () -> "false");
     registry.add("datastreaming.launcher.kafka-streams.image", () -> kafkaStreamsImage);
     registry.add(
         "datastreaming.launcher.kafka-streams.command",
-        () ->
-            real
-                ? "java -jar /deployments/application.jar"
-                : "curl -sf -X PUT "
-                    + openSearchUrlForPod
-                    + "/smoke-index/_doc/"
-                    + DOCUMENT_ID
-                    + " -H Content-Type:application/json -d {\\\"marker\\\":\\\""
-                    + DOCUMENT_ID
-                    + "\\\"} #");
+        () -> "java -jar /deployments/application.jar");
   }
 
   @Test
@@ -216,20 +184,13 @@ class DirectIngestionMatrixSpringKafkaStreamsSmokeTest {
     String correlationId = "smoke-" + UUID.randomUUID();
     String token = fixture.mintUserToken();
 
-    if (realImageMode) {
-      seedOneRealWorldCheckRow(kafka.bootstrapServers());
-    }
+    seedOneRealWorldCheckRow(kafka.bootstrapServers());
 
     var spec =
-        realImageMode
-            ? WorldCheckFixtures.boundedKafkaSpec(
-                "kafka:" + KAFKA_TOPIC + "?brokers=" + kafka.hostDockerInternalBootstrapServers(),
-                openSearchUrlForPod,
-                Path.of(""))
-            : WorldCheckFixtures.boundedKafkaSpec(
-                "kafka:" + KAFKA_TOPIC + "?brokers=unused:9092",
-                "http://unused:9200",
-                Path.of("/tmp/unused.json"));
+        WorldCheckFixtures.boundedKafkaSpec(
+            "kafka:" + KAFKA_TOPIC + "?brokers=" + kafka.hostDockerInternalBootstrapServers(),
+            openSearchUrlForPod,
+            Path.of(""));
 
     Map<String, Object> requestBody =
         Map.of(
@@ -258,10 +219,7 @@ class DirectIngestionMatrixSpringKafkaStreamsSmokeTest {
     assertEquals(
         "SUCCEEDED", phase, "the real dispatched Job must reach a real terminal SUCCEEDED phase");
 
-    String documentUri =
-        realImageMode
-            ? opensearch.hostEndpoint() + "/worldcheck-screening-records/_doc/wc-1"
-            : opensearch.hostEndpoint() + "/smoke-index/_doc/" + DOCUMENT_ID;
+    String documentUri = opensearch.hostEndpoint() + "/worldcheck-screening-records/_doc/wc-1";
     HttpResponse<String> document =
         HttpClient.newHttpClient()
             .send(
@@ -271,9 +229,7 @@ class DirectIngestionMatrixSpringKafkaStreamsSmokeTest {
         200,
         document.statusCode(),
         "expected the real document written by the dispatched pod: " + document.body());
-    assertTrue(
-        document.body().contains(realImageMode ? "Smith" : DOCUMENT_ID),
-        "unexpected document body: " + document.body());
+    assertTrue(document.body().contains("Smith"), "unexpected document body: " + document.body());
   }
 
   private String pollUntilTerminal(String token, String correlationId) throws Exception {
@@ -399,30 +355,6 @@ class DirectIngestionMatrixSpringKafkaStreamsSmokeTest {
     } catch (Exception e) {
       throw new IllegalStateException("failed to seed the real WorldCheck row onto Kafka", e);
     }
-  }
-
-  private static Secret dockerConfigSecret(String username, String token) {
-    String auth =
-        Base64.getEncoder()
-            .encodeToString((username + ":" + token).getBytes(StandardCharsets.UTF_8));
-    String dockerConfigJson =
-        "{\"auths\":{\"https://index.docker.io/v1/\":{\"username\":\""
-            + username
-            + "\",\"password\":\""
-            + token
-            + "\",\"auth\":\""
-            + auth
-            + "\"}}}";
-    return new SecretBuilder()
-        .withNewMetadata()
-        .withName(PULL_SECRET_NAME)
-        .withNamespace(NAMESPACE)
-        .endMetadata()
-        .withType("kubernetes.io/dockerconfigjson")
-        .addToData(
-            ".dockerconfigjson",
-            Base64.getEncoder().encodeToString(dockerConfigJson.getBytes(StandardCharsets.UTF_8)))
-        .build();
   }
 
   private static String dockerBridgeGatewayIp() throws Exception {

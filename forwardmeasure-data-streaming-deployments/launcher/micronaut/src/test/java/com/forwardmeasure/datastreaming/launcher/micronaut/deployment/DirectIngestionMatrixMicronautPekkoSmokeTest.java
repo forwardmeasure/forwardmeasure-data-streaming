@@ -26,8 +26,6 @@ import com.forwardmeasure.datastreaming.testfixtures.WorldCheckFixtures;
 import com.forwardmeasure.testcontainers.kubernetes.KubernetesTestContainer;
 import com.forwardmeasure.testcontainers.opensearch.OpenSearchTestContainer;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
-import io.fabric8.kubernetes.api.model.Secret;
-import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpResponse;
@@ -53,50 +51,22 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.Timeout;
 
-/**
- * The Micronaut sibling of {@code DirectIngestionMatrixQuarkusPekkoSmokeTest}/{@code
- * DirectIngestionMatrixSpringPekkoSmokeTest} - first-ever real, no-mocks boot test for this
- * launcher's Micronaut deployment (confirmed: no test source existed in this module before). Same
- * real proof, same fallback discipline (real pushed image when {@code DOCKER_HUB_USERNAME}/{@code
- * DOCKER_HUB_TOKEN} are set, a public curl stand-in otherwise).
- *
- * <p>Structural pattern (real, already-proven precedent, not invented here):
- * {@code @MicronautTest(transactional = false)} + {@code TestPropertyProvider} +
- * {@code @TestInstance (PER_CLASS)}, mirroring forwardmeasure-entity-intelligence's own real {@code
- * AuthorizationSmokeResourceTest} (ingestion-service/micronaut). {@code transactional = false}
- * isn't load-bearing here (this launcher has no JPA/transaction-manager bean at all, unlike that
- * precedent), kept only for structural parity since {@code TestPropertyProvider} still requires
- * {@code PER_CLASS} regardless (confirmed: {@code getProperties()} runs before any per-test
- * instance would otherwise exist).
- *
- * <p>Unlike Spring's {@code @TestConfiguration}+{@code @Primary} (which needed an explicit
- * {@code @Import} - a real, live-caught gap, see that class's own javadoc), Micronaut's
- * {@code @Replaces} is resolved at compile-time bean-definition-graph construction, not runtime
- * tie-breaking - the replaced bean definition is never even registered, so there is no equivalent
- * eager-construction near-miss possible here by construction, not by luck.
- */
+/** Real REST admission, selected current executor, and persisted provider output. */
 @MicronautTest(transactional = false)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class DirectIngestionMatrixMicronautPekkoSmokeTest implements TestPropertyProvider {
 
   private static final String ROLE_NAME = "micronaut-direct-smoke-role";
   private static final String NAMESPACE = "fds-micronaut-smoke";
-  private static final String DOCUMENT_ID = "smoke-doc-5";
-  private static final String CURL_IMAGE =
-      "curlimages/curl@sha256:83a505ba2ba62f208ed6e410c268b7b9aa48f0f7b403c8108b9773b44199dbba";
 
-  /** Same digest {@code DirectIngestionLauncherRealImageIntegrationTest} pins. */
-  private static final String PEKKO_IMAGE =
-      "docker.io/forwardmeasure/data-streaming-executor-pekko@sha256:"
-          + "a1eab0f12073b4b2f0215fd350061522ffa01aca08ab259a81e8053ee04a90e3";
+  private static String PEKKO_IMAGE;
 
-  private static final String PULL_SECRET_NAME = "dockerhub-pull-secret";
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
   static volatile AuthzenKeycloakFixture fixture;
   static volatile KubernetesTestContainer kubernetes;
   static volatile OpenSearchTestContainer opensearch;
-  static volatile boolean realImageMode;
+
   static volatile String openSearchUrlForPod;
 
   @Inject
@@ -105,6 +75,11 @@ class DirectIngestionMatrixMicronautPekkoSmokeTest implements TestPropertyProvid
 
   @Override
   public Map<String, String> getProperties() {
+    String executorImage = System.getProperty("fds.acceptance.pekko.image");
+    if (executorImage == null || executorImage.isBlank()) {
+      throw new IllegalStateException(
+          "Set fds.acceptance.pekko.image to the current locally built executor image");
+    }
     fixture = AuthzenKeycloakFixture.start();
     var tenantDid =
         com.forwardmeasure.jpa.tenancy.Did.parse("did:fwmtest:tenant:" + UUID.randomUUID());
@@ -122,40 +97,22 @@ class DirectIngestionMatrixMicronautPekkoSmokeTest implements TestPropertyProvid
             AuthorizationAction.INGESTION_RUN_READ.scope()));
 
     kubernetes = new KubernetesTestContainer().start();
+    PEKKO_IMAGE = kubernetes.loadImageAndPinDigest(executorImage);
     CurrentKubernetesTestContainer.set(kubernetes);
-    String username = System.getenv("DOCKER_HUB_USERNAME");
-    String token = System.getenv("DOCKER_HUB_TOKEN");
-    realImageMode = username != null && token != null;
     try (KubernetesClient client = kubernetes.createClient()) {
       client
           .namespaces()
           .resource(
               new NamespaceBuilder().withNewMetadata().withName(NAMESPACE).endMetadata().build())
           .create();
-      if (realImageMode) {
-        client
-            .secrets()
-            .inNamespace(NAMESPACE)
-            .resource(dockerConfigSecret(username, token))
-            .create();
-      }
     }
 
     opensearch = new OpenSearchTestContainer().start();
     openSearchUrlForPod = "http://host.docker.internal:" + opensearch.hostEndpoint().getPort();
     String gatewayIp = dockerBridgeGatewayIp();
 
-    String pekkoImage = realImageMode ? PEKKO_IMAGE : CURL_IMAGE;
-    String pekkoCommand =
-        realImageMode
-            ? realRowSeedAndRunCommand()
-            : "curl -sf -X PUT "
-                + openSearchUrlForPod
-                + "/smoke-index/_doc/"
-                + DOCUMENT_ID
-                + " -H Content-Type:application/json -d {\\\"marker\\\":\\\""
-                + DOCUMENT_ID
-                + "\\\"} #";
+    String pekkoImage = PEKKO_IMAGE;
+    String pekkoCommand = realRowSeedAndRunCommand();
 
     return Map.ofEntries(
         Map.entry(
@@ -173,16 +130,14 @@ class DirectIngestionMatrixMicronautPekkoSmokeTest implements TestPropertyProvid
             AuthzenKeycloakFixture.AUTHZEN_CLIENT_SECRET),
         Map.entry("datastreaming.launcher.k8s.namespaces", NAMESPACE),
         Map.entry("datastreaming.launcher.k8s.images", pekkoImage),
-        Map.entry(
-            "datastreaming.launcher.k8s.image-pull-secrets",
-            realImageMode ? PULL_SECRET_NAME : "unused"),
+        Map.entry("datastreaming.launcher.k8s.image-pull-secrets", "unused"),
         Map.entry("datastreaming.launcher.k8s.host-aliases", "host.docker.internal=" + gatewayIp),
         Map.entry("datastreaming.launcher.fowf.keycloak.client-id", "unused"),
         Map.entry("datastreaming.launcher.fowf.keycloak.client-secret", "unused"),
         Map.entry("datastreaming.launcher.pekko.image", pekkoImage),
         Map.entry("datastreaming.launcher.pekko.command", pekkoCommand),
-        Map.entry("datastreaming.launcher.kafka-streams.image", CURL_IMAGE),
-        Map.entry("datastreaming.launcher.kafka-streams.command", "true #"));
+        Map.entry("datastreaming.launcher.kafka-streams.image", "unused"),
+        Map.entry("datastreaming.launcher.kafka-streams.command", "false"));
   }
 
   @AfterAll
@@ -206,27 +161,22 @@ class DirectIngestionMatrixMicronautPekkoSmokeTest implements TestPropertyProvid
     String token = fixture.mintUserToken();
 
     var spec =
-        realImageMode
-            ? WorldCheckFixtures.boundedFileSpec(
-                // Real, live-confirmed race found 2026-09-23 (deterministic here, 3/3 runs):
-                // Camel's
-                // own file consumer starts polling as soon as the CamelContext starts, independent
-                // of when the corresponding Pekko Source.fromPublisher(...) actually subscribes -
-                // with initialDelay=0, Camel's first poll can fire (and, per its own reactive-
-                // streams component's real backpressure contract, throw
-                // ReactiveStreamsNoActiveSubscriptionsException) before that subscription
-                // completes. Quarkus/Spring's own identical real-image smoke tests happened not to
-                // lose this race, but the race itself is real and pre-existing in shared
-                // PekkoIngestionRunner/CamelBridge code, not something this test introduces - a
-                // real, small initialDelay here (test-only, not a production code change) reliably
-                // gives the subscription time to complete first.
-                "file:/tmp?fileName=source.csv&noop=true&initialDelay=1000&delay=100",
-                openSearchUrlForPod,
-                Path.of(""))
-            : WorldCheckFixtures.boundedFileSpec(
-                "file:/tmp?fileName=unused.csv&noop=true",
-                "http://unused:9200",
-                Path.of("/tmp/unused.json"));
+        WorldCheckFixtures.boundedFileSpec(
+            // Real, live-confirmed race found 2026-09-23 (deterministic here, 3/3 runs):
+            // Camel's
+            // own file consumer starts polling as soon as the CamelContext starts, independent
+            // of when the corresponding Pekko Source.fromPublisher(...) actually subscribes -
+            // with initialDelay=0, Camel's first poll can fire (and, per its own reactive-
+            // streams component's real backpressure contract, throw
+            // ReactiveStreamsNoActiveSubscriptionsException) before that subscription
+            // completes. Quarkus/Spring's own identical real-image smoke tests happened not to
+            // lose this race, but the race itself is real and pre-existing in shared
+            // PekkoIngestionRunner/CamelBridge code, not something this test introduces - a
+            // real, small initialDelay here (test-only, not a production code change) reliably
+            // gives the subscription time to complete first.
+            "file:/tmp?fileName=source.csv&noop=true&initialDelay=1000&delay=100",
+            openSearchUrlForPod,
+            Path.of(""));
 
     // Micronaut's own native HttpClient encodes a request body via compile-time micronaut-serde
     // introspection, unlike Jackson's runtime reflection - IngestionSpec (a plain record from the
@@ -267,10 +217,7 @@ class DirectIngestionMatrixMicronautPekkoSmokeTest implements TestPropertyProvid
               + podLogs());
     }
 
-    String documentUri =
-        realImageMode
-            ? opensearch.hostEndpoint() + "/worldcheck-screening-records/_doc/wc-3"
-            : opensearch.hostEndpoint() + "/smoke-index/_doc/" + DOCUMENT_ID;
+    String documentUri = opensearch.hostEndpoint() + "/worldcheck-screening-records/_doc/wc-3";
     java.net.http.HttpResponse<String> document =
         java.net.http.HttpClient.newHttpClient()
             .send(
@@ -281,7 +228,7 @@ class DirectIngestionMatrixMicronautPekkoSmokeTest implements TestPropertyProvid
         document.statusCode(),
         "expected the real document written by the dispatched pod: " + document.body());
     assertTrue(
-        document.body().contains(realImageMode ? "\"entity_kind\":\"organization\"" : DOCUMENT_ID),
+        document.body().contains("\"entity_kind\":\"organization\""),
         "unexpected document body: " + document.body());
   }
 
@@ -321,30 +268,6 @@ class DirectIngestionMatrixMicronautPekkoSmokeTest implements TestPropertyProvid
         + seedTsvBase64
         + " | base64 -d > /tmp/source.csv && "
         + "exec java -jar /deployments/application.jar /tmp/ingestion-spec.yaml'";
-  }
-
-  private static Secret dockerConfigSecret(String username, String token) {
-    String auth =
-        Base64.getEncoder()
-            .encodeToString((username + ":" + token).getBytes(StandardCharsets.UTF_8));
-    String dockerConfigJson =
-        "{\"auths\":{\"https://index.docker.io/v1/\":{\"username\":\""
-            + username
-            + "\",\"password\":\""
-            + token
-            + "\",\"auth\":\""
-            + auth
-            + "\"}}}";
-    return new SecretBuilder()
-        .withNewMetadata()
-        .withName(PULL_SECRET_NAME)
-        .withNamespace(NAMESPACE)
-        .endMetadata()
-        .withType("kubernetes.io/dockerconfigjson")
-        .addToData(
-            ".dockerconfigjson",
-            Base64.getEncoder().encodeToString(dockerConfigJson.getBytes(StandardCharsets.UTF_8)))
-        .build();
   }
 
   private static String podLogs() {

@@ -49,9 +49,9 @@ import org.testcontainers.utility.DockerImageName;
  * recipe. Built incrementally, stage by stage, each stage live-verified before the next is added -
  * see this class's own stage methods.
  *
- * <p>Uses actual locally built FOWF images. Execution-management supports explicit Quarkus,
- * Spring and Micronaut selection and logs the image ID used. Other service starters currently
- * select Quarkus; execution-API parity alone is not evidence of engine/framework matrix coverage.
+ * <p>Uses actual locally built FOWF images. Execution-management supports explicit Quarkus, Spring
+ * and Micronaut selection. The framework overload selects definition, execution, engine and
+ * operation-adapter images consistently; startup logs record each actual image ID.
  *
  * <p><b>Tenant identity</b>: fowf's real onboarding convention is DID-first - {@code
  * did:web:<alias>.<domain>} - never an independently-chosen UUID (see {@code
@@ -146,7 +146,22 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
   private final TenantId tenantId;
   private final String organizationId;
   private final List<GenericContainer<?>> services = new java.util.ArrayList<>();
+  private final List<com.sun.net.httpserver.HttpServer> documentServers =
+      new java.util.ArrayList<>();
   private KubernetesTestContainer kubernetes;
+  private Framework framework = Framework.QUARKUS;
+  private com.forwardmeasure.testcontainers.cassandra.CassandraTestContainer cassandra;
+  private String tenantAlias;
+  private final List<String> additionalTenantAliases = new java.util.ArrayList<>();
+  private PekkoPersistence pekkoPersistence =
+      PekkoPersistence.valueOf(
+          System.getProperty("fds.acceptance.pekko.persistence", "POSTGRESQL")
+              .toUpperCase(java.util.Locale.ROOT));
+
+  public enum PekkoPersistence {
+    POSTGRESQL,
+    CASSANDRA
+  }
 
   private RealFowfWorkflowFixture(
       Network network,
@@ -174,6 +189,23 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
    * still grant whatever real AuthZEN resource/scope permissions their own scenario needs via
    * {@link #keycloak()}.
    */
+  /** Selects one actual framework consistently for definition, execution, engine and adapter. */
+  public static RealFowfWorkflowFixture start(
+      String tenantAlias, String role, Framework framework) {
+    Objects.requireNonNull(framework, "framework");
+    var fixture = start(tenantAlias, role);
+    fixture.framework = framework;
+    return fixture;
+  }
+
+  public static RealFowfWorkflowFixture start(
+      String tenantAlias, String role, Framework framework, PekkoPersistence persistence) {
+    Objects.requireNonNull(persistence, "persistence");
+    var fixture = start(tenantAlias, role, framework);
+    fixture.pekkoPersistence = persistence;
+    return fixture;
+  }
+
   public static RealFowfWorkflowFixture start(String tenantAlias, String role) {
     Objects.requireNonNull(tenantAlias, "tenantAlias");
     Objects.requireNonNull(role, "role");
@@ -191,7 +223,8 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
       KafkaTestContainer kafka =
           new KafkaTestContainer(
                   KafkaContainerConfiguration.defaults()
-                      .withNetwork(network.getId(), List.of(KAFKA_ALIAS)))
+                      .withNetwork(network.getId(), List.of(KAFKA_ALIAS))
+                      .withHostDockerInternalListener())
               .start();
 
       started.add(kafka);
@@ -206,62 +239,11 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
               + " (matches the real openworkflow-migrations tenant registry row)",
           organizationId,
           tenantId.value());
-      // fowf's own services run a SECOND, server-side AuthZEN check independent of this launcher's
-      // own (AuthzenExecutionAuthorizer/WorkflowGovernanceServiceImpl, both confirmed by direct
-      // source read) - real resource type/collection-id pairs from fowf's own
-      // OpenWorkflowAuthorizationResources (the varying execution/definition id is only ever a
-      // resource *property*, never part of the Keycloak resource's own name - same collection-
-      // scoped-not-instance-scoped shape this repo's own DataStreamingAuthorizationResources uses).
-      keycloak.grantResourceAuthorization(
-          organizationId,
-          "openworkflow-execution",
-          "executions",
-          "fixture-execution-permission",
-          role,
-          java.util.Set.of(
-              AuthorizationAction.EXECUTION_START.scope(),
-              AuthorizationAction.EXECUTION_READ.scope(),
-              AuthorizationAction.EXECUTION_LIST.scope(),
-              AuthorizationAction.EXECUTION_PAUSE.scope(),
-              AuthorizationAction.EXECUTION_RESUME.scope(),
-              AuthorizationAction.EXECUTION_CANCEL.scope(),
-              // WorkflowIngestionLauncher (wired 2026-09-26) attaches subjectActor to every real
-              // Start/Control call - fowf's server-side WorkflowExecutionManagementService.
-              // resolveSubjectActor gates this on execution:assert-subject, fail-closed, regardless
-              // of whether the caller already holds EXECUTION_START/etc. Without this grant every
-              // real launch()/observe()/cancel() call 500s with AuthorizationDeniedException.
-              AuthorizationAction.EXECUTION_ASSERT_SUBJECT.scope()));
-      keycloak.grantResourceAuthorization(
-          organizationId,
-          "openworkflow-definition",
-          "definitions",
-          "fixture-definition-permission",
-          role,
-          java.util.Set.of(
-              AuthorizationAction.DEFINITION_CREATE.scope(),
-              AuthorizationAction.DEFINITION_READ.scope(),
-              AuthorizationAction.DEFINITION_LIST.scope(),
-              AuthorizationAction.DEFINITION_VALIDATE.scope(),
-              AuthorizationAction.DEFINITION_PUBLISH.scope()));
-      // A THIRD, real server-side check - independent of the two above - runs inside the
-      // operation-adapter itself (AuthzenOperationSecurityResolver, confirmed by direct source
-      // read), for every operation it dispatches (e.g. this fixture's own kubernetes-deployment
-      // apply/watch steps): OpenWorkflowAuthorizationResources.operation(...) resolves to a
-      // collection-scoped "openworkflow-operation"/"operations" resource (operation_kind is only
-      // ever a resource *property*, matching the execution/definition resources' own shape) and
-      // requires AuthorizationAction.OPERATION_EXECUTE. Without this, any real workflow execution
-      // that reaches a call: asyncapi step fails with "Authorization denied" the moment the
-      // operation-adapter picks it up off Kafka - found live 2026-09-21 driving the first real
-      // end-to-end execution through this fixture.
-      keycloak.grantResourceAuthorization(
-          organizationId,
-          "openworkflow-operation",
-          "operations",
-          "fixture-operation-permission",
-          role,
-          java.util.Set.of(AuthorizationAction.OPERATION_EXECUTE.scope()));
-      return new RealFowfWorkflowFixture(
-          network, postgres, kafka, keycloak, tenantId, organizationId);
+      grantRuntimePermissions(keycloak, organizationId, role);
+      var fixture =
+          new RealFowfWorkflowFixture(network, postgres, kafka, keycloak, tenantId, organizationId);
+      fixture.tenantAlias = tenantAlias;
+      return fixture;
     } catch (RuntimeException | Error failure) {
       for (AutoCloseable resource : started.reversed()) {
         try {
@@ -315,7 +297,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
    *     runs ({@code OPENWORKFLOW_ENGINE_ID}), reached at that engine container's own alias.
    */
   public GenericContainer<?> startExecutionManagement(String engine) {
-    return startExecutionManagement(engine, Framework.QUARKUS);
+    return startExecutionManagement(engine, framework);
   }
 
   /** Selects the actual packaged execution API; this alone does not select an engine framework. */
@@ -367,9 +349,142 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
                 Wait.forHttp(framework.readinessPath)
                     .forStatusCode(200)
                     .withStartupTimeout(Duration.ofMinutes(3)));
+    configureFramework(executionManagement, framework);
+    // Register before startup so failed readiness also closes the partially started container.
+    services.add(executionManagement);
+    executionManagement.start();
+    LOGGER.info(
+        "Execution API framework={} image={} imageId={}",
+        framework,
+        executionManagement.getDockerImageName(),
+        executionManagement.getContainerInfo().getImageId());
+    return executionManagement;
+  }
+
+  /** Onboards another real tenant without seeding definitions, executions or result rows. */
+  public String provisionAdditionalTenant(String alias, String role) {
+    runMigrations(network, postgres, alias);
+    additionalTenantAliases.add(alias);
+    if (cassandra != null) migrateCassandraTenant(alias);
+    String organization =
+        keycloak.provisionTenant(alias, new Did("did:web:" + alias + "." + TENANT_DOMAIN), role);
+    grantRuntimePermissions(keycloak, organization, role);
+    return organization;
+  }
+
+  private static void grantRuntimePermissions(
+      AuthzenKeycloakFixture keycloak, String organizationId, String role) {
+    // fowf's own services run a SECOND, server-side AuthZEN check independent of this launcher's
+    // own (AuthzenExecutionAuthorizer/WorkflowGovernanceServiceImpl, both confirmed by direct
+    // source read) - real resource type/collection-id pairs from fowf's own
+    // OpenWorkflowAuthorizationResources (the varying execution/definition id is only ever a
+    // resource *property*, never part of the Keycloak resource's own name - same collection-
+    // scoped-not-instance-scoped shape this repo's own DataStreamingAuthorizationResources uses).
+    keycloak.grantResourceAuthorization(
+        organizationId,
+        "openworkflow-execution",
+        "executions",
+        "fixture-execution-permission",
+        role,
+        java.util.Set.of(
+            AuthorizationAction.EXECUTION_START.scope(),
+            AuthorizationAction.EXECUTION_READ.scope(),
+            AuthorizationAction.EXECUTION_LIST.scope(),
+            AuthorizationAction.EXECUTION_PAUSE.scope(),
+            AuthorizationAction.EXECUTION_RESUME.scope(),
+            AuthorizationAction.EXECUTION_CANCEL.scope(),
+            // WorkflowIngestionLauncher (wired 2026-09-26) attaches subjectActor to every real
+            // Start/Control call - fowf's server-side WorkflowExecutionManagementService.
+            // resolveSubjectActor gates this on execution:assert-subject, fail-closed, regardless
+            // of whether the caller already holds EXECUTION_START/etc. Without this grant every
+            // real launch()/observe()/cancel() call 500s with AuthorizationDeniedException.
+            AuthorizationAction.EXECUTION_ASSERT_SUBJECT.scope()));
+    keycloak.grantResourceAuthorization(
+        organizationId,
+        "openworkflow-definition",
+        "definitions",
+        "fixture-definition-permission",
+        role,
+        java.util.Set.of(
+            AuthorizationAction.DEFINITION_CREATE.scope(),
+            AuthorizationAction.DEFINITION_READ.scope(),
+            AuthorizationAction.DEFINITION_LIST.scope(),
+            AuthorizationAction.DEFINITION_VALIDATE.scope(),
+            AuthorizationAction.DEFINITION_PUBLISH.scope()));
+    // A THIRD, real server-side check - independent of the two above - runs inside the
+    // operation-adapter itself (AuthzenOperationSecurityResolver, confirmed by direct source
+    // read), for every operation it dispatches (e.g. this fixture's own kubernetes-deployment
+    // apply/watch steps): OpenWorkflowAuthorizationResources.operation(...) resolves to a
+    // collection-scoped "openworkflow-operation"/"operations" resource (operation_kind is only
+    // ever a resource *property*, matching the execution/definition resources' own shape) and
+    // requires AuthorizationAction.OPERATION_EXECUTE. Without this, any real workflow execution
+    // that reaches a call: asyncapi step fails with "Authorization denied" the moment the
+    // operation-adapter picks it up off Kafka - found live 2026-09-21 driving the first real
+    // end-to-end execution through this fixture.
+    keycloak.grantResourceAuthorization(
+        organizationId,
+        "openworkflow-operation",
+        "operations",
+        "fixture-operation-permission",
+        role,
+        java.util.Set.of(AuthorizationAction.OPERATION_EXECUTE.scope()));
+  }
+
+  private void ensurePekkoPersistence() {
+    if (pekkoPersistence != PekkoPersistence.CASSANDRA || cassandra != null) return;
+    cassandra =
+        new com.forwardmeasure.testcontainers.cassandra.CassandraTestContainer(
+                existingNetwork(network.getId()), "cassandra")
+            .start();
+    // Provision through the same migration image as deployment; never let engine startup invent
+    // schema.
+    migrateCassandraTenant(tenantAlias);
+    additionalTenantAliases.forEach(this::migrateCassandraTenant);
+  }
+
+  private void migrateCassandraTenant(String alias) {
+    runMigrations(
+        network,
+        postgres,
+        alias,
+        java.util.Map.of(
+            "OPENWORKFLOW_CASSANDRA_CONTACT_POINTS",
+            "cassandra:9042",
+            "OPENWORKFLOW_CASSANDRA_LOCAL_DATACENTER",
+            cassandra.localDatacenter()));
+  }
+
+  private void configurePekkoPersistence(GenericContainer<?> service) {
+    service.withEnv(
+        "OPENWORKFLOW_PERSISTENCE_PROFILE",
+        pekkoPersistence.name().toLowerCase(java.util.Locale.ROOT));
+    if (pekkoPersistence == PekkoPersistence.CASSANDRA) {
+      service
+          .withEnv("OPENWORKFLOW_PERSISTENCE_ENDPOINT", "cassandra:9042")
+          .withEnv("OPENWORKFLOW_PERSISTENCE_LOCAL_DATACENTER", cassandra.localDatacenter())
+          .withEnv("OPENWORKFLOW_PERSISTENCE_USERNAME", "")
+          .withEnv("OPENWORKFLOW_PERSISTENCE_PASSWORD", "");
+    }
+  }
+
+  private String frameworkImage(String quarkusImage) {
+    return quarkusImage.replace("-quarkus:", "-" + framework.imageSuffix + ":");
+  }
+
+  private void configureFramework(GenericContainer<?> service, Framework framework) {
+    String issuer = hostDockerInternalIssuer();
+    service
+        .withImagePullPolicy(image -> false)
+        .withCreateContainerCmdModifier(
+            command -> command.getHostConfig().withMemory(2L * 1024 * 1024 * 1024))
+        .withEnv("JAVA_TOOL_OPTIONS", "-Xmx1g")
+        .withEnv("OPENWORKFLOW_TENANT_DATABASE_HOST", POSTGRES_ALIAS)
+        .withEnv("OPENWORKFLOW_TENANT_DATABASE_PORT", "5432")
+        .withEnv("OPENWORKFLOW_KEYCLOAK_ISSUER", issuer)
+        .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", keycloak.issuer().toString());
     String expectedIssuer = keycloak.issuer().toString();
     if (framework == Framework.SPRING) {
-      executionManagement
+      service
           .withEnv("MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED", "true")
           .withEnv("SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI", expectedIssuer)
           .withEnv(
@@ -378,7 +493,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
     } else if (framework == Framework.MICRONAUT) {
       // Keep the application's expected issuer setting while routing JWKS/AuthZEN over Docker.
       // Do not add a test-only claims validator: the packaged application must own validation.
-      executionManagement
+      service
           .withEnv("OPENWORKFLOW_KEYCLOAK_ISSUER", expectedIssuer)
           .withEnv(
               "JAVA_TOOL_OPTIONS",
@@ -389,15 +504,25 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
                   + issuer
                   + "/protocol/openid-connect/certs");
     }
-    // Register before startup so failed readiness also closes the partially started container.
-    services.add(executionManagement);
-    executionManagement.start();
+  }
+
+  private void startFrameworkService(GenericContainer<?> service, boolean waitForHealth) {
+    configureFramework(service, framework);
+    // Pekko engine/adapter bootstrap requires both members, so do not wait for cluster readiness
+    // before the other member starts. The caller must still awaitPekkoClusterReady before dispatch.
+    service.waitingFor(
+        waitForHealth
+            ? Wait.forHttp(framework.readinessPath)
+                .forStatusCode(200)
+                .withStartupTimeout(Duration.ofMinutes(3))
+            : Wait.forListeningPort().withStartupTimeout(Duration.ofMinutes(3)));
+    services.add(service);
+    service.start();
     LOGGER.info(
-        "Execution API framework={} image={} imageId={}",
+        "Runtime framework={} image={} imageId={}",
         framework,
-        executionManagement.getDockerImageName(),
-        executionManagement.getContainerInfo().getImageId());
-    return executionManagement;
+        service.getDockerImageName(),
+        service.getContainerInfo().getImageId());
   }
 
   /**
@@ -413,7 +538,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
   public GenericContainer<?> startEngineKafkaStreams() {
     String issuer = hostDockerInternalIssuer();
     GenericContainer<?> engine =
-        new GenericContainer<>(DockerImageName.parse(ENGINE_KAFKA_STREAMS_IMAGE))
+        new GenericContainer<>(DockerImageName.parse(frameworkImage(ENGINE_KAFKA_STREAMS_IMAGE)))
             .withNetwork(existingNetwork(network.getId()))
             .withNetworkAliases(ENGINE_KAFKA_STREAMS_ALIAS)
             .withExtraHost("host.docker.internal", "host-gateway")
@@ -464,8 +589,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .waitingFor(
                 Wait.forLogMessage(".*started in.*\\n", 1)
                     .withStartupTimeout(Duration.ofMinutes(3)));
-    engine.start();
-    services.add(engine);
+    startFrameworkService(engine, false);
     return engine;
   }
 
@@ -532,10 +656,11 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
   }
 
   public GenericContainer<?> startEnginePekko() {
+    ensurePekkoPersistence();
     startCloudEventsStub();
     String issuer = hostDockerInternalIssuer();
     GenericContainer<?> engine =
-        new GenericContainer<>(DockerImageName.parse(ENGINE_PEKKO_IMAGE))
+        new GenericContainer<>(DockerImageName.parse(frameworkImage(ENGINE_PEKKO_IMAGE)))
             .withNetwork(existingNetwork(network.getId()))
             .withNetworkAliases(ENGINE_PEKKO_ALIAS)
             .withExtraHost("host.docker.internal", "host-gateway")
@@ -627,8 +752,8 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .waitingFor(
                 Wait.forLogMessage(".*started in.*\\n", 1)
                     .withStartupTimeout(Duration.ofMinutes(3)));
-    engine.start();
-    services.add(engine);
+    configurePekkoPersistence(engine);
+    startFrameworkService(engine, false);
     return engine;
   }
 
@@ -642,7 +767,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
   public GenericContainer<?> startDefinitionManagement() {
     String issuer = hostDockerInternalIssuer();
     GenericContainer<?> definitionManagement =
-        new GenericContainer<>(DockerImageName.parse(DEFINITION_MANAGEMENT_IMAGE))
+        new GenericContainer<>(DockerImageName.parse(frameworkImage(DEFINITION_MANAGEMENT_IMAGE)))
             .withNetwork(existingNetwork(network.getId()))
             .withNetworkAliases(DEFINITION_MANAGEMENT_ALIAS)
             .withExtraHost("host.docker.internal", "host-gateway")
@@ -672,8 +797,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .waitingFor(
                 Wait.forLogMessage(".*started in.*\\n", 1)
                     .withStartupTimeout(Duration.ofMinutes(3)));
-    definitionManagement.start();
-    services.add(definitionManagement);
+    startFrameworkService(definitionManagement, true);
     return definitionManagement;
   }
 
@@ -720,8 +844,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
       String namespace, String image, int maxReplicas, boolean joinPekkoCluster) {
     GenericContainer<?> operationAdapter =
         buildOperationAdapter(namespace, image, maxReplicas, joinPekkoCluster);
-    operationAdapter.start();
-    services.add(operationAdapter);
+    startFrameworkService(operationAdapter, false);
     return operationAdapter;
   }
 
@@ -762,9 +885,20 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withEnv(
                 "OPENWORKFLOW_OPERATIONS_KUBERNETES_JOB_MAX_PARALLELISM_ALLOWLIST",
                 tenant + "=" + jobMaxParallelism);
-    operationAdapter.start();
-    services.add(operationAdapter);
+    startFrameworkService(operationAdapter, false);
     return operationAdapter;
+  }
+
+  /**
+   * Runs real HTTP protocol operations against a disposable receiver, with tenant-scoped egress.
+   */
+  public GenericContainer<?> startHttpOperationAdapter(boolean joinPekkoCluster) {
+    var adapter =
+        buildOperationAdapter("unused", "unused", 1, joinPekkoCluster)
+            .withEnv(
+                "OPENWORKFLOW_HTTP_EGRESS_ALLOWLIST", tenantId.value() + "=host.docker.internal");
+    startFrameworkService(adapter, false);
+    return adapter;
   }
 
   /** Builds, but does not start, operation-adapter - shared by both public entry points above. */
@@ -776,9 +910,10 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
     GenericContainer<?> operationAdapter =
         new GenericContainer<>(
                 DockerImageName.parse(
-                    joinPekkoCluster
-                        ? OPERATION_ADAPTER_PEKKO_IMAGE
-                        : OPERATION_ADAPTER_KAFKA_IMAGE))
+                    frameworkImage(
+                        joinPekkoCluster
+                            ? OPERATION_ADAPTER_PEKKO_IMAGE
+                            : OPERATION_ADAPTER_KAFKA_IMAGE)))
             .withNetwork(existingNetwork(network.getId()))
             .withNetworkAliases(OPERATION_ADAPTER_ALIAS)
             .withExtraHost("host.docker.internal", "host-gateway")
@@ -823,6 +958,8 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
                 Wait.forLogMessage(".*started in.*\\n", 1)
                     .withStartupTimeout(Duration.ofMinutes(3)));
     if (joinPekkoCluster) {
+      ensurePekkoPersistence();
+      configurePekkoPersistence(operationAdapter);
       operationAdapter
           .withEnv("OPENWORKFLOW_CLUSTER_DISCOVERY_SERVICE", CLUSTER_SERVICE_NAME)
           .withEnv("OPENWORKFLOW_CLUSTER_POD_IP", OPERATION_ADAPTER_ALIAS)
@@ -938,6 +1075,14 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
 
   private static void runMigrations(
       Network network, PostgreSqlTestContainer postgres, String tenantAlias) {
+    runMigrations(network, postgres, tenantAlias, java.util.Map.of());
+  }
+
+  private static void runMigrations(
+      Network network,
+      PostgreSqlTestContainer postgres,
+      String tenantAlias,
+      java.util.Map<String, String> persistenceEnvironment) {
     LOGGER.info(
         "RealFowfWorkflowFixture: running openworkflow-migrations for tenant '{}'", tenantAlias);
     try (GenericContainer<?> migrations =
@@ -957,6 +1102,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             // too short a timeout, tear the container down before it can log its own real error).
             .withStartupCheckStrategy(
                 new OneShotStartupCheckStrategy().withTimeout(Duration.ofMinutes(2)))) {
+      migrations.withEnv(persistenceEnvironment).withImagePullPolicy(image -> false);
       migrations.start();
       awaitExit(migrations, "openworkflow-migrations");
     }
@@ -1058,6 +1204,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
               out.write(body);
             }
           });
+      documentServers.add(server);
       server.start();
       int port = server.getAddress().getPort();
       String url = "http://host.docker.internal:" + port + path;
@@ -1075,12 +1222,14 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
 
   @Override
   public void close() {
-    for (GenericContainer<?> service : services) {
+    documentServers.forEach(server -> server.stop(0));
+    for (GenericContainer<?> service : services.reversed()) {
       service.close();
     }
     if (kubernetes != null) {
       kubernetes.close();
     }
+    if (cassandra != null) cassandra.close();
     keycloak.close();
     kafka.close();
     postgres.close();

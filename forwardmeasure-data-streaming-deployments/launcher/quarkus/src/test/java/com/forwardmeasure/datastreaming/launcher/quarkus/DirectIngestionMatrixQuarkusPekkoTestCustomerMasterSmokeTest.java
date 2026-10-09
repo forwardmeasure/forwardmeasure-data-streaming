@@ -26,8 +26,6 @@ import com.forwardmeasure.datastreaming.testfixtures.TestCustomerMasterFixtures;
 import com.forwardmeasure.testcontainers.kubernetes.KubernetesTestContainer;
 import com.forwardmeasure.testcontainers.opensearch.OpenSearchTestContainer;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
-import io.fabric8.kubernetes.api.model.Secret;
-import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
 import io.quarkus.test.junit.QuarkusTest;
@@ -45,24 +43,12 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-/**
- * Phase H's own sibling of {@code DirectIngestionMatrixQuarkusPekkoSmokeTest} - the identical
- * plumbing proof (real HTTP -&gt; real Keycloak auth -&gt; real K8s Job dispatch -&gt; real
- * cross-container reachability via {@code hostAliases}), this time seeded with a real Customer
- * Master customer-master row instead of WorldCheck, proving {@link TestCustomerMasterFixtures}' own
- * mapping resolves correctly end to end, not just at the {@code FieldMappingEngine} unit level
- * {@code TestCustomerMasterMappingTest} already proves.
- *
- * <p>Falls back to the same public curl stand-in image when Docker Hub credentials aren't available
- * in this environment, matching the WorldCheck sibling's own real, already-established gate.
- */
+/** Real REST admission, selected current executor, and persisted provider output. */
 @QuarkusTest
 @QuarkusTestResource(
     value = DirectIngestionMatrixQuarkusPekkoTestCustomerMasterSmokeTest.SmokeResource.class,
     restrictToAnnotatedClass = true)
 class DirectIngestionMatrixQuarkusPekkoTestCustomerMasterSmokeTest {
-
-  private static final String DOCUMENT_ID = "smoke-doc-1";
 
   @Test
   @Timeout(180)
@@ -71,15 +57,10 @@ class DirectIngestionMatrixQuarkusPekkoTestCustomerMasterSmokeTest {
     String token = SmokeResource.fixture.mintUserToken();
 
     var spec =
-        SmokeResource.realImageMode
-            ? TestCustomerMasterFixtures.boundedFileSpec(
-                "file:/tmp?fileName=source.csv&noop=true&initialDelay=0&delay=100",
-                SmokeResource.openSearchUrlForPod,
-                Path.of(""))
-            : TestCustomerMasterFixtures.boundedFileSpec(
-                "file:/tmp?fileName=unused.csv&noop=true",
-                "http://unused:9200",
-                Path.of("/tmp/unused.json"));
+        TestCustomerMasterFixtures.boundedFileSpec(
+            "file:/tmp?fileName=source.csv&noop=true&initialDelay=0&delay=100",
+            SmokeResource.openSearchUrlForPod,
+            Path.of(""));
 
     Map<String, Object> requestBody =
         Map.of(
@@ -108,11 +89,9 @@ class DirectIngestionMatrixQuarkusPekkoTestCustomerMasterSmokeTest {
         "SUCCEEDED", phase, "the real dispatched Job must reach a real terminal SUCCEEDED phase");
 
     String documentUri =
-        SmokeResource.realImageMode
-            ? SmokeResource.opensearch.hostEndpoint()
-                + "/test-customer-master-screening-records/_doc/"
-                + "KYC22438AML"
-            : SmokeResource.opensearch.hostEndpoint() + "/smoke-index/_doc/" + DOCUMENT_ID;
+        SmokeResource.opensearch.hostEndpoint()
+            + "/test-customer-master-screening-records/_doc/"
+            + "KYC22438AML";
     HttpResponse<String> document =
         HttpClient.newHttpClient()
             .send(
@@ -123,10 +102,7 @@ class DirectIngestionMatrixQuarkusPekkoTestCustomerMasterSmokeTest {
         document.statusCode(),
         "expected the real document written by the dispatched pod: " + document.body());
     assertTrue(
-        document
-            .body()
-            .contains(
-                SmokeResource.realImageMode ? "\"entity_kind\":\"organization\"" : DOCUMENT_ID),
+        document.body().contains("\"entity_kind\":\"organization\""),
         "unexpected document body: " + document.body());
   }
 
@@ -153,14 +129,8 @@ class DirectIngestionMatrixQuarkusPekkoTestCustomerMasterSmokeTest {
   public static final class SmokeResource implements QuarkusTestResourceLifecycleManager {
     static final String ROLE_NAME = "quarkus-direct-cm-smoke-role";
     static final String NAMESPACE = "fds-quarkus-cm-smoke";
-    static final String CURL_IMAGE =
-        "curlimages/curl@sha256:83a505ba2ba62f208ed6e410c268b7b9aa48f0f7b403c8108b9773b44199dbba";
 
-    static final String PEKKO_IMAGE =
-        "docker.io/forwardmeasure/data-streaming-executor-pekko@sha256:"
-            + "a1eab0f12073b4b2f0215fd350061522ffa01aca08ab259a81e8053ee04a90e3";
-
-    static final String PULL_SECRET_NAME = "dockerhub-pull-secret";
+    private static String PEKKO_IMAGE;
 
     /**
      * Real Customer Master header + the real, well-populated organisation row (ss-3, "iShares
@@ -181,11 +151,16 @@ class DirectIngestionMatrixQuarkusPekkoTestCustomerMasterSmokeTest {
     static volatile AuthzenKeycloakFixture fixture;
     static volatile KubernetesTestContainer kubernetes;
     static volatile OpenSearchTestContainer opensearch;
-    static volatile boolean realImageMode;
+
     static volatile String openSearchUrlForPod;
 
     @Override
     public Map<String, String> start() {
+      String executorImage = System.getProperty("fds.acceptance.pekko.image");
+      if (executorImage == null || executorImage.isBlank()) {
+        throw new IllegalStateException(
+            "Set fds.acceptance.pekko.image to the current locally built executor image");
+      }
       fixture = AuthzenKeycloakFixture.start();
       var tenantDid =
           com.forwardmeasure.jpa.tenancy.Did.parse("did:fwmtest:tenant:" + UUID.randomUUID());
@@ -204,22 +179,13 @@ class DirectIngestionMatrixQuarkusPekkoTestCustomerMasterSmokeTest {
 
       kubernetes = new KubernetesTestContainer().start();
       CurrentKubernetesTestContainer.set(kubernetes);
+      PEKKO_IMAGE = kubernetes.loadImageAndPinDigest(executorImage);
       try (var client = kubernetes.createClient()) {
         client
             .namespaces()
             .resource(
                 new NamespaceBuilder().withNewMetadata().withName(NAMESPACE).endMetadata().build())
             .create();
-        String username = System.getenv("DOCKER_HUB_USERNAME");
-        String token = System.getenv("DOCKER_HUB_TOKEN");
-        realImageMode = username != null && token != null;
-        if (realImageMode) {
-          client
-              .secrets()
-              .inNamespace(NAMESPACE)
-              .resource(dockerConfigSecret(username, token))
-              .create();
-        }
       }
 
       opensearch = new OpenSearchTestContainer().start();
@@ -227,17 +193,8 @@ class DirectIngestionMatrixQuarkusPekkoTestCustomerMasterSmokeTest {
       String gatewayIp = dockerBridgeGatewayIp();
       openSearchUrlForPod = "http://host.docker.internal:" + opensearchPort;
 
-      String pekkoImage = realImageMode ? PEKKO_IMAGE : CURL_IMAGE;
-      String pekkoCommand =
-          realImageMode
-              ? realRowSeedAndRunCommand()
-              : "curl -sf -X PUT "
-                  + openSearchUrlForPod
-                  + "/smoke-index/_doc/"
-                  + DOCUMENT_ID
-                  + " -H Content-Type:application/json -d {\\\"marker\\\":\\\""
-                  + DOCUMENT_ID
-                  + "\\\"} #";
+      String pekkoImage = PEKKO_IMAGE;
+      String pekkoCommand = realRowSeedAndRunCommand();
 
       return Map.ofEntries(
           Map.entry("quarkus.oidc.auth-server-url", fixture.issuer().toString()),
@@ -253,16 +210,14 @@ class DirectIngestionMatrixQuarkusPekkoTestCustomerMasterSmokeTest {
               AuthzenKeycloakFixture.AUTHZEN_CLIENT_SECRET),
           Map.entry("datastreaming.launcher.k8s.namespaces", NAMESPACE),
           Map.entry("datastreaming.launcher.k8s.images", pekkoImage),
-          Map.entry(
-              "datastreaming.launcher.k8s.image-pull-secrets",
-              realImageMode ? PULL_SECRET_NAME : "unused"),
+          Map.entry("datastreaming.launcher.k8s.image-pull-secrets", "unused"),
           Map.entry("datastreaming.launcher.k8s.host-aliases", "host.docker.internal=" + gatewayIp),
           Map.entry("datastreaming.launcher.fowf.keycloak.client-id", "unused"),
           Map.entry("datastreaming.launcher.fowf.keycloak.client-secret", "unused"),
           Map.entry("datastreaming.launcher.pekko.image", pekkoImage),
           Map.entry("datastreaming.launcher.pekko.command", pekkoCommand),
-          Map.entry("datastreaming.launcher.kafka-streams.image", CURL_IMAGE),
-          Map.entry("datastreaming.launcher.kafka-streams.command", "true #"),
+          Map.entry("datastreaming.launcher.kafka-streams.image", "unused"),
+          Map.entry("datastreaming.launcher.kafka-streams.command", "false"),
           Map.entry("datastreaming.launcher.spark.image", "unused"),
           Map.entry("datastreaming.launcher.spark.command", "unused"),
           Map.entry("datastreaming.launcher.kafka.bootstrap-servers", "unused"));
@@ -280,30 +235,6 @@ class DirectIngestionMatrixQuarkusPekkoTestCustomerMasterSmokeTest {
       if (fixture != null) {
         fixture.close();
       }
-    }
-
-    private static Secret dockerConfigSecret(String username, String token) {
-      String auth =
-          Base64.getEncoder()
-              .encodeToString((username + ":" + token).getBytes(StandardCharsets.UTF_8));
-      String dockerConfigJson =
-          "{\"auths\":{\"https://index.docker.io/v1/\":{\"username\":\""
-              + username
-              + "\",\"password\":\""
-              + token
-              + "\",\"auth\":\""
-              + auth
-              + "\"}}}";
-      return new SecretBuilder()
-          .withNewMetadata()
-          .withName(PULL_SECRET_NAME)
-          .withNamespace(NAMESPACE)
-          .endMetadata()
-          .withType("kubernetes.io/dockerconfigjson")
-          .addToData(
-              ".dockerconfigjson",
-              Base64.getEncoder().encodeToString(dockerConfigJson.getBytes(StandardCharsets.UTF_8)))
-          .build();
     }
   }
 

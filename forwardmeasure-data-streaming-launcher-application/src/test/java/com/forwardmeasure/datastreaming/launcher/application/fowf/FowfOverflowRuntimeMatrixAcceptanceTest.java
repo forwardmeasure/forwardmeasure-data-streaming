@@ -46,9 +46,13 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Packaged services, public admission, real GCS protocol storage and durable engine recovery. */
 class FowfOverflowRuntimeMatrixAcceptanceTest {
+  private static final Logger LOGGER =
+      LoggerFactory.getLogger(FowfOverflowRuntimeMatrixAcceptanceTest.class);
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final HttpClient HTTP =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
@@ -127,6 +131,7 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
       String api = endpoint(execution);
       String source = "http://host.docker.internal:" + server.getAddress().getPort();
       for (Scenario scenario : Scenario.values()) {
+        LOGGER.info("Overflow scenario started: runtime={} scenario={}", selected, scenario);
         String marker = run + "-" + scenario;
         int size = scenario == Scenario.INLINE ? 32 : scenario == Scenario.MAXIMUM ? 32768 : 8192;
         byte[] payload = JSON.writeValueAsBytes(Map.of("marker", marker, "blob", "x".repeat(size)));
@@ -225,6 +230,7 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
                 key,
                 202);
         assertEquals(id, replay.path("id").asText());
+        LOGGER.info("Overflow scenario passed: runtime={} scenario={}", selected, scenario);
       }
     } finally {
       server.stop(0);

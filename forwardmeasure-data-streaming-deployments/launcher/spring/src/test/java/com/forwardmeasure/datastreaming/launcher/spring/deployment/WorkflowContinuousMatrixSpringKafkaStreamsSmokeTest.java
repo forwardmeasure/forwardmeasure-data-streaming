@@ -148,10 +148,10 @@ class WorkflowContinuousMatrixSpringKafkaStreamsSmokeTest {
         () -> fixture.keycloak().issuer() + "/protocol/openid-connect/token");
     registry.add(
         "datastreaming.launcher.fowf.keycloak.client-id",
-        () -> AuthzenKeycloakFixture.AUTHZEN_CLIENT_ID);
+        () -> RealFowfWorkflowFixture.LAUNCHER_CLIENT_ID);
     registry.add(
         "datastreaming.launcher.fowf.keycloak.client-secret",
-        () -> AuthzenKeycloakFixture.AUTHZEN_CLIENT_SECRET);
+        () -> RealFowfWorkflowFixture.LAUNCHER_CLIENT_SECRET);
     registry.add("datastreaming.launcher.k8s.namespaces", () -> NAMESPACE);
     registry.add("datastreaming.launcher.k8s.images", () -> IMAGE);
     registry.add("datastreaming.launcher.k8s.image-pull-secrets", () -> "unused");

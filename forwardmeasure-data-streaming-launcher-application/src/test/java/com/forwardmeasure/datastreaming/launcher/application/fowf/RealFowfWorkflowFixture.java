@@ -139,6 +139,11 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
    */
   public static final String TENANT_DOMAIN = "fds-phase-d.test";
 
+  /** Tenant-member machine identity used by the FDS launcher when it calls FOWF. */
+  public static final String LAUNCHER_CLIENT_ID = "fds-workflow-launcher";
+
+  public static final String LAUNCHER_CLIENT_SECRET = "fixture-workflow-launcher-secret";
+
   private final Network network;
   private final PostgreSqlTestContainer postgres;
   private final KafkaTestContainer kafka;
@@ -282,6 +287,10 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
           organizationId,
           tenantId.value());
       grantRuntimePermissions(keycloak, organizationId, role);
+      // PDP credentials do not carry organization membership and cannot admit workflows.
+      // Use a distinct machine identity in the same scoped role as this fixture's caller.
+      keycloak.createServiceAccountClient(LAUNCHER_CLIENT_ID, LAUNCHER_CLIENT_SECRET);
+      keycloak.addServiceAccountToOrganization(organizationId, LAUNCHER_CLIENT_ID, role);
       var fixture =
           new RealFowfWorkflowFixture(network, postgres, kafka, keycloak, tenantId, organizationId);
       fixture.tenantAlias = tenantAlias;

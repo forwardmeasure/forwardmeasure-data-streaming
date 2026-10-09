@@ -214,10 +214,10 @@ class WorkflowContinuousMatrixQuarkusPekkoSmokeTest {
               fixture.keycloak().issuer() + "/protocol/openid-connect/token"),
           Map.entry(
               "datastreaming.launcher.fowf.keycloak.client-id",
-              com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture.AUTHZEN_CLIENT_ID),
+              RealFowfWorkflowFixture.LAUNCHER_CLIENT_ID),
           Map.entry(
               "datastreaming.launcher.fowf.keycloak.client-secret",
-              com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture.AUTHZEN_CLIENT_SECRET),
+              RealFowfWorkflowFixture.LAUNCHER_CLIENT_SECRET),
           // This test never dispatches through the Direct-Job path, but DirectIngestionLauncher's
           // own producer is eagerly created regardless.
           Map.entry("datastreaming.launcher.k8s.namespaces", NAMESPACE),

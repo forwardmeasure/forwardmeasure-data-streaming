@@ -272,10 +272,10 @@ class WorkflowBoundedMatrixQuarkusPekkoTestCustomerMasterSmokeTest {
               fixture.keycloak().issuer() + "/protocol/openid-connect/token"),
           Map.entry(
               "datastreaming.launcher.fowf.keycloak.client-id",
-              com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture.AUTHZEN_CLIENT_ID),
+              RealFowfWorkflowFixture.LAUNCHER_CLIENT_ID),
           Map.entry(
               "datastreaming.launcher.fowf.keycloak.client-secret",
-              com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture.AUTHZEN_CLIENT_SECRET),
+              RealFowfWorkflowFixture.LAUNCHER_CLIENT_SECRET),
           Map.entry("datastreaming.launcher.k8s.namespaces", NAMESPACE),
           Map.entry("datastreaming.launcher.k8s.images", pekkoImage),
           Map.entry("datastreaming.launcher.k8s.image-pull-secrets", "unused"),

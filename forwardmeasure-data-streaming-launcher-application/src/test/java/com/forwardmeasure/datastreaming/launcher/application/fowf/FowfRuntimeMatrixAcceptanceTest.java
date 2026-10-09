@@ -16,6 +16,9 @@
  */
 package com.forwardmeasure.datastreaming.launcher.application.fowf;
 
+import static com.forwardmeasure.datastreaming.launcher.application.fowf.PublicWorkflowAcceptanceClient.endpoint;
+import static com.forwardmeasure.datastreaming.launcher.application.fowf.PublicWorkflowAcceptanceClient.publish;
+import static com.forwardmeasure.datastreaming.launcher.application.fowf.PublicWorkflowAcceptanceClient.request;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -24,18 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture;
-import com.forwardmeasure.openworkflow.definition.management.api.model.CreateWorkflowDefinitionRequest;
-import com.forwardmeasure.openworkflow.definition.management.api.model.CreateWorkflowRequest;
-import com.forwardmeasure.openworkflow.definition.management.client.ApiClient;
-import com.forwardmeasure.openworkflow.definition.management.client.api.WorkflowDefinitionGovernanceApi;
-import com.forwardmeasure.openworkflow.definition.management.client.api.WorkflowDefinitionsApi;
-import com.forwardmeasure.openworkflow.definition.management.client.api.WorkflowsApi;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
@@ -44,13 +37,10 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.testcontainers.containers.GenericContainer;
 
 /** Cross-product public FOWF acceptance hosted beside the shared runtime fixture used by FDS. */
 class FowfRuntimeMatrixAcceptanceTest {
   private static final ObjectMapper JSON = new ObjectMapper();
-  private static final HttpClient HTTP =
-      HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
   record Runtime(
       RealFowfWorkflowFixture.Framework framework,
@@ -244,30 +234,6 @@ class FowfRuntimeMatrixAcceptanceTest {
     }
   }
 
-  private static UUID publish(GenericContainer<?> definition, String token, String source) {
-    var client = new ApiClient();
-    client.setBasePath(endpoint(definition));
-    client.setBearerToken(token);
-    var workflows = new WorkflowsApi(client);
-    var definitions = new WorkflowDefinitionsApi(client);
-    var governance = new WorkflowDefinitionGovernanceApi(client);
-    // Catalogue name deliberately differs from document.name, exercising durable definition
-    // identity.
-    var workflow =
-        workflows.createWorkflow(
-            new CreateWorkflowRequest()
-                .name("catalogue-" + UUID.randomUUID())
-                .title("Runtime acceptance"));
-    var created =
-        definitions.createWorkflowDefinition(
-            workflow.getId(),
-            new CreateWorkflowDefinitionRequest().version("1.0.0").source(source));
-    String match = "\"" + created.getRevision() + "\"";
-    var validated = governance.validateWorkflowDefinition(match, workflow.getId(), created.getId());
-    assertTrue(Boolean.TRUE.equals(validated.getValid()), validated.toString());
-    return governance.publishWorkflowDefinition(match, workflow.getId(), created.getId()).getId();
-  }
-
   private static String caller(
       AuthzenKeycloakFixture identity, String organization, String client) {
     String secret = "matrix-identity-test-only";
@@ -320,34 +286,5 @@ class FowfRuntimeMatrixAcceptanceTest {
               phase: after
     """
         .formatted(effect, effect);
-  }
-
-  private static String endpoint(GenericContainer<?> service) {
-    return "http://" + service.getHost() + ":" + service.getMappedPort(8080);
-  }
-
-  private static JsonNode request(
-      String endpoint,
-      String path,
-      String token,
-      String method,
-      Object body,
-      String key,
-      int expected)
-      throws Exception {
-    var request =
-        HttpRequest.newBuilder(URI.create(endpoint + path))
-            .timeout(Duration.ofSeconds(30))
-            .header("Authorization", "Bearer " + token)
-            .header("Content-Type", "application/json");
-    if (key != null) request.header("Idempotency-Key", key);
-    request.method(
-        method,
-        body == null
-            ? HttpRequest.BodyPublishers.noBody()
-            : HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body)));
-    var response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
-    assertEquals(expected, response.statusCode(), response.body());
-    return response.body().isBlank() ? JSON.nullNode() : JSON.readTree(response.body());
   }
 }

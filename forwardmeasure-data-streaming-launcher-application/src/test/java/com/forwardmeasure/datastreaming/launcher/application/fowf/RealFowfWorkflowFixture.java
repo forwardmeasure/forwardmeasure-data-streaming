@@ -150,6 +150,31 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
       new java.util.ArrayList<>();
   private KubernetesTestContainer kubernetes;
   private Framework framework = Framework.QUARKUS;
+  private boolean networkIdentity;
+  private java.util.Map<String, String> overflowEnvironment = java.util.Map.of();
+
+  /** Configures the production storage client before any runtime service has started. */
+  public void configureOverflow(String endpoint, String bucket, long threshold, long maximum) {
+    if (!services.isEmpty())
+      throw new IllegalStateException("Configure overflow before runtime startup");
+    if (threshold < 1 || maximum <= threshold)
+      throw new IllegalArgumentException("Invalid overflow bounds");
+    overflowEnvironment =
+        java.util.Map.of(
+            "OPENWORKFLOW_OPERATIONS_PROTOCOL_STORAGE_BACKEND",
+            "gcs",
+            "OPENWORKFLOW_OPERATIONS_PROTOCOL_STORAGE_ENDPOINT",
+            endpoint,
+            "OPENWORKFLOW_OPERATIONS_PROTOCOL_STORAGE_BUCKET",
+            bucket,
+            "OPENWORKFLOW_OPERATIONS_PROTOCOL_STORAGE_KEY_PREFIX",
+            "runtime-acceptance",
+            "OPENWORKFLOW_OPERATIONS_PROTOCOL_OFFLOAD_THRESHOLD_BYTES",
+            Long.toString(threshold),
+            "OPENWORKFLOW_OPERATIONS_PROTOCOL_MAX_RESPONSE_BYTES",
+            Long.toString(maximum));
+  }
+
   private com.forwardmeasure.testcontainers.cassandra.CassandraTestContainer cassandra;
   private String tenantAlias;
   private final List<String> additionalTenantAliases = new java.util.ArrayList<>();
@@ -207,6 +232,20 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
   }
 
   public static RealFowfWorkflowFixture start(String tenantAlias, String role) {
+    return start(tenantAlias, role, false);
+  }
+
+  /** Uses one network-reachable issuer for products that also call its AuthZEN endpoint. */
+  public static RealFowfWorkflowFixture startWithNetworkIdentity(
+      String alias, String role, Framework framework, PekkoPersistence persistence) {
+    var fixture = start(alias, role, true);
+    fixture.framework = Objects.requireNonNull(framework);
+    fixture.pekkoPersistence = Objects.requireNonNull(persistence);
+    return fixture;
+  }
+
+  private static RealFowfWorkflowFixture start(
+      String tenantAlias, String role, boolean networkIdentity) {
     Objects.requireNonNull(tenantAlias, "tenantAlias");
     Objects.requireNonNull(role, "role");
     Network network = Network.newNetwork();
@@ -229,7 +268,10 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
 
       started.add(kafka);
       TenantId tenantId = deriveTenantId(tenantAlias);
-      AuthzenKeycloakFixture keycloak = AuthzenKeycloakFixture.start();
+      AuthzenKeycloakFixture keycloak =
+          networkIdentity
+              ? AuthzenKeycloakFixture.start(existingNetwork(network.getId()), "keycloak")
+              : AuthzenKeycloakFixture.start();
       started.add(keycloak);
       String organizationId =
           keycloak.provisionTenant(
@@ -243,6 +285,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
       var fixture =
           new RealFowfWorkflowFixture(network, postgres, kafka, keycloak, tenantId, organizationId);
       fixture.tenantAlias = tenantAlias;
+      fixture.networkIdentity = networkIdentity;
       return fixture;
     } catch (RuntimeException | Error failure) {
       for (AutoCloseable resource : started.reversed()) {
@@ -307,15 +350,12 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
     String issuer = hostDockerInternalIssuer();
     GenericContainer<?> executionManagement =
         new GenericContainer<>(
-                DockerImageName.parse(
-                    "forwardmeasure/openworkflow-execution-management-"
-                        + framework.imageSuffix
-                        + ":"
-                        + FOWF_IMAGE_TAG))
+                DockerImageName.parse(selectedImage(EXECUTION_MANAGEMENT_IMAGE, framework)))
             .withImagePullPolicy(image -> false)
             .withCreateContainerCmdModifier(
                 command -> command.getHostConfig().withMemory(2L * 1024 * 1024 * 1024))
             .withEnv("JAVA_TOOL_OPTIONS", "-Xmx1g")
+            .withEnv("OPENWORKFLOW_TENANT_DOMAIN", TENANT_DOMAIN)
             .withNetwork(existingNetwork(network.getId()))
             .withNetworkAliases(EXECUTION_MANAGEMENT_ALIAS)
             .withExtraHost("host.docker.internal", "host-gateway")
@@ -336,7 +376,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withEnv("OPENWORKFLOW_KEYCLOAK_ISSUER", issuer)
             // Discovery/JWKS use the container-reachable address, while the JWT must retain
             // the exact issuer used to mint the fixture's real tokens on the host.
-            .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", keycloak.issuer().toString())
+            .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", expectedIssuer())
             .withEnv("OPENWORKFLOW_CLIENT_ID", AuthzenKeycloakFixture.AUTHZEN_CLIENT_ID)
             .withEnv("OPENWORKFLOW_CLIENT_SECRET", AuthzenKeycloakFixture.AUTHZEN_CLIENT_SECRET)
             .withEnv("OPENWORKFLOW_ORGANIZATION_CLIENT_ID", AuthzenKeycloakFixture.CLIENT_ID)
@@ -468,7 +508,16 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
   }
 
   private String frameworkImage(String quarkusImage) {
-    return quarkusImage.replace("-quarkus:", "-" + framework.imageSuffix + ":");
+    return selectedImage(quarkusImage, framework);
+  }
+
+  private static String selectedImage(String quarkusImage, Framework framework) {
+    String component =
+        quarkusImage.substring(
+            "forwardmeasure/openworkflow-".length(), quarkusImage.indexOf("-quarkus:"));
+    return System.getProperty(
+        "openworkflow.acceptance." + component + "." + framework.imageSuffix + ".image",
+        quarkusImage.replace("-quarkus:", "-" + framework.imageSuffix + ":"));
   }
 
   private void configureFramework(GenericContainer<?> service, Framework framework) {
@@ -478,11 +527,12 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
         .withCreateContainerCmdModifier(
             command -> command.getHostConfig().withMemory(2L * 1024 * 1024 * 1024))
         .withEnv("JAVA_TOOL_OPTIONS", "-Xmx1g")
+        .withEnv("OPENWORKFLOW_TENANT_DOMAIN", TENANT_DOMAIN)
         .withEnv("OPENWORKFLOW_TENANT_DATABASE_HOST", POSTGRES_ALIAS)
         .withEnv("OPENWORKFLOW_TENANT_DATABASE_PORT", "5432")
         .withEnv("OPENWORKFLOW_KEYCLOAK_ISSUER", issuer)
-        .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", keycloak.issuer().toString());
-    String expectedIssuer = keycloak.issuer().toString();
+        .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", expectedIssuer());
+    String expectedIssuer = expectedIssuer();
     if (framework == Framework.SPRING) {
       service
           .withEnv("MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED", "true")
@@ -508,6 +558,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
 
   private void startFrameworkService(GenericContainer<?> service, boolean waitForHealth) {
     configureFramework(service, framework);
+    service.withEnv(overflowEnvironment);
     // Pekko engine/adapter bootstrap requires both members, so do not wait for cluster readiness
     // before the other member starts. The caller must still awaitPekkoClusterReady before dispatch.
     service.waitingFor(
@@ -572,7 +623,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withEnv("FORWARDMEASURE_JPA_TENANT_DATABASE_PASSWORD", RUNTIME_DATABASE_PASSWORD)
             .withEnv("FORWARDMEASURE_JPA_FUNCTIONAL_SCHEMA", "OPENWORKFLOW")
             .withEnv("OPENWORKFLOW_KEYCLOAK_ISSUER", issuer)
-            .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", keycloak.issuer().toString())
+            .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", expectedIssuer())
             .withEnv("OPENWORKFLOW_CLIENT_ID", AuthzenKeycloakFixture.AUTHZEN_CLIENT_ID)
             .withEnv("OPENWORKFLOW_CLIENT_SECRET", AuthzenKeycloakFixture.AUTHZEN_CLIENT_SECRET)
             .withEnv("OPENWORKFLOW_ORGANIZATION_CLIENT_ID", AuthzenKeycloakFixture.CLIENT_ID)
@@ -695,7 +746,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
                 "OPENWORKFLOW_CLOUD_EVENTS_PUBLISH_URL",
                 "http://" + CLOUD_EVENTS_STUB_ALIAS + ":8080/")
             .withEnv("OPENWORKFLOW_KEYCLOAK_ISSUER", issuer)
-            .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", keycloak.issuer().toString())
+            .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", expectedIssuer())
             .withEnv("OPENWORKFLOW_CLIENT_ID", AuthzenKeycloakFixture.AUTHZEN_CLIENT_ID)
             .withEnv("OPENWORKFLOW_CLIENT_SECRET", AuthzenKeycloakFixture.AUTHZEN_CLIENT_SECRET)
             .withEnv("OPENWORKFLOW_ORGANIZATION_CLIENT_ID", AuthzenKeycloakFixture.CLIENT_ID)
@@ -778,7 +829,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withEnv("OPENWORKFLOW_TENANT_DATABASE_HOST", POSTGRES_ALIAS)
             .withEnv("OPENWORKFLOW_TENANT_DATABASE_PORT", "5432")
             .withEnv("OPENWORKFLOW_KEYCLOAK_ISSUER", issuer)
-            .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", keycloak.issuer().toString())
+            .withEnv("QUARKUS_OIDC_TOKEN_ISSUER", expectedIssuer())
             .withEnv("OPENWORKFLOW_CLIENT_ID", AuthzenKeycloakFixture.AUTHZEN_CLIENT_ID)
             .withEnv("OPENWORKFLOW_CLIENT_SECRET", AuthzenKeycloakFixture.AUTHZEN_CLIENT_SECRET)
             .withEnv("OPENWORKFLOW_ORGANIZATION_CLIENT_ID", AuthzenKeycloakFixture.CLIENT_ID)
@@ -897,6 +948,22 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
         buildOperationAdapter("unused", "unused", 1, joinPekkoCluster)
             .withEnv(
                 "OPENWORKFLOW_HTTP_EGRESS_ALLOWLIST", tenantId.value() + "=host.docker.internal");
+    startFrameworkService(adapter, false);
+    return adapter;
+  }
+
+  /** Real secret-mounted adapter for the production FDE workflow contract. */
+  public GenericContainer<?> startAuthenticatedGrpcAdapter(
+      boolean pekko, String host, String token) {
+    var adapter =
+        buildOperationAdapter("unused", "unused", 1, pekko)
+            .withEnv(
+                "OPENWORKFLOW_HTTP_EGRESS_ALLOWLIST",
+                tenantId.value() + "=" + host + ",host.docker.internal")
+            .withEnv("OPENWORKFLOW_ADAPTER_SECRET_DIRECTORY", "/var/run/secrets/openworkflow")
+            .withCopyToContainer(
+                Transferable.of(token.getBytes(StandardCharsets.UTF_8), 0444),
+                "/var/run/secrets/openworkflow/" + tenantAlias + "/decision-engine-token");
     startFrameworkService(adapter, false);
     return adapter;
   }
@@ -1027,8 +1094,13 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
    * host-gateway DNS name every service container below registers via {@code
    * withExtraHost("host.docker.internal", "host-gateway")}.
    */
-  private String hostDockerInternalIssuer() {
-    String issuer = keycloak.issuer().toString();
+  private String expectedIssuer() {
+    return (networkIdentity ? keycloak.networkIssuer() : keycloak.issuer()).toString();
+  }
+
+  public String hostDockerInternalIssuer() {
+    if (networkIdentity) return keycloak.networkIssuer().toString();
+    String issuer = expectedIssuer();
     return issuer.replaceFirst("^http://[^:/]+:", "http://host.docker.internal:");
   }
 
@@ -1186,9 +1258,8 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
    * direct source read - even fowf's own real dispatch tests embed one as a literal string), so a
    * real, reachable HTTP endpoint is the only way to satisfy {@code
    * AllowlistedHttpWorkflowResourceLoader}'s own real HTTP fetch. Returns the URL as reachable from
-   * a container on this fixture's own network (via {@code host.docker.internal}) - never closed by
-   * {@link #close()}, since a real {@code HttpServer} has no {@link AutoCloseable} lifecycle worth
-   * tracking here; it dies with the test JVM.
+   * a container on this fixture's own network (via {@code host.docker.internal}). The fixture owns
+   * the HTTP server and stops it during {@link #close()}.
    */
   public String startAsyncApiDocumentServer(String path, String content) {
     try {

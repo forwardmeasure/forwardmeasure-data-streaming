@@ -48,6 +48,11 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-gcs</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>com.forwardmeasure.openworkflow</groupId>
       <artifactId>openworkflow-definition</artifactId>
       <scope>test</scope>

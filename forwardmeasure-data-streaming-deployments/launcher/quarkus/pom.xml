@@ -160,6 +160,12 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <!-- Test-JAR dependencies do not inherit the fixture's test-scoped backend containers. -->
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-cassandra</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <!-- Publishing a real WorkflowDefinition against the real definition-management image. -->
       <groupId>com.forwardmeasure.openworkflow</groupId>
       <artifactId>openworkflow-definition-management-client-apachehttp</artifactId>

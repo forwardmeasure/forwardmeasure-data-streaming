@@ -49,11 +49,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Real, no-mocking-framework proof at the actual HTTP protocol level - same plain JDK {@link
- * HttpServer} stand-in for fowf's own execution-management service that {@code
- * WorkflowIngestionLauncherTest} already uses, this time exercised through {@link
- * WorkflowRunResource} to prove the HTTP-facing wiring (status codes, {@code Location},
- * header/query validation) on top of the already-proven launcher.
+ * Resource adapter test: invokes the resource directly and uses a JDK HTTP server for the upstream
+ * FOWF protocol. Verifies response construction and outgoing paths/headers; this is not evidence of
+ * incoming HTTP routing or real authorization. Those are covered by the three framework deployment
+ * suites and packaged runtime acceptance.
  */
 final class WorkflowRunResourceTest {
 
@@ -73,7 +72,7 @@ final class WorkflowRunResourceTest {
   @BeforeEach
   void start() throws IOException {
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-    server.createContext("/v1/executions", this::respond);
+    server.createContext("/v1/workflow-executions", this::respond);
     server.start();
 
     ApiClient apiClient = new ApiClient();
@@ -100,6 +99,8 @@ final class WorkflowRunResourceTest {
     Response response = resource.create(request);
 
     assertEquals(202, response.getStatus());
+    assertEquals("POST", lastMethod.get());
+    assertEquals("/v1/workflow-executions", lastPath.get());
     assertNotNull(response.getHeaderString("Location"));
     WorkflowExecution execution = (WorkflowExecution) response.getEntity();
     assertTrue(response.getHeaderString("Location").endsWith(execution.getId().toString()));
@@ -107,10 +108,13 @@ final class WorkflowRunResourceTest {
 
   @Test
   void getReturnsTheCurrentExecution() throws Exception {
-    Response response = resource.get(UUID.randomUUID());
+    UUID executionId = UUID.randomUUID();
+    Response response = resource.get(executionId);
 
     assertEquals(200, response.getStatus());
     assertEquals("GET", lastMethod.get());
+    assertEquals("/v1/workflow-executions/" + executionId, lastPath.get());
+    assertEquals(executionId, ((WorkflowExecution) response.getEntity()).getId());
   }
 
   @Test
@@ -121,7 +125,9 @@ final class WorkflowRunResourceTest {
 
     assertEquals(200, response.getStatus());
     assertEquals("\"3\"", lastIfMatch.get());
-    assertTrue(lastPath.get().endsWith("/cancel"));
+    assertEquals("POST", lastMethod.get());
+    assertEquals("/v1/workflow-executions/" + executionId + "/cancel", lastPath.get());
+    assertEquals(executionId, ((WorkflowExecution) response.getEntity()).getId());
   }
 
   @Test
@@ -139,7 +145,8 @@ final class WorkflowRunResourceTest {
     lastIfMatch.set(exchange.getRequestHeaders().getFirst("If-Match"));
     exchange.getRequestBody().readAllBytes();
 
-    UUID id = UUID.randomUUID();
+    String[] path = exchange.getRequestURI().getPath().split("/");
+    UUID id = path.length > 3 ? UUID.fromString(path[3]) : UUID.randomUUID();
     String json =
         """
         {"id":"%s","workflowId":"%s","revisionId":"%s","revisionDigest":"abc123",

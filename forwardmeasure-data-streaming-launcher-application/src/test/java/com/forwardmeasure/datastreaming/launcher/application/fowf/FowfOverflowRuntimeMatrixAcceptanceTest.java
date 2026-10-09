@@ -165,7 +165,7 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
         assertFalse(id.isBlank());
         assertEquals(selected.engine(), started.path("engineId").asText());
         if (recovery) {
-          awaitDurableWait(runtime, api, id);
+          awaitDurableWait(runtime, api, id, marker, pekko);
           List<String> artifacts = objectsContaining(storage, marker);
           assertFalse(artifacts.isEmpty(), "The real response must have been offloaded");
           String prefix = "runtime-acceptance/" + runtime.tenantId().value() + "/";
@@ -237,7 +237,8 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
     }
   }
 
-  private static void awaitDurableWait(RealFowfWorkflowFixture runtime, String api, String id)
+  private static void awaitDurableWait(
+      RealFowfWorkflowFixture runtime, String api, String id, String marker, boolean pekko)
       throws Exception {
     long deadline = System.nanoTime() + Duration.ofMinutes(2).toNanos();
     JsonNode last = null;
@@ -253,7 +254,21 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
               200);
       assertNotEquals("FAILED", last.path("state").asText(), last.toString());
       assertNotEquals("COMPLETED", last.path("state").asText(), "Recovery window was missed");
-      if (!last.path("timers").isEmpty()) return;
+      // The public projection's timers collection is not populated by the event projector.
+      // Require persisted history evidence of the wait after the received payload, rather than
+      // treating an empty collection or the earlier HTTP-operation WAITING state as a barrier.
+      if ("WAITING".equals(last.path("state").asText())) {
+        JsonNode history = request(api, "/v1/workflow-executions/" + id + "/history",
+            runtime.keycloak().mintUserToken(), "GET", null, null, 200);
+        for (JsonNode entry : history.path("items")) {
+          if (pekko
+              ? "STATE_OBSERVED".equals(entry.path("type").asText())
+                  && "WAITING".equals(entry.path("state").asText())
+                  && marker.equals(entry.path("data").path("marker").asText())
+              : "TIMER_SCHEDULED".equals(entry.path("type").asText())
+                  && entry.path("taskPath").asText().contains("restoreWindow")) return;
+        }
+      }
       Thread.sleep(250);
     }
     fail("No durable timer was exposed before restart: " + last);

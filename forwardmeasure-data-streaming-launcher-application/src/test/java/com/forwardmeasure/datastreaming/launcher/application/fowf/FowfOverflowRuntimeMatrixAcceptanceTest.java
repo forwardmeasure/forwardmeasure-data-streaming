@@ -42,6 +42,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -114,16 +118,19 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
                 "overflow-caller",
                 selected.framework(),
                 selected.persistence());
-        var storage = new GcsEmulatorTestContainer(runtime.network(), "gcs").start()) {
+        var storage = new GcsEmulatorTestContainer(runtime.network(), "gcs").start();
+        var storageReads = new StorageReadBarrier(storage)) {
       storageRequest(
           storage,
           "POST",
           "/storage/v1/b?project=acceptance",
           JSON.writeValueAsBytes(Map.of("name", BUCKET)),
           200);
-      runtime.configureOverflow(storage.networkEndpoint().toString(), BUCKET, 1024, 16384);
-      var execution = runtime.startExecutionManagement(selected.engine());
       boolean pekko = selected.engine().equals("pekko");
+      runtime.configureOverflow(
+          pekko ? storageReads.endpoint() : storage.networkEndpoint().toString(),
+          BUCKET, 1024, 16384);
+      var execution = runtime.startExecutionManagement(selected.engine());
       var engine = pekko ? runtime.startEnginePekko() : runtime.startEngineKafkaStreams();
       var definition = runtime.startDefinitionManagement();
       var adapter = runtime.startHttpOperationAdapter(pekko);
@@ -140,6 +147,7 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
             scenario == Scenario.RECOVER
                 || scenario == Scenario.CORRUPT
                 || scenario == Scenario.MISSING;
+        if (recovery && pekko) storageReads.arm();
         if (scenario == Scenario.STORAGE_WRITE_FAILURE) {
           // Make the real bucket unavailable. Do not fake a storage client's exception.
           for (String key : objectKeys(storage)) deleteObject(storage, key);
@@ -150,7 +158,7 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
             publish(
                 definition,
                 runtime.keycloak().mintUserToken(),
-                workflow(marker, source + "/source/" + marker, source + "/effect", recovery));
+                workflow(marker, source + "/source/" + marker, source + "/effect", recovery && !pekko));
         String key = UUID.randomUUID().toString();
         Map<String, Object> admission = Map.of("revisionId", revision, "input", Map.of());
         JsonNode started =
@@ -166,7 +174,8 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
         assertFalse(id.isBlank());
         assertEquals(selected.engine(), started.path("engineId").asText());
         if (recovery) {
-          awaitDurableWait(runtime, api, id, marker, pekko);
+          if (pekko) storageReads.awaitRead();
+          awaitDurableWait(runtime, api, id, pekko);
           List<String> artifacts = objectsContaining(storage, marker);
           assertFalse(artifacts.isEmpty(), "The real response must have been offloaded");
           String prefix = "runtime-acceptance/" + runtime.tenantId().value() + "/";
@@ -196,6 +205,7 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
           } else if (scenario == Scenario.MISSING) {
             for (String artifact : artifacts) deleteObject(storage, artifact);
           }
+          storageReads.release();
           engine.getDockerClient().startContainerCmd(engine.getContainerId()).exec();
           if (pekko) runtime.awaitPekkoClusterReady(engine, adapter);
         }
@@ -239,7 +249,7 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
   }
 
   private static void awaitDurableWait(
-      RealFowfWorkflowFixture runtime, String api, String id, String marker, boolean pekko)
+      RealFowfWorkflowFixture runtime, String api, String id, boolean pekko)
       throws Exception {
     long deadline = System.nanoTime() + Duration.ofMinutes(2).toNanos();
     JsonNode last = null;
@@ -256,8 +266,9 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
       assertNotEquals("FAILED", last.path("state").asText(), last.toString());
       assertNotEquals("COMPLETED", last.path("state").asText(), "Recovery window was missed");
       // The public projection's timers collection is not populated by the event projector.
-      // Require persisted history evidence of the wait after the received payload, rather than
-      // treating an empty collection or the earlier HTTP-operation WAITING state as a barrier.
+      // Pekko resolves and journals payloads before a subsequent timer. Gate the real object
+      // read instead, and require its ARTIFACT state to be projected before killing the process.
+      // Kafka retains the reference through its durable timer, so that is its recovery barrier.
       if ("WAITING".equals(last.path("state").asText())) {
         JsonNode history = request(api, "/v1/workflow-executions/" + id + "/history",
             runtime.keycloak().mintUserToken(), "GET", null, null, 200);
@@ -265,14 +276,86 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
           if (pekko
               ? "STATE_OBSERVED".equals(entry.path("type").asText())
                   && "WAITING".equals(entry.path("state").asText())
-                  && marker.equals(entry.path("data").path("marker").asText())
+                  && "ARTIFACT".equals(entry.path("data").path("storage").asText())
               : "TIMER_SCHEDULED".equals(entry.path("type").asText())
                   && entry.path("taskPath").asText().contains("restoreWindow")) return;
         }
       }
       Thread.sleep(250);
     }
-    fail("No durable timer was exposed before restart: " + last);
+    fail("No durable recovery barrier was exposed before restart: " + last);
+  }
+
+  /** Forwards real GCS requests, delaying media reads only until the owning engine is stopped. */
+  private static final class StorageReadBarrier implements AutoCloseable {
+    private record Gate(CountDownLatch entered, CountDownLatch release) {}
+
+    private final AtomicReference<Gate> gate = new AtomicReference<>();
+    private final java.util.concurrent.ExecutorService executor =
+        Executors.newVirtualThreadPerTaskExecutor();
+    private final HttpServer server;
+
+    StorageReadBarrier(GcsEmulatorTestContainer storage) throws java.io.IOException {
+      server = HttpServer.create(new InetSocketAddress("0.0.0.0", 0), 0);
+      server.setExecutor(executor);
+      server.createContext("/", exchange -> {
+        try (exchange) {
+          String path = exchange.getRequestURI().toString();
+          Gate current = gate.get();
+          if (current != null && exchange.getRequestMethod().equals("GET")
+              && (path.contains("alt=media") || path.startsWith("/download/"))) {
+            current.entered().countDown();
+            if (!current.release().await(2, TimeUnit.MINUTES))
+              throw new java.io.IOException("Storage read barrier was not released");
+          }
+          var forwarded = HttpRequest.newBuilder(URI.create(storage.hostEndpoint() + path))
+              .timeout(Duration.ofSeconds(30))
+              .method(exchange.getRequestMethod(),
+                  HttpRequest.BodyPublishers.ofByteArray(exchange.getRequestBody().readAllBytes()));
+          exchange.getRequestHeaders().forEach((name, values) -> {
+            if (!List.of("host", "connection", "content-length", "expect", "upgrade",
+                "transfer-encoding", "http2-settings").contains(name.toLowerCase(java.util.Locale.ROOT)))
+              values.forEach(value -> forwarded.header(name, value));
+          });
+          var response = HTTP.send(forwarded.build(), HttpResponse.BodyHandlers.ofByteArray());
+          response.headers().map().forEach((name, values) -> {
+            if (!List.of("content-length", "transfer-encoding", "connection").contains(name))
+              exchange.getResponseHeaders().put(name, values);
+          });
+          byte[] body = response.body();
+          exchange.sendResponseHeaders(response.statusCode(), body.length == 0 ? -1 : body.length);
+          if (body.length > 0) exchange.getResponseBody().write(body);
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+        }
+      });
+      server.start();
+    }
+
+    String endpoint() {
+      return "http://host.docker.internal:" + server.getAddress().getPort();
+    }
+
+    void arm() {
+      assertTrue(gate.compareAndSet(null, new Gate(new CountDownLatch(1), new CountDownLatch(1))));
+    }
+
+    void awaitRead() throws InterruptedException {
+      assertTrue(gate.get().entered().await(60, TimeUnit.SECONDS),
+          "The real GCS media read must start before the engine is stopped");
+    }
+
+    void release() {
+      Gate current = gate.getAndSet(null);
+      if (current != null) current.release().countDown();
+    }
+
+    @Override
+    public void close() {
+      release();
+      server.stop(0);
+      executor.shutdownNow();
+    }
   }
 
   private static JsonNode awaitTerminal(RealFowfWorkflowFixture runtime, String api, String id)

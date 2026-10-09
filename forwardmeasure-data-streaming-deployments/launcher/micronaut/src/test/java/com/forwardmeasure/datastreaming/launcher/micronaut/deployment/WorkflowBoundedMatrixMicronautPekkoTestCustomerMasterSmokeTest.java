@@ -71,7 +71,9 @@ class WorkflowBoundedMatrixMicronautPekkoTestCustomerMasterSmokeTest
   private static final String ROLE = "micronaut-workflow-cm-smoke-role";
   private static final String NAMESPACE = "fds-micronaut-workflow-cm-smoke";
   private static final String PEKKO_LOCAL_IMAGE =
-      "forwardmeasure/data-streaming-executor-pekko:1.1.0";
+      java.util.Objects.requireNonNull(
+          System.getProperty("fds.acceptance.pekko.image"),
+          "Set fds.acceptance.pekko.image to the current local executor image");
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
   static volatile RealFowfWorkflowFixture fixture;

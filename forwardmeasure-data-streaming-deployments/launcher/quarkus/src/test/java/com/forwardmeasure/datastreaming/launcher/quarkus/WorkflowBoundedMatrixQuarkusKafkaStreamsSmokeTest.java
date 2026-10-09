@@ -139,7 +139,10 @@ class WorkflowBoundedMatrixQuarkusKafkaStreamsSmokeTest {
   public static final class SmokeResource implements QuarkusTestResourceLifecycleManager {
     static final String ROLE = "quarkus-workflow-ks-smoke-role";
     static final String NAMESPACE = "fds-quarkus-workflow-ks-smoke";
-    static final String PEKKO_LOCAL_IMAGE = "forwardmeasure/data-streaming-executor-pekko:1.1.0";
+    static final String PEKKO_LOCAL_IMAGE =
+        java.util.Objects.requireNonNull(
+            System.getProperty("fds.acceptance.pekko.image"),
+            "Set fds.acceptance.pekko.image to the current local executor image");
 
     static volatile RealFowfWorkflowFixture fixture;
     static volatile com.forwardmeasure.testcontainers.opensearch.OpenSearchTestContainer opensearch;

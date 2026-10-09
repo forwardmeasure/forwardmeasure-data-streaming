@@ -1242,6 +1242,12 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
    * the HTTP server and stops it during {@link #close()}.
    */
   public String startAsyncApiDocumentServer(String path, String content) {
+    return startDocumentServer(path, "application/yaml", content);
+  }
+
+  /** Serves a contract with its actual media type, including non-YAML protocol sources. */
+  public String startDocumentServer(String path, String mediaType, String content) {
+    Objects.requireNonNull(mediaType, "mediaType");
     try {
       com.sun.net.httpserver.HttpServer server =
           com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("0.0.0.0", 0), 0);
@@ -1249,7 +1255,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
       server.createContext(
           path,
           exchange -> {
-            exchange.getResponseHeaders().add("Content-Type", "application/yaml");
+            exchange.getResponseHeaders().add("Content-Type", mediaType);
             exchange.sendResponseHeaders(200, body.length);
             try (var out = exchange.getResponseBody()) {
               out.write(body);
@@ -1260,7 +1266,10 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
       int port = server.getAddress().getPort();
       String url = "http://host.docker.internal:" + port + path;
       LOGGER.info(
-          "RealFowfWorkflowFixture: hosting AsyncAPI document at {} (real path {})", url, path);
+          "RealFowfWorkflowFixture: hosting {} document at {} (real path {})",
+          mediaType,
+          url,
+          path);
       return url;
     } catch (java.io.IOException e) {
       throw new java.io.UncheckedIOException(e);

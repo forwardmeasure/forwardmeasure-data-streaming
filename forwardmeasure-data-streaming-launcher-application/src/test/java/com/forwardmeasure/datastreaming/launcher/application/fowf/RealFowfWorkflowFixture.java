@@ -354,7 +354,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withImagePullPolicy(image -> false)
             .withCreateContainerCmdModifier(
                 command -> command.getHostConfig().withMemory(2L * 1024 * 1024 * 1024))
-            .withEnv("JAVA_TOOL_OPTIONS", "-Xmx1g")
+            .withEnv("JAVA_TOOL_OPTIONS", containerJavaOptions())
             .withEnv("OPENWORKFLOW_TENANT_DOMAIN", TENANT_DOMAIN)
             .withNetwork(existingNetwork(network.getId()))
             .withNetworkAliases(EXECUTION_MANAGEMENT_ALIAS)
@@ -520,13 +520,18 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
         quarkusImage.replace("-quarkus:", "-" + framework.imageSuffix + ":"));
   }
 
+  private static String containerJavaOptions() {
+    // Explicit test-run override: host JAVA_TOOL_OPTIONS is not inherited by Docker services.
+    return System.getProperty("forwardmeasure.acceptance.java-tool-options", "-Xmx1g");
+  }
+
   private void configureFramework(GenericContainer<?> service, Framework framework) {
     String issuer = hostDockerInternalIssuer();
     service
         .withImagePullPolicy(image -> false)
         .withCreateContainerCmdModifier(
             command -> command.getHostConfig().withMemory(2L * 1024 * 1024 * 1024))
-        .withEnv("JAVA_TOOL_OPTIONS", "-Xmx1g")
+        .withEnv("JAVA_TOOL_OPTIONS", containerJavaOptions())
         .withEnv("OPENWORKFLOW_TENANT_DOMAIN", TENANT_DOMAIN)
         .withEnv("OPENWORKFLOW_TENANT_DATABASE_HOST", POSTGRES_ALIAS)
         .withEnv("OPENWORKFLOW_TENANT_DATABASE_PORT", "5432")
@@ -547,7 +552,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
           .withEnv("OPENWORKFLOW_KEYCLOAK_ISSUER", expectedIssuer)
           .withEnv(
               "JAVA_TOOL_OPTIONS",
-              "-Xmx1g"
+              containerJavaOptions()
                   + " -Dopenworkflow.authorization.issuer="
                   + issuer
                   + " -Dmicronaut.security.token.jwt.signatures.jwks.keycloak.url="

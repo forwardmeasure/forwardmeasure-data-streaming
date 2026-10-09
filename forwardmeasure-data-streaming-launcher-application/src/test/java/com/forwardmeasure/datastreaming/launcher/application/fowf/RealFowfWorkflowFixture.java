@@ -640,7 +640,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .waitingFor(
                 Wait.forLogMessage(".*started in.*\\n", 1)
                     .withStartupTimeout(Duration.ofMinutes(3)));
-    startFrameworkService(engine, false);
+    startFrameworkService(engine, true);
     return engine;
   }
 
@@ -862,7 +862,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
       String namespace, String image, int maxReplicas, boolean joinPekkoCluster) {
     GenericContainer<?> operationAdapter =
         buildOperationAdapter(namespace, image, maxReplicas, joinPekkoCluster);
-    startFrameworkService(operationAdapter, false);
+    startFrameworkService(operationAdapter, !joinPekkoCluster);
     return operationAdapter;
   }
 
@@ -903,7 +903,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withEnv(
                 "OPENWORKFLOW_OPERATIONS_KUBERNETES_JOB_MAX_PARALLELISM_ALLOWLIST",
                 tenant + "=" + jobMaxParallelism);
-    startFrameworkService(operationAdapter, false);
+    startFrameworkService(operationAdapter, !joinPekkoCluster);
     return operationAdapter;
   }
 
@@ -915,7 +915,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
         buildOperationAdapter("unused", "unused", 1, joinPekkoCluster)
             .withEnv(
                 "OPENWORKFLOW_HTTP_EGRESS_ALLOWLIST", tenantId.value() + "=host.docker.internal");
-    startFrameworkService(adapter, false);
+    startFrameworkService(adapter, !joinPekkoCluster);
     return adapter;
   }
 
@@ -931,7 +931,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withCopyToContainer(
                 Transferable.of(token.getBytes(StandardCharsets.UTF_8), 0444),
                 "/var/run/secrets/openworkflow/" + tenantAlias + "/decision-engine-token");
-    startFrameworkService(adapter, false);
+    startFrameworkService(adapter, !pekko);
     return adapter;
   }
 

@@ -645,44 +645,6 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
   }
 
   /**
-   * The Pekko engine equivalent of {@link #startEngineKafkaStreams} - real parity coverage, not
-   * built until 2026-09-21 (a real gap this fixture originally shipped with: it only ever wired the
-   * Kafka Streams engine, even though both engines share the identical {@code
-   * kubernetes-deployment} dispatch path via {@code KafkaProtocolOperationExecutors.create(...)},
-   * so both need the same real end-to-end proof).
-   *
-   * <p>Env var recipe confirmed against a real, already-proven container-based fixture for this
-   * exact image in forwardmeasure-entity-intelligence's own Playwright/Testcontainers E2E suite
-   * ({@code forwardmeasure-entity-intelligence-studio/webapp/.../tests-e2e/support/environment.ts}
-   * - TypeScript, same underlying Testcontainers Docker API), cross-checked against this class's
-   * own already-proven Kafka Streams engine wiring above, and against direct source reads of {@code
-   * PekkoEngineQuarkusBinding}/{@code PekkoClusterRuntime}:
-   *
-   * <ul>
-   *   <li>{@code OPENWORKFLOW_CLOUD_EVENTS_TRANSPORT}/{@code _PUBLISH_URL}, not {@code
-   *       OPENWORKFLOW_EXECUTION_EVENTS_URL} - a genuinely different config surface ({@code
-   *       openworkflow.cloud-events.*}) from the Kafka Streams engine's own {@code
-   *       openworkflow.execution-events.url} (which this image also has, but its own real default
-   *       already matches {@link #EXECUTION_MANAGEMENT_ALIAS} byte-for-byte, so nothing needs
-   *       overriding there).
-   *   <li>No {@code OPENWORKFLOW_KAFKA_BOOTSTRAP_SERVERS} - this engine's own Kafka use (human-task
-   *       request/outcome topics) is unrelated to this fixture's real scenario.
-   *   <li>{@code OPENWORKFLOW_CLUSTER_DISCOVERY_SERVICE} deliberately left unset - confirmed by
-   *       direct read of {@code PekkoClusterRuntime}: a blank discovery service takes a real,
-   *       code-supported single-node self-join path ({@code Cluster.get(system).manager().tell(
-   *       Join.create(cluster.selfMember().address()))}), skipping DNS discovery/{@code
-   *       PekkoManagement} entirely - {@code OPENWORKFLOW_CLUSTER_POD_IP} (which would need the
-   *       Kubernetes downward API this fixture has no equivalent of) is only ever consumed on the
-   *       DNS-discovery path, so it's safe to leave unset too.
-   *   <li>Real Postgres-backed Pekko persistence (event_journal/event_tag/snapshot, {@code
-   *       openworkflow-common.xml}'s own {@code openworkflow-240-pekko-postgresql-persistence}
-   *       changeset) genuinely needs {@code OPENWORKFLOW_PERSISTENCE_*} pointed at this fixture's
-   *       real Postgres (its own real default, {@code postgresql:5432}, doesn't match {@link
-   *       #POSTGRES_ALIAS}) - same reasoning as every other service's {@code
-   *       OPENWORKFLOW_DATABASE_*} override.
-   * </ul>
-   */
-  /**
    * Minimal, real stand-in for a genuine {@code publish:emit:} CloudEvents subscriber - returns 204
    * for any request on port 8080, no auth/state needed since this scenario never inspects the
    * delivered event's own content, only that delivery succeeds so the Pekko Projection driving it
@@ -728,6 +690,11 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withEnv("OPENWORKFLOW_TENANT_REGISTRY_URL", postgres.networkJdbcUrl())
             .withEnv("OPENWORKFLOW_TENANT_REGISTRY_USERNAME", postgres.username())
             .withEnv("OPENWORKFLOW_TENANT_REGISTRY_PASSWORD", postgres.password())
+            // Lifecycle events go to the real execution API. CloudEvents publication below
+            // is a separate protocol and must not replace this persistence/status callback.
+            .withEnv(
+                "OPENWORKFLOW_EXECUTION_EVENTS_URL",
+                "http://" + EXECUTION_MANAGEMENT_ALIAS + ":8080")
             .withEnv("OPENWORKFLOW_CLOUD_EVENTS_TRANSPORT", "http")
             // Real, live-caught bug (2026-09-23), corrected again 2026-09-24: an earlier fix here
             // added the missing "events" path segment to stop a real, permanent HTTP 404

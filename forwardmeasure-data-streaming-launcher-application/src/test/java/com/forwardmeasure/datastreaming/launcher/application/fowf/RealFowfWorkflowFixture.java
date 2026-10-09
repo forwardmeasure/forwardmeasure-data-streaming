@@ -681,6 +681,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withEnv("OPENWORKFLOW_CONTROL_PLANE_DATABASE_URL", postgres.networkJdbcUrl())
             .withEnv("OPENWORKFLOW_RUNTIME_DATABASE_USERNAME", RUNTIME_DATABASE_USERNAME)
             .withEnv("OPENWORKFLOW_RUNTIME_DATABASE_PASSWORD", RUNTIME_DATABASE_PASSWORD)
+            .withEnv("OPENWORKFLOW_KAFKA_BOOTSTRAP_SERVERS", kafka.networkBootstrapServers())
             .withEnv("OPENWORKFLOW_PERSISTENCE_ENDPOINT", postgres.networkJdbcUrl())
             .withEnv("OPENWORKFLOW_PERSISTENCE_USERNAME", RUNTIME_DATABASE_USERNAME)
             .withEnv("OPENWORKFLOW_PERSISTENCE_PASSWORD", RUNTIME_DATABASE_PASSWORD)
@@ -1028,6 +1029,13 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
       throws InterruptedException {
     long deadline = System.nanoTime() + Duration.ofMinutes(2).toNanos();
     while (System.nanoTime() < deadline) {
+      if (!engine.isRunning() || !operationAdapter.isRunning()) {
+        throw new IllegalStateException(
+            "Pekko member exited before joining the cluster; engine logs:\n"
+                + engine.getLogs()
+                + "\nadapter logs:\n"
+                + operationAdapter.getLogs());
+      }
       if (engine.getLogs().contains("to [Up]")
           && operationAdapter.getLogs().contains("Welcome from")) {
         return;

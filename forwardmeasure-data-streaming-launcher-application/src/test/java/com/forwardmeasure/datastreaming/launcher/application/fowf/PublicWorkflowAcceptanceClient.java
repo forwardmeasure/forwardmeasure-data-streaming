@@ -32,6 +32,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Map;
 import java.util.UUID;
 import org.testcontainers.containers.GenericContainer;
 
@@ -80,11 +81,26 @@ public final class PublicWorkflowAcceptanceClient {
       String key,
       int expected)
       throws Exception {
+    return request(endpoint, path, token, method, body, key, expected, Map.of());
+  }
+
+  public static JsonNode request(
+      String endpoint,
+      String path,
+      String token,
+      String method,
+      Object body,
+      String key,
+      int expected,
+      Map<String, String> headers)
+      throws Exception {
     var request =
         HttpRequest.newBuilder(URI.create(endpoint + path))
             .timeout(Duration.ofSeconds(30))
             .header("Authorization", "Bearer " + token)
+            .header("X-Correlation-ID", key == null ? UUID.randomUUID().toString() : key)
             .header("Content-Type", "application/json");
+    headers.forEach(request::header);
     if (key != null) request.header("Idempotency-Key", key);
     request.method(
         method,

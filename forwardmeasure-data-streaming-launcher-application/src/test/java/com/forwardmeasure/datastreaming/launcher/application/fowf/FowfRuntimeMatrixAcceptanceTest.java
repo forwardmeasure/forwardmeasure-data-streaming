@@ -48,18 +48,40 @@ class FowfRuntimeMatrixAcceptanceTest {
       RealFowfWorkflowFixture.PekkoPersistence persistence) {}
 
   static Stream<Runtime> runtimes() {
-    return Stream.of(RealFowfWorkflowFixture.Framework.values())
-        .flatMap(
-            framework ->
-                Stream.of(
-                    new Runtime(
-                        framework,
-                        "kafka-streams",
-                        RealFowfWorkflowFixture.PekkoPersistence.POSTGRESQL),
-                    new Runtime(
-                        framework, "pekko", RealFowfWorkflowFixture.PekkoPersistence.POSTGRESQL),
-                    new Runtime(
-                        framework, "pekko", RealFowfWorkflowFixture.PekkoPersistence.CASSANDRA)));
+    var all =
+        Stream.of(RealFowfWorkflowFixture.Framework.values())
+            .flatMap(
+                framework ->
+                    Stream.of(
+                        new Runtime(
+                            framework,
+                            "kafka-streams",
+                            RealFowfWorkflowFixture.PekkoPersistence.POSTGRESQL),
+                        new Runtime(
+                            framework,
+                            "pekko",
+                            RealFowfWorkflowFixture.PekkoPersistence.POSTGRESQL),
+                        new Runtime(
+                            framework,
+                            "pekko",
+                            RealFowfWorkflowFixture.PekkoPersistence.CASSANDRA)))
+            .toList();
+    String selection = System.getProperty("fowf.acceptance.runtime", "");
+    var selected =
+        all.stream()
+            .filter(
+                runtime ->
+                    selection.isBlank()
+                        || selection.equals(
+                            runtime.framework().name().toLowerCase(java.util.Locale.ROOT)
+                                + "/"
+                                + runtime.engine()
+                                + "/"
+                                + runtime.persistence().name().toLowerCase(java.util.Locale.ROOT)))
+            .toList();
+    if (selected.isEmpty())
+      throw new IllegalArgumentException("Unknown FOWF acceptance runtime: " + selection);
+    return selected.stream();
   }
 
   @ParameterizedTest(name = "{0}")
@@ -201,7 +223,8 @@ class FowfRuntimeMatrixAcceptanceTest {
           "POST",
           Map.of(),
           null,
-          404);
+          404,
+          Map.of("If-Match", "\"" + completed.path("version").asLong() + "\""));
       request(endpoint, "/v1/workflow-executions", tokenB, "POST", body, key, 404);
       UUID isolatedRevision = publish(definition, tokenB, isolatedWorkflow());
       var isolated =

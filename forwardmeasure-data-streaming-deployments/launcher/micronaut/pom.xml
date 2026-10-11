@@ -117,6 +117,13 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <!-- RealFowfWorkflowFixture (launcher-application test-jar) provisions the OKS topics; test-jar
+           test dependencies are not transitive. -->
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-kafka-streams-testkit</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>org.apache.kafka</groupId>
       <artifactId>kafka-clients</artifactId>
       <scope>test</scope>

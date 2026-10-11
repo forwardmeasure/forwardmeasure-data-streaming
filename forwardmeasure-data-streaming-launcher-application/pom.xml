@@ -57,6 +57,12 @@
       <artifactId>openworkflow-definition</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <!-- RealFowfWorkflowFixture provisions the OKS topics the platform declares in production. -->
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-kafka-streams-testkit</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
     <dependency>
       <!-- ExecutionPlanCompiler - the planner DirectIngestionLauncher calls to resolve which

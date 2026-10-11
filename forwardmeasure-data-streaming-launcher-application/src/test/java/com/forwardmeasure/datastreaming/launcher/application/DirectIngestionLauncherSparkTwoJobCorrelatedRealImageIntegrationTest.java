@@ -85,7 +85,7 @@ import org.junit.jupiter.api.Timeout;
  * matching a reference entity, one not), proving real cross-source merge on the *right* key, not
  * just "a correlated plan happens not to crash."
  */
-@WithKubernetesContainer
+@WithKubernetesContainer(jacocoImagePrefixes = "forwardmeasure/data-streaming-")
 @WithKafkaContainer(hostDockerInternalListener = true)
 @WithOpenSearchContainer
 final class DirectIngestionLauncherSparkTwoJobCorrelatedRealImageIntegrationTest {

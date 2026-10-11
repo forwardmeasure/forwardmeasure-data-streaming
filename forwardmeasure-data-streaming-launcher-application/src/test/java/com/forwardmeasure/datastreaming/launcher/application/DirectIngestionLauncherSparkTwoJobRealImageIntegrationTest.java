@@ -77,7 +77,7 @@ import org.junit.jupiter.api.Timeout;
  * consequence of the architecture, not something this test forces), which reads that topic and
  * writes the final, screened rows to a real OpenSearch index.
  */
-@WithKubernetesContainer
+@WithKubernetesContainer(jacocoImagePrefixes = "forwardmeasure/data-streaming-")
 @WithKafkaContainer(hostDockerInternalListener = true)
 @WithOpenSearchContainer
 final class DirectIngestionLauncherSparkTwoJobRealImageIntegrationTest {

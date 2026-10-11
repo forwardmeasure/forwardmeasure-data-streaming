@@ -18,6 +18,7 @@ package com.forwardmeasure.datastreaming.mappers;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.forwardmeasure.datastreaming.api.OpenSearchHttpClients;
 import com.forwardmeasure.datastreaming.api.OpenSearchIndexInitializer;
 import com.forwardmeasure.datastreaming.api.SecretRefs;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
@@ -52,7 +53,7 @@ public final class OpenSearchSinkRowWriter implements SinkRowWriter {
   private final String index;
   private final String authHeader;
   private final ObjectMapper objectMapper = new ObjectMapper();
-  private final HttpClient client = HttpClient.newHttpClient();
+  private final HttpClient client;
 
   public OpenSearchSinkRowWriter(SinkSpec sink) {
     Objects.requireNonNull(sink, "sink");
@@ -60,6 +61,7 @@ public final class OpenSearchSinkRowWriter implements SinkRowWriter {
     this.baseUrl = sink.uri();
     this.index = sink.index();
     this.authHeader = basicAuthHeader(sink.options());
+    this.client = OpenSearchHttpClients.create(sink.options());
     OpenSearchIndexInitializer.ensureIndex(baseUrl, index, sink.options());
   }
 

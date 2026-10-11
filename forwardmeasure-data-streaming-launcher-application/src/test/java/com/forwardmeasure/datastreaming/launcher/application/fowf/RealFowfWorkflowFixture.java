@@ -20,6 +20,7 @@ import com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture;
 import com.forwardmeasure.jpa.tenancy.Did;
 import com.forwardmeasure.jpa.tenancy.TenantId;
 import com.forwardmeasure.openworkflow.authorization.AuthorizationAction;
+import com.forwardmeasure.openworkflow.workflow.runtime.testkit.OksTopicProvisioner;
 import com.forwardmeasure.testcontainers.kafka.KafkaContainerConfiguration;
 import com.forwardmeasure.testcontainers.kafka.KafkaTestContainer;
 import com.forwardmeasure.testcontainers.kubernetes.KubernetesTestContainer;
@@ -104,6 +105,8 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
 
   private static final String POSTGRES_ALIAS = "postgres";
   private static final String KAFKA_ALIAS = "kafka";
+  // The engine and operation adapter images' own default OPENWORKFLOW_KAFKA_TOPIC_PREFIX.
+  private static final String OKS_TOPIC_PREFIX = "openworkflow";
   static final String EXECUTION_MANAGEMENT_ALIAS = "openworkflow-execution-management-quarkus";
   static final String ENGINE_KAFKA_STREAMS_ALIAS = "openworkflow-engine-kafka-streams-quarkus";
   static final String ENGINE_PEKKO_ALIAS = "openworkflow-engine-pekko-quarkus";
@@ -272,6 +275,9 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
               .start();
 
       started.add(kafka);
+      // The platform declares the OKS topics in production; the Kafka Streams engine and its
+      // operation adapter only wait for them. Provision them from the same catalogue here.
+      OksTopicProvisioner.provision(kafka.bootstrapServers(), OKS_TOPIC_PREFIX);
       TenantId tenantId = deriveTenantId(tenantAlias);
       AuthzenKeycloakFixture keycloak =
           networkIdentity
@@ -1070,7 +1076,12 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
    */
   public synchronized KubernetesTestContainer kubernetes() {
     if (kubernetes == null) {
-      kubernetes = new KubernetesTestContainer().start();
+      // Under the coverage profile every FDS executor JVM this cluster runs records into the
+      // module's jacoco.exec, collected when the fixture closes the cluster.
+      kubernetes =
+          new KubernetesTestContainer()
+              .withJacocoCoverage("forwardmeasure/data-streaming-")
+              .start();
     }
     return kubernetes;
   }

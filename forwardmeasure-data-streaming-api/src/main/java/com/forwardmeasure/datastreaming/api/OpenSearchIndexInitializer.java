@@ -55,8 +55,6 @@ import java.util.Map;
  */
 public final class OpenSearchIndexInitializer {
 
-  private static final HttpClient HTTP_CLIENT =
-      HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
   private static final ObjectMapper JSON = new ObjectMapper();
 
   private OpenSearchIndexInitializer() {}
@@ -76,6 +74,7 @@ public final class OpenSearchIndexInitializer {
     if (index == null || !index.matches("[a-z0-9][a-z0-9-]{0,254}"))
       throw new IllegalArgumentException("Invalid index name");
     String authHeader = basicAuthHeader(options);
+    HttpClient client = OpenSearchHttpClients.create(options);
     String indexUri = baseUrl + "/" + index;
     try {
       String body =
@@ -85,17 +84,21 @@ public final class OpenSearchIndexInitializer {
       if (body.length() > 1_048_576)
         throw new IllegalArgumentException("Index settings exceed 1 MiB");
       JsonNode expected = JSON.readTree(body);
-      if (!indexExists(indexUri, authHeader)) {
-        createIndex(indexUri, body, authHeader);
+      if (!indexExists(client, indexUri, authHeader)) {
+        createIndex(client, indexUri, body, authHeader);
         return;
       }
-      JsonNode mappings = getJson(indexUri + "/_mapping", authHeader).path(index).path("mappings");
+      JsonNode mappings =
+          getJson(client, indexUri + "/_mapping", authHeader).path(index).path("mappings");
       if (!contains(mappings, expected.path("mappings"))) {
         throw new IllegalStateException(
             "Existing index ownership or mapping differs from the admitted contract");
       }
       JsonNode settings =
-          getJson(indexUri + "/_settings", authHeader).path(index).path("settings").path("index");
+          getJson(client, indexUri + "/_settings", authHeader)
+              .path(index)
+              .path("settings")
+              .path("index");
       JsonNode wanted = expected.path("settings");
       if (wanted.has("index")) wanted = wanted.path("index");
       if (!contains(settings, wanted))
@@ -118,11 +121,11 @@ public final class OpenSearchIndexInitializer {
         : expected.equals(actual);
   }
 
-  private static JsonNode getJson(String uri, String auth) throws IOException {
+  private static JsonNode getJson(HttpClient client, String uri, String auth) throws IOException {
     var builder = HttpRequest.newBuilder(URI.create(uri)).timeout(Duration.ofSeconds(30)).GET();
     if (auth != null) builder.header("Authorization", auth);
     try {
-      var response = HTTP_CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+      var response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
       if (response.statusCode() / 100 != 2)
         throw new IOException("Index inspection HTTP " + response.statusCode());
       return JSON.readTree(response.body());
@@ -132,7 +135,7 @@ public final class OpenSearchIndexInitializer {
     }
   }
 
-  private static boolean indexExists(String indexUri, String authHeader) {
+  private static boolean indexExists(HttpClient client, String indexUri, String authHeader) {
     HttpRequest.Builder requestBuilder =
         HttpRequest.newBuilder(URI.create(indexUri))
             .timeout(Duration.ofSeconds(30))
@@ -142,7 +145,7 @@ public final class OpenSearchIndexInitializer {
     }
     HttpResponse<Void> response;
     try {
-      response = HTTP_CLIENT.send(requestBuilder.build(), HttpResponse.BodyHandlers.discarding());
+      response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.discarding());
     } catch (IOException | InterruptedException e) {
       if (e instanceof InterruptedException) Thread.currentThread().interrupt();
       throw new IllegalStateException(
@@ -153,7 +156,8 @@ public final class OpenSearchIndexInitializer {
     throw new IllegalStateException("Index existence check HTTP " + response.statusCode());
   }
 
-  private static void createIndex(String indexUri, String body, String authHeader) {
+  private static void createIndex(
+      HttpClient client, String indexUri, String body, String authHeader) {
     HttpRequest.Builder requestBuilder =
         HttpRequest.newBuilder(URI.create(indexUri))
             .timeout(Duration.ofSeconds(30))
@@ -164,7 +168,7 @@ public final class OpenSearchIndexInitializer {
     }
     HttpResponse<String> response;
     try {
-      response = HTTP_CLIENT.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+      response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
     } catch (IOException | InterruptedException e) {
       if (e instanceof InterruptedException) Thread.currentThread().interrupt();
       throw new IllegalStateException("OpenSearchIndexInitializer: PUT " + indexUri + " failed", e);

@@ -80,7 +80,7 @@ import org.junit.jupiter.api.Timeout;
  * exists (see the repo's own gap-bridging plan, Phase C) - not before, since there is nothing real
  * yet to point it at.
  */
-@WithKubernetesContainer
+@WithKubernetesContainer(jacocoImagePrefixes = "forwardmeasure/data-streaming-")
 final class DirectIngestionLauncherRealImageIntegrationTest {
 
   private static final org.slf4j.Logger LOGGER =

@@ -129,7 +129,9 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
       boolean pekko = selected.engine().equals("pekko");
       runtime.configureOverflow(
           pekko ? storageReads.endpoint() : storage.networkEndpoint().toString(),
-          BUCKET, 1024, 16384);
+          BUCKET,
+          1024,
+          16384);
       var execution = runtime.startExecutionManagement(selected.engine());
       var engine = pekko ? runtime.startEnginePekko() : runtime.startEngineKafkaStreams();
       var definition = runtime.startDefinitionManagement();
@@ -158,7 +160,8 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
             publish(
                 definition,
                 runtime.keycloak().mintUserToken(),
-                workflow(marker, source + "/source/" + marker, source + "/effect", recovery && !pekko));
+                workflow(
+                    marker, source + "/source/" + marker, source + "/effect", recovery && !pekko));
         String key = UUID.randomUUID().toString();
         Map<String, Object> admission = Map.of("revisionId", revision, "input", Map.of());
         JsonNode started =
@@ -249,8 +252,7 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
   }
 
   private static void awaitDurableWait(
-      RealFowfWorkflowFixture runtime, String api, String id, boolean pekko)
-      throws Exception {
+      RealFowfWorkflowFixture runtime, String api, String id, boolean pekko) throws Exception {
     long deadline = System.nanoTime() + Duration.ofMinutes(2).toNanos();
     JsonNode last = null;
     while (System.nanoTime() < deadline) {
@@ -270,8 +272,15 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
       // read instead, and require its ARTIFACT state to be projected before killing the process.
       // Kafka retains the reference through its durable timer, so that is its recovery barrier.
       if ("WAITING".equals(last.path("state").asText())) {
-        JsonNode history = request(api, "/v1/workflow-executions/" + id + "/history",
-            runtime.keycloak().mintUserToken(), "GET", null, null, 200);
+        JsonNode history =
+            request(
+                api,
+                "/v1/workflow-executions/" + id + "/history",
+                runtime.keycloak().mintUserToken(),
+                "GET",
+                null,
+                null,
+                200);
         for (JsonNode entry : history.path("items")) {
           if (pekko
               ? "STATE_OBSERVED".equals(entry.path("type").asText())
@@ -298,37 +307,58 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
     StorageReadBarrier(GcsEmulatorTestContainer storage) throws java.io.IOException {
       server = HttpServer.create(new InetSocketAddress("0.0.0.0", 0), 0);
       server.setExecutor(executor);
-      server.createContext("/", exchange -> {
-        try (exchange) {
-          String path = exchange.getRequestURI().toString();
-          Gate current = gate.get();
-          if (current != null && exchange.getRequestMethod().equals("GET")
-              && (path.contains("alt=media") || path.startsWith("/download/"))) {
-            current.entered().countDown();
-            if (!current.release().await(2, TimeUnit.MINUTES))
-              throw new java.io.IOException("Storage read barrier was not released");
-          }
-          var forwarded = HttpRequest.newBuilder(URI.create(storage.hostEndpoint() + path))
-              .timeout(Duration.ofSeconds(30))
-              .method(exchange.getRequestMethod(),
-                  HttpRequest.BodyPublishers.ofByteArray(exchange.getRequestBody().readAllBytes()));
-          exchange.getRequestHeaders().forEach((name, values) -> {
-            if (!List.of("host", "connection", "content-length", "expect", "upgrade",
-                "transfer-encoding", "http2-settings").contains(name.toLowerCase(java.util.Locale.ROOT)))
-              values.forEach(value -> forwarded.header(name, value));
+      server.createContext(
+          "/",
+          exchange -> {
+            try (exchange) {
+              String path = exchange.getRequestURI().toString();
+              Gate current = gate.get();
+              if (current != null
+                  && exchange.getRequestMethod().equals("GET")
+                  && (path.contains("alt=media") || path.startsWith("/download/"))) {
+                current.entered().countDown();
+                if (!current.release().await(2, TimeUnit.MINUTES))
+                  throw new java.io.IOException("Storage read barrier was not released");
+              }
+              var forwarded =
+                  HttpRequest.newBuilder(URI.create(storage.hostEndpoint() + path))
+                      .timeout(Duration.ofSeconds(30))
+                      .method(
+                          exchange.getRequestMethod(),
+                          HttpRequest.BodyPublishers.ofByteArray(
+                              exchange.getRequestBody().readAllBytes()));
+              exchange
+                  .getRequestHeaders()
+                  .forEach(
+                      (name, values) -> {
+                        if (!List.of(
+                                "host",
+                                "connection",
+                                "content-length",
+                                "expect",
+                                "upgrade",
+                                "transfer-encoding",
+                                "http2-settings")
+                            .contains(name.toLowerCase(java.util.Locale.ROOT)))
+                          values.forEach(value -> forwarded.header(name, value));
+                      });
+              var response = HTTP.send(forwarded.build(), HttpResponse.BodyHandlers.ofByteArray());
+              response
+                  .headers()
+                  .map()
+                  .forEach(
+                      (name, values) -> {
+                        if (!List.of("content-length", "transfer-encoding", "connection")
+                            .contains(name)) exchange.getResponseHeaders().put(name, values);
+                      });
+              byte[] body = response.body();
+              exchange.sendResponseHeaders(
+                  response.statusCode(), body.length == 0 ? -1 : body.length);
+              if (body.length > 0) exchange.getResponseBody().write(body);
+            } catch (InterruptedException interrupted) {
+              Thread.currentThread().interrupt();
+            }
           });
-          var response = HTTP.send(forwarded.build(), HttpResponse.BodyHandlers.ofByteArray());
-          response.headers().map().forEach((name, values) -> {
-            if (!List.of("content-length", "transfer-encoding", "connection").contains(name))
-              exchange.getResponseHeaders().put(name, values);
-          });
-          byte[] body = response.body();
-          exchange.sendResponseHeaders(response.statusCode(), body.length == 0 ? -1 : body.length);
-          if (body.length > 0) exchange.getResponseBody().write(body);
-        } catch (InterruptedException interrupted) {
-          Thread.currentThread().interrupt();
-        }
-      });
       server.start();
     }
 
@@ -341,7 +371,8 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
     }
 
     void awaitRead() throws InterruptedException {
-      assertTrue(gate.get().entered().await(60, TimeUnit.SECONDS),
+      assertTrue(
+          gate.get().entered().await(60, TimeUnit.SECONDS),
           "The real GCS media read must start before the engine is stopped");
     }
 
@@ -461,7 +492,12 @@ class FowfOverflowRuntimeMatrixAcceptanceTest {
     var response = HTTP.send(request, HttpResponse.BodyHandlers.ofByteArray());
     assertTrue(
         java.util.Arrays.stream(expected).anyMatch(status -> status == response.statusCode()),
-        method + " " + path + " returned " + response.statusCode() + ": "
+        method
+            + " "
+            + path
+            + " returned "
+            + response.statusCode()
+            + ": "
             + new String(response.body(), StandardCharsets.UTF_8));
     return response.body();
   }

@@ -86,7 +86,7 @@ import org.junit.jupiter.api.Timeout;
  * <p>Needs real Docker Hub credentials the test never hardcodes - skipped if {@code
  * DOCKER_HUB_USERNAME}/{@code DOCKER_HUB_TOKEN} aren't set, same as the Pekko sibling.
  */
-@WithKubernetesContainer
+@WithKubernetesContainer(jacocoImagePrefixes = "forwardmeasure/data-streaming-")
 @WithKafkaContainer(hostDockerInternalListener = true)
 @WithOpenSearchContainer
 final class DirectIngestionLauncherKafkaStreamsRealImageIntegrationTest {

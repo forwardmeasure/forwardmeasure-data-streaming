@@ -181,7 +181,63 @@ public final class ContinuousDeliveryAcceptanceFixture implements AutoCloseable 
       Thread.sleep(500);
     }
     throw new AssertionError(
-        "Continuous delivery did not persist " + id + "/" + field + ": " + last);
+        "Continuous delivery did not persist "
+            + id
+            + "/"
+            + field
+            + ": "
+            + last
+            + "\n"
+            + workerDiagnostics());
+  }
+
+  /** The deployed worker's pod state and logs - the only evidence of why it failed. */
+  public String workerDiagnostics() {
+    var out =
+        new StringBuilder("=== continuous worker pods (image ").append(image).append(") ===\n");
+    try (var client = runtime.kubernetes().createClient()) {
+      for (var pod : client.pods().inAnyNamespace().list().getItems()) {
+        boolean worker =
+            pod.getSpec().getContainers().stream()
+                .anyMatch(container -> image.equals(container.getImage()));
+        if (!worker) continue;
+        String namespace = pod.getMetadata().getNamespace();
+        String name = pod.getMetadata().getName();
+        out.append("--- ")
+            .append(namespace)
+            .append('/')
+            .append(name)
+            .append(" phase=")
+            .append(pod.getStatus().getPhase())
+            .append(" containers=")
+            .append(pod.getStatus().getContainerStatuses())
+            .append('\n');
+        try {
+          out.append(client.pods().inNamespace(namespace).withName(name).tailingLines(400).getLog())
+              .append('\n');
+        } catch (RuntimeException logFailure) {
+          out.append("(log unavailable: ").append(logFailure.getMessage()).append(")\n");
+        }
+        try {
+          // A crash-looping worker's real error is in the previous container's log.
+          out.append("--- previous container ---\n")
+              .append(
+                  client
+                      .pods()
+                      .inNamespace(namespace)
+                      .withName(name)
+                      .terminated()
+                      .tailingLines(400)
+                      .getLog())
+              .append('\n');
+        } catch (RuntimeException noPrevious) {
+          out.append("(no previous container log)\n");
+        }
+      }
+    } catch (RuntimeException failure) {
+      out.append("(diagnostics failed: ").append(failure).append(")\n");
+    }
+    return out.toString();
   }
 
   private JsonNode get(String path) throws Exception {
@@ -225,13 +281,83 @@ public final class ContinuousDeliveryAcceptanceFixture implements AutoCloseable 
     assertTrue(
         gateway.matches("[0-9.]+"), "Expected the disposable cluster's host gateway address");
     // This client belongs only to the Testcontainers K3s instance, never the user's kube context.
+    // K3s manages the coredns ConfigMap ("DO NOT EDIT"); coredns-custom is its supported import.
     try (var client = runtime.kubernetes().createClient()) {
-      var map = client.configMaps().inNamespace("kube-system").withName("coredns").get();
-      Objects.requireNonNull(map, "Disposable K3s CoreDNS configuration");
-      String hosts = Objects.requireNonNull(map.getData().get("NodeHosts"), "K3s NodeHosts");
-      map.getData().put("NodeHosts", hosts + "\n" + gateway + " host.docker.internal\n");
-      client.configMaps().inNamespace("kube-system").resource(map).update();
+      var configMaps = client.configMaps().inNamespace("kube-system");
+      var custom = configMaps.withName("coredns-custom").get();
+      if (custom == null) {
+        custom =
+            new io.fabric8.kubernetes.api.model.ConfigMapBuilder()
+                .withNewMetadata()
+                .withName("coredns-custom")
+                .withNamespace("kube-system")
+                .endMetadata()
+                .build();
+      }
+      if (custom.getData() == null) custom.setData(new LinkedHashMap<>());
+      custom
+          .getData()
+          .put(
+              "host-docker-internal.server",
+              "host.docker.internal:53 {\n    hosts {\n        "
+                  + gateway
+                  + " host.docker.internal\n    }\n}\n");
+      configMaps
+          .resource(custom)
+          .createOr(io.fabric8.kubernetes.client.dsl.NonDeletingOperation::update);
+      // A running CoreDNS sees the change only after the kubelet syncs the mounted ConfigMap:
+      // 30-150 s on an idle cluster, over 3 minutes on a loaded test cluster (observed). Its
+      // Deployment recreates the deleted pods, which mount the current ConfigMap at once.
+      client.pods().inNamespace("kube-system").withLabel("k8s-app", "kube-dns").delete();
+      awaitInClusterResolution(client, gateway);
     }
+  }
+
+  /**
+   * CoreDNS sees a ConfigMap change only after the kubelet syncs the volume and CoreDNS reloads
+   * (measured up to ~2 minutes). A worker started before then cannot resolve the host and
+   * crash-loops past the delivery window, so do not return until a pod really resolves it.
+   */
+  private static void awaitInClusterResolution(
+      io.fabric8.kubernetes.client.KubernetesClient client, String gateway) throws Exception {
+    long deadline = System.nanoTime() + Duration.ofMinutes(3).toNanos();
+    String last = "";
+    for (int attempt = 0; System.nanoTime() < deadline; attempt++) {
+      String name = "fds-dns-probe-" + attempt;
+      var pods = client.pods().inNamespace("kube-system");
+      pods.resource(
+              new io.fabric8.kubernetes.api.model.PodBuilder()
+                  .withNewMetadata()
+                  .withName(name)
+                  .endMetadata()
+                  .withNewSpec()
+                  .withRestartPolicy("Never")
+                  .addNewContainer()
+                  .withName("nslookup")
+                  .withImage("busybox:1.36")
+                  .withCommand("nslookup", "host.docker.internal")
+                  .endContainer()
+                  .endSpec()
+                  .build())
+          .create();
+      try {
+        String phase = null;
+        long podDeadline = System.nanoTime() + Duration.ofSeconds(60).toNanos();
+        while (System.nanoTime() < podDeadline) {
+          var pod = pods.withName(name).get();
+          phase = pod == null || pod.getStatus() == null ? null : pod.getStatus().getPhase();
+          if ("Succeeded".equals(phase) || "Failed".equals(phase)) break;
+          Thread.sleep(500);
+        }
+        last = phase + ": " + pods.withName(name).getLog();
+        if (last.contains("Address: " + gateway)) return;
+      } finally {
+        pods.withName(name).withGracePeriod(0).delete();
+      }
+      Thread.sleep(3_000);
+    }
+    throw new AssertionError(
+        "host.docker.internal never resolved inside the disposable cluster; last lookup: " + last);
   }
 
   @Override

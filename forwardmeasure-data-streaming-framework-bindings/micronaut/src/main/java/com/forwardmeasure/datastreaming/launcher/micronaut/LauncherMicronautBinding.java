@@ -39,7 +39,9 @@ import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.RunAccepted;
 import com.forwardmeasure.openworkflow.common.model.Problem;
 import com.forwardmeasure.openworkflow.common.model.Violation;
 import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecution;
+import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecutionEffect;
 import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecutionState;
+import com.forwardmeasure.openworkflow.execution.api.model.WorkflowExecutionTimer;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
@@ -117,7 +119,11 @@ import java.util.stream.Collectors;
       Violation.class,
       KubernetesJobObservation.class,
       WorkflowExecution.class,
-      WorkflowExecutionState.class
+      WorkflowExecutionState.class,
+      WorkflowExecutionEffect.class,
+      WorkflowExecutionEffect.StateEnum.class,
+      WorkflowExecutionTimer.class,
+      WorkflowExecutionTimer.StateEnum.class
     })
 @SerdeImport(DirectLaunchRequest.class)
 @SerdeImport(WorkflowLaunchRequest.class)
@@ -155,6 +161,10 @@ import java.util.stream.Collectors;
 // register), so this and WorkflowExecutionState are the only two additions needed.
 @SerdeImport(WorkflowExecution.class)
 @SerdeImport(WorkflowExecutionState.class)
+@SerdeImport(WorkflowExecutionEffect.class)
+@SerdeImport(WorkflowExecutionEffect.StateEnum.class)
+@SerdeImport(WorkflowExecutionTimer.class)
+@SerdeImport(WorkflowExecutionTimer.StateEnum.class)
 public class LauncherMicronautBinding {
 
   @Singleton

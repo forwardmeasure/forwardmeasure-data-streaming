@@ -40,14 +40,14 @@ imageVersions:
       micronaut: forwardmeasure/data-streaming-launcher-micronaut
     tag: "1.1.0"
     digests:
-      quarkus: "sha256:82db774d4eb7284538941938cb1460f464f224c1372bd1ef09a5f26d245577bf"
+      quarkus: "sha256:3e19e48bdf67c6f18001c174f4bce7f9d587443cbbbb93c00c85970b606722c4"
       spring: ""
       micronaut: ""
   pekko:
     repository: docker.io/forwardmeasure/data-streaming-executor-pekko
     tag: "1.1.0"
-    digest: "sha256:32e0285b59d9c389aaf828e7bd64ebfbbfd244d81ed5e079b282465b48d2bd3e"
+    digest: "sha256:52a48c18bf54e01b2671171371d1013347202bdfa5691eb311e5b6746697b50b"
   spark:
     repository: docker.io/forwardmeasure/data-streaming-executor-spark
     tag: "1.1.0"
-    digest: "sha256:5fea15a2b464ed5f9e4d9d08f86e875249d474ebb1dad81d612e4701748eb802"
+    digest: "sha256:a8a3a2004b52b5e3269f23c98827696b7397bd0b1e599166962b6924a342ba7c"

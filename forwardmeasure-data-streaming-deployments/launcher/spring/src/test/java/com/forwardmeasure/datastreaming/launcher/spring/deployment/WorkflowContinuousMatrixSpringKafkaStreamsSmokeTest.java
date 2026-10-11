@@ -220,7 +220,9 @@ class WorkflowContinuousMatrixSpringKafkaStreamsSmokeTest {
       assertTrue(
           Integer.valueOf(1).equals(readyReplicas),
           "the real Deployment must actually be Available (readyReplicas=1) - last observed "
-              + readyReplicas);
+              + readyReplicas
+              + "\n"
+              + delivery.workerDiagnostics());
     }
   }
 

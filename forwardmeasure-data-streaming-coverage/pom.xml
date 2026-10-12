@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements. See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with
+  the License. You may obtain a copy of the License at
+
+      https://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.forwardmeasure.datastreaming</groupId>
+    <artifactId>forwardmeasure-data-streaming-parent</artifactId>
+    <version>${revision}</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+  <artifactId>forwardmeasure-data-streaming-coverage</artifactId>
+  <packaging>pom</packaging>
+  <name>ForwardMeasure Data Streaming Aggregate Coverage</name>
+  <description>Aggregate coverage report and gate for the launcher framework bindings, whose behaviour
+    is exercised by the launcher deployments' tests rather than tests of their own. Matches
+    openworkflow-coverage and forwardmeasure-entity-intelligence-coverage: each module here is
+    declared (its classes are in the report) and staged (its classes are in the gate), so the
+    platform's coverage policy treats it as owned by this aggregate.</description>
+
+  <properties>
+    <coverage.excludes>META-INF/**,BOOT-INF/lib/**,BOOT-INF/classpath.idx,BOOT-INF/layers.idx,org/springframework/boot/loader/**,**/*_.class,**/$*.class,**/generated/**,**/api/model/**</coverage.excludes>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-launcher-quarkus-bindings</artifactId>
+      <version>${project.version}</version>
+      <exclusions><exclusion><groupId>*</groupId><artifactId>*</artifactId></exclusion></exclusions>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-launcher-spring-bindings</artifactId>
+      <version>${project.version}</version>
+      <exclusions><exclusion><groupId>*</groupId><artifactId>*</artifactId></exclusion></exclusions>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-launcher-micronaut-bindings</artifactId>
+      <version>${project.version}</version>
+      <exclusions><exclusion><groupId>*</groupId><artifactId>*</artifactId></exclusion></exclusions>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-launcher-quarkus-service</artifactId>
+      <version>${project.version}</version>
+      <exclusions><exclusion><groupId>*</groupId><artifactId>*</artifactId></exclusion></exclusions>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-launcher-spring-service</artifactId>
+      <version>${project.version}</version>
+      <exclusions><exclusion><groupId>*</groupId><artifactId>*</artifactId></exclusion></exclusions>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-launcher-micronaut-service</artifactId>
+      <version>${project.version}</version>
+      <exclusions><exclusion><groupId>*</groupId><artifactId>*</artifactId></exclusion></exclusions>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>com.forwardmeasure.platform</groupId>
+        <artifactId>forwardmeasure-platform-policy-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>require-coverage-data</id>
+            <phase>verify</phase>
+            <goals><goal>require-coverage-data</goal></goals>
+            <configuration>
+              <aggregateOwnsCoverage>false</aggregateOwnsCoverage>
+              <dataFile>${project.build.directory}/jacoco-aggregate.exec</dataFile>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>stage-production-classes-for-coverage-check</id>
+            <phase>prepare-package</phase>
+            <goals><goal>unpack-dependencies</goal></goals>
+            <configuration>
+              <includeGroupIds>${project.groupId}</includeGroupIds>
+              <includeArtifactIds>
+                forwardmeasure-data-streaming-launcher-quarkus-bindings,
+                forwardmeasure-data-streaming-launcher-spring-bindings,
+                forwardmeasure-data-streaming-launcher-micronaut-bindings,
+                forwardmeasure-data-streaming-launcher-quarkus-service,
+                forwardmeasure-data-streaming-launcher-spring-service,
+                forwardmeasure-data-streaming-launcher-micronaut-service
+              </includeArtifactIds>
+              <outputDirectory>${project.build.outputDirectory}</outputDirectory>
+              <excludes>${coverage.excludes}</excludes>
+              <overWriteReleases>true</overWriteReleases>
+              <overWriteSnapshots>true</overWriteSnapshots>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>merge-reactor-execution-data</id>
+            <phase>prepare-package</phase>
+            <goals><goal>merge</goal></goals>
+            <configuration>
+              <fileSets>
+                <fileSet>
+                  <directory>${project.basedir}/..</directory>
+                  <includes><include>**/target/jacoco.exec</include></includes>
+                </fileSet>
+              </fileSets>
+              <destFile>${project.build.directory}/jacoco-aggregate.exec</destFile>
+            </configuration>
+          </execution>
+          <execution>
+            <id>aggregate-report</id>
+            <phase>verify</phase>
+            <goals><goal>report-aggregate</goal></goals>
+            <configuration>
+              <title>ForwardMeasure Data Streaming Aggregate Coverage</title>
+              <outputDirectory>${project.reporting.outputDirectory}/jacoco-aggregate</outputDirectory>
+              <formats><format>HTML</format><format>XML</format><format>CSV</format></formats>
+              <excludes>**/*_.*,**/$*.*,**/generated/**,**/api/model/**,${forwardmeasure.coverage.generated.excludes}</excludes>
+            </configuration>
+          </execution>
+          <execution>
+            <id>enforce-aggregate-coverage</id>
+            <phase>verify</phase>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <!-- Without a test run the merged data is whatever earlier runs left on disk. -->
+              <skip>${skipTests}</skip>
+              <dataFile>${project.build.directory}/jacoco-aggregate.exec</dataFile>
+              <excludes>**/*_,**/$*,**/generated/**,**/api/model/**,${forwardmeasure.coverage.generated.excludes}</excludes>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>${jacoco.minimum.line.coverage}</minimum></limit>
+                    <limit><counter>BRANCH</counter><value>COVEREDRATIO</value><minimum>${jacoco.minimum.branch.coverage}</minimum></limit>
+                    <limit><counter>CLASS</counter><value>MISSEDCOUNT</value><maximum>${jacoco.maximum.missed.classes}</maximum></limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

@@ -28,6 +28,11 @@
     MicronautReferencePopulationResource pattern exactly). Never boots its own bootable app - see
     forwardmeasure-data-streaming-deployments/launcher/micronaut for the real deployable
     assembly.</description>
+  <properties>
+    <!-- The launcher deployments' tests exercise this binding; forwardmeasure-data-streaming-coverage
+         owns its coverage (declared and staged there), so its own module check defers to that gate. -->
+    <jacoco.module.check.skip>true</jacoco.module.check.skip>
+  </properties>
   <dependencyManagement>
     <dependencies>
       <dependency>
@@ -85,6 +90,18 @@
   </dependencies>
   <build>
     <plugins>
+      <plugin>
+        <groupId>com.forwardmeasure.platform</groupId>
+        <artifactId>forwardmeasure-platform-policy-maven-plugin</artifactId>
+        <configuration>
+          <overrides>
+            <override>
+              <key>property:jacoco.module.check.skip</key>
+              <reason>The launcher deployments' tests exercise this binding; forwardmeasure-data-streaming-coverage owns and gates its coverage.</reason>
+            </override>
+          </overrides>
+        </configuration>
+      </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>

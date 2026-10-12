@@ -25,6 +25,11 @@
     its own (those are shared, in launcher-jaxrs) and never boots its own bootable app - the actual
     deployable assembly happens one level down, in forwardmeasure-data-streaming-deployments/launcher/
     quarkus, matching fowf's and fei's own real *-binding vs *-deployments split.</description>
+  <properties>
+    <!-- The launcher deployments' tests exercise this binding; forwardmeasure-data-streaming-coverage
+         owns its coverage (declared and staged there), so its own module check defers to that gate. -->
+    <jacoco.module.check.skip>true</jacoco.module.check.skip>
+  </properties>
   <dependencyManagement>
     <dependencies>
       <dependency>
@@ -61,4 +66,20 @@
     </dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
   </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>com.forwardmeasure.platform</groupId>
+        <artifactId>forwardmeasure-platform-policy-maven-plugin</artifactId>
+        <configuration>
+          <overrides>
+            <override>
+              <key>property:jacoco.module.check.skip</key>
+              <reason>The launcher deployments' tests exercise this binding; forwardmeasure-data-streaming-coverage owns and gates its coverage.</reason>
+            </override>
+          </overrides>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
 </project>

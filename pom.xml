@@ -98,6 +98,7 @@
     <module>forwardmeasure-data-streaming-launcher-client</module>
     <module>forwardmeasure-data-streaming-framework-bindings</module>
     <module>forwardmeasure-data-streaming-deployments</module>
+    <module>forwardmeasure-data-streaming-coverage</module>
   </modules>
 
   <dependencyManagement>

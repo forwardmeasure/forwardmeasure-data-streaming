@@ -55,8 +55,11 @@ list of file paths per environment, passed through to each sub-helmfile explicit
 }}
 {{- $envFiles := index $envLayers .Environment.Name | default (list) }}
 
+# Sub-helmfiles use this file's chart repositories (inherits: [repositories]).
 helmfiles:
   - path: helmfiles/launcher.yaml.gotmpl
+    inherits: [repositories]
     values: {{ toYaml $envFiles | nindent 6 }}
   - path: helmfiles/workflows.yaml.gotmpl
+    inherits: [repositories]
     values: {{ toYaml $envFiles | nindent 6 }}

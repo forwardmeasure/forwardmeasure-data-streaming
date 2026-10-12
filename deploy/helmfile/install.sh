@@ -31,6 +31,9 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ENVIRONMENT="${1:?Usage: $0 <configured-environment>}"
 PLATFORM_DEPLOY="$(cd -- "${SCRIPT_DIR}/../../../forwardmeasure-platform/deploy" && pwd)"
 source "${PLATFORM_DEPLOY}/scripts/product-selection.sh"
+source "${PLATFORM_DEPLOY}/scripts/install-steps.sh"
+# install-platform.sh checked the tools already; run on its own, check them here.
+install_prepared || check_install_tools
 python3 "${PLATFORM_DEPLOY}/scripts/check-deployment-transition.py"
 
 # Reconcile every selected release in Helmfile order, including unchanged failed releases.
@@ -45,5 +48,8 @@ for command in kubectl helm helmfile; do
   }
 done
 
-helmfile --file "${SCRIPT_DIR}/helmfile.yaml.gotmpl" --environment "${ENVIRONMENT}" \
-  sync --skip-needs=false --wait --wait-for-jobs
+# Upgrades only the releases that changed (helmfile apply), with their hooks; when a release is
+# failed or interrupted, every release is synchronized in Helmfile order instead (see
+# reconcile_releases in forwardmeasure-platform/deploy/scripts/install-steps.sh).
+install_step "Data Streaming releases" \
+  reconcile_releases "${SCRIPT_DIR}/helmfile.yaml.gotmpl" "${ENVIRONMENT}" ""

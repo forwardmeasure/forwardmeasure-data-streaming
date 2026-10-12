@@ -118,6 +118,8 @@ import java.util.stream.Collectors;
       Problem.class,
       Violation.class,
       KubernetesJobObservation.class,
+      KubernetesJobObservation.Phase.class,
+      com.forwardmeasure.datastreaming.api.ExecutionMode.class,
       WorkflowExecution.class,
       WorkflowExecutionState.class,
       WorkflowExecutionEffect.class,
@@ -148,6 +150,8 @@ import java.util.stream.Collectors;
 @SerdeImport(Problem.class)
 @SerdeImport(Violation.class)
 @SerdeImport(KubernetesJobObservation.class)
+@SerdeImport(KubernetesJobObservation.Phase.class)
+@SerdeImport(com.forwardmeasure.datastreaming.api.ExecutionMode.class)
 // Real, live-caught gap (2026-09-24, WorkflowBoundedMatrixMicronautPekkoSmokeTest): fowf's own
 // generated WorkflowExecution model - returned directly by WorkflowRunResource's create()/get() -
 // had no

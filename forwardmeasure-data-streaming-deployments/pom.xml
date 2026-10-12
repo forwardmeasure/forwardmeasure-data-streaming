@@ -46,4 +46,21 @@
     <maven.build.cache.skipCache>true</maven.build.cache.skipCache>
     <maven.build.cache.skipSave>true</maven.build.cache.skipSave>
   </properties>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <!-- The launcher acceptance tests run the executor images this reactor builds; name them
+                 the way the executor modules tag them, so no test run supplies a tag by hand. -->
+            <fds.acceptance.pekko.image>${container-image.group}/data-streaming-executor-pekko:${container-image.tag}</fds.acceptance.pekko.image>
+            <fds.acceptance.kafka-streams.image>${container-image.group}/data-streaming-executor-kafka-streams:${container-image.tag}</fds.acceptance.kafka-streams.image>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
 </project>

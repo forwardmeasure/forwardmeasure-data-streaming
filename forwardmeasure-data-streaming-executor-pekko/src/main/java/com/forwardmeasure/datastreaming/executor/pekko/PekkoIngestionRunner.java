@@ -455,6 +455,44 @@ public final class PekkoIngestionRunner {
   }
 
   /**
+   * Like {@link #run(IngestionSpec, ActorSystem, Function, Sink)}, but the single text source's
+   * bytes come from {@code content}, which the caller opens - its spec still supplies the format,
+   * parsing options (delimiter, quote, record limit, {@code charset}), delivery and error policy.
+   * One forward pass, parsed on downstream demand, with no Camel endpoint and no staging copy.
+   */
+  public <T, R> R run(
+      IngestionSpec spec,
+      TextContent content,
+      ActorSystem system,
+      Function<SourceRow, T> transform,
+      Sink<T, CompletionStage<R>> sink)
+      throws IOException {
+    SourceSpec sourceSpec = singleSource(spec).source();
+    if (isSqlConnector(sourceSpec.connector()) || KAFKA_CONNECTOR.equals(sourceSpec.connector()))
+      throw new IllegalArgumentException(
+          "Caller-supplied content is text; connector " + sourceSpec.connector() + " is not");
+    Source<SourceRow, ?> source =
+        Source.unfoldResource(
+                () -> StreamingTextRows.open(content, sourceSpec),
+                StreamingTextRows::next,
+                StreamingTextRows::close)
+            .withAttributes(
+                org.apache.pekko.stream.ActorAttributes.dispatcher(
+                    "pekko.actor.default-blocking-io-dispatcher"));
+    try {
+      return PekkoIngestionPipeline.run(
+              source, spec.delivery(), spec.errors(), transform, sink, system)
+          .toCompletableFuture()
+          .join();
+    } catch (CompletionException e) {
+      Throwable cause = e.getCause();
+      if (cause instanceof RuntimeException runtimeException) throw runtimeException;
+      if (cause instanceof IOException ioException) throw ioException;
+      throw new IllegalStateException("ingestion run failed", cause != null ? cause : e);
+    }
+  }
+
+  /**
    * Dispatches on {@code source.connector()}: {@code jdbc}/{@code sql} goes through {@link
    * #sqlRowSource} (rows already Map-shaped, no text parsing); everything else goes through {@link
    * #textRowSource} (a resource-scoped reader, parsed on downstream demand). Package-visible (not

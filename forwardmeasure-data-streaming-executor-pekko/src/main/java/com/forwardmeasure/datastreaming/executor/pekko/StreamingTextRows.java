@@ -60,52 +60,85 @@ final class StreamingTextRows implements AutoCloseable {
       // Camel's GenericFile -> Reader conversion honors the endpoint charset without loading
       // the file into a String. Keep the exchange alive until the parser has finished reading it.
       rows.reader = rows.exchange.getMessage().getMandatoryBody(Reader.class);
-      String format = source.format() == null ? "csv" : source.format().type();
-      switch (format) {
-        case "csv" -> {
-          String delimiter = source.options().getOrDefault("delimiter", ",");
-          if (delimiter.isEmpty()) delimiter = ",";
-          if (delimiter.length() != 1)
-            throw new IllegalArgumentException("CSV delimiter must be one character");
-          String quoteOption = source.options().getOrDefault("quote", "\"");
-          if (quoteOption.length() > 1)
-            throw new IllegalArgumentException("CSV quote must be one character or empty");
-          Character quote = quoteOption.isEmpty() ? null : quoteOption.charAt(0);
-          long maxRecord =
-              Long.parseLong(source.options().getOrDefault("maxRecordCharacters", "1048576"));
-          if (maxRecord < 1)
-            throw new IllegalArgumentException("maxRecordCharacters must be positive");
-          rows.reader =
-              new CsvRecordLimitReader(rows.reader, delimiter.charAt(0), quote, maxRecord);
-          rows.csv =
-              CSVFormat.DEFAULT
-                  .builder()
-                  .setHeader()
-                  .setSkipHeaderRecord(true)
-                  .setDelimiter(delimiter.charAt(0))
-                  .setQuote(quote)
-                  .get()
-                  .parse(rows.reader);
-          rows.csvRows = rows.csv.iterator();
-        }
-        case "json", "ndjson", "jsonl" ->
-            rows.jsonRows =
-                new ObjectMapper()
-                    .readerFor(new TypeReference<java.util.Map<String, Object>>() {})
-                    .readValues(rows.reader);
-        default -> throw new IllegalArgumentException("Unsupported source format: " + format);
-      }
-      return rows;
+      return parse(rows, source);
     } catch (Exception failure) {
-      if (rows.exchange != null) rows.exchange.setException(failure);
-      try {
-        rows.close();
-      } catch (Exception cleanup) {
-        failure.addSuppressed(cleanup);
-      }
-      if (failure instanceof IOException io) throw new java.io.UncheckedIOException(io);
-      throw failure;
+      throw failed(rows, failure);
     }
+  }
+
+  /**
+   * Reads text the caller opens itself - such as one pinned object-storage version - in a single
+   * forward pass, with no staging copy. The {@code charset} option names the encoding (UTF-8 by
+   * default); bytes that are not valid in it fail the read instead of being replaced.
+   */
+  static StreamingTextRows open(TextContent content, SourceSpec source) throws Exception {
+    StreamingTextRows rows = new StreamingTextRows(null);
+    try {
+      java.nio.charset.Charset charset =
+          java.nio.charset.Charset.forName(source.options().getOrDefault("charset", "UTF-8"));
+      rows.reader =
+          new java.io.BufferedReader(
+              new java.io.InputStreamReader(
+                  content.open(),
+                  charset
+                      .newDecoder()
+                      .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                      .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)),
+              65536);
+      return parse(rows, source);
+    } catch (Exception failure) {
+      throw failed(rows, failure);
+    }
+  }
+
+  private static StreamingTextRows parse(StreamingTextRows rows, SourceSpec source)
+      throws Exception {
+    String format = source.format() == null ? "csv" : source.format().type();
+    switch (format) {
+      case "csv" -> {
+        String delimiter = source.options().getOrDefault("delimiter", ",");
+        if (delimiter.isEmpty()) delimiter = ",";
+        if (delimiter.length() != 1)
+          throw new IllegalArgumentException("CSV delimiter must be one character");
+        String quoteOption = source.options().getOrDefault("quote", "\"");
+        if (quoteOption.length() > 1)
+          throw new IllegalArgumentException("CSV quote must be one character or empty");
+        Character quote = quoteOption.isEmpty() ? null : quoteOption.charAt(0);
+        long maxRecord =
+            Long.parseLong(source.options().getOrDefault("maxRecordCharacters", "1048576"));
+        if (maxRecord < 1)
+          throw new IllegalArgumentException("maxRecordCharacters must be positive");
+        rows.reader = new CsvRecordLimitReader(rows.reader, delimiter.charAt(0), quote, maxRecord);
+        rows.csv =
+            CSVFormat.DEFAULT
+                .builder()
+                .setHeader()
+                .setSkipHeaderRecord(true)
+                .setDelimiter(delimiter.charAt(0))
+                .setQuote(quote)
+                .get()
+                .parse(rows.reader);
+        rows.csvRows = rows.csv.iterator();
+      }
+      case "json", "ndjson", "jsonl" ->
+          rows.jsonRows =
+              new ObjectMapper()
+                  .readerFor(new TypeReference<java.util.Map<String, Object>>() {})
+                  .readValues(rows.reader);
+      default -> throw new IllegalArgumentException("Unsupported source format: " + format);
+    }
+    return rows;
+  }
+
+  private static Exception failed(StreamingTextRows rows, Exception failure) {
+    if (rows.exchange != null) rows.exchange.setException(failure);
+    try {
+      rows.close();
+    } catch (Exception cleanup) {
+      failure.addSuppressed(cleanup);
+    }
+    if (failure instanceof IOException io) return new java.io.UncheckedIOException(io);
+    return failure;
   }
 
   Optional<SourceRow> next() throws Exception {
@@ -117,7 +150,7 @@ final class StreamingTextRows implements AutoCloseable {
       exhausted = true;
       return Optional.empty();
     } catch (Exception failure) {
-      exchange.setException(failure);
+      if (exchange != null) exchange.setException(failure);
       if (failure instanceof IOException io) throw new java.io.UncheckedIOException(io);
       throw failure;
     }
@@ -130,10 +163,12 @@ final class StreamingTextRows implements AutoCloseable {
     try {
       if (reader != null) reader.close();
     } finally {
-      try {
-        if (exchange != null) consumer.doneUoW(exchange);
-      } finally {
-        consumer.stop();
+      if (consumer != null) {
+        try {
+          if (exchange != null) consumer.doneUoW(exchange);
+        } finally {
+          consumer.stop();
+        }
       }
     }
   }

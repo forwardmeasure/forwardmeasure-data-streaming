@@ -17,6 +17,7 @@
 package com.forwardmeasure.datastreaming.executor.pekko;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
@@ -117,6 +118,130 @@ class PekkoIngestionRunnerIntegrationTest {
     assertTrue(
         threadNames.size() > 1,
         "expected multiple worker threads to process rows, saw only: " + threadNames);
+  }
+
+  /**
+   * The caller-opened source reads the same rows the file endpoint would, in one pass, honoring the
+   * delimiter and charset options, and closes the stream it opened.
+   */
+  @Test
+  void readsCallerOpenedContentWithTheSourceDialectAndClosesIt() throws Exception {
+    StringBuilder text = new StringBuilder("id;name\n");
+    for (int i = 1; i <= ROW_COUNT; i++) text.append(i).append(";Rów ").append(i).append('\n');
+    byte[] latin1 = text.toString().getBytes(StandardCharsets.ISO_8859_1);
+    java.util.concurrent.atomic.AtomicInteger opened =
+        new java.util.concurrent.atomic.AtomicInteger();
+    java.util.concurrent.atomic.AtomicBoolean closed =
+        new java.util.concurrent.atomic.AtomicBoolean();
+    TextContent content =
+        () -> {
+          opened.incrementAndGet();
+          return new java.io.FilterInputStream(new java.io.ByteArrayInputStream(latin1)) {
+            @Override
+            public void close() throws IOException {
+              closed.set(true);
+              super.close();
+            }
+          };
+        };
+    Set<String> names = ConcurrentHashMap.newKeySet();
+    ActorSystem system = ActorSystem.create("caller-opened-content");
+    long processed;
+    try {
+      processed =
+          new PekkoIngestionRunner()
+              .run(
+                  streamSpec(Map.of("delimiter", ";", "charset", "ISO-8859-1")),
+                  content,
+                  system,
+                  row -> {
+                    names.add(String.valueOf(row.get("name")));
+                    return row;
+                  },
+                  Sink.<Long, SourceRow>fold(0L, (count, ignored) -> count + 1));
+    } finally {
+      system.terminate();
+    }
+    assertEquals(ROW_COUNT, processed);
+    assertTrue(names.contains("Rów 1") && names.contains("Rów " + ROW_COUNT), names.toString());
+    assertEquals(1, opened.get());
+    assertTrue(closed.get(), "the runner closes the stream it read");
+  }
+
+  /** Bytes that are not text in the declared charset fail the run rather than being replaced. */
+  @Test
+  void callerOpenedContentWithInvalidBytesFailsTheRun() {
+    byte[] invalidUtf8 = {'i', 'd', '\n', '1', (byte) 0xC3, '\n'};
+    ActorSystem system = ActorSystem.create("caller-opened-invalid");
+    try {
+      assertThrows(
+          RuntimeException.class,
+          () ->
+              new PekkoIngestionRunner()
+                  .run(
+                      streamSpec(Map.of()),
+                      () -> new java.io.ByteArrayInputStream(invalidUtf8),
+                      system,
+                      row -> row,
+                      Sink.<Long, SourceRow>fold(0L, (count, ignored) -> count + 1)));
+    } finally {
+      system.terminate();
+    }
+  }
+
+  @Test
+  void callerOpenedContentIsOnlyForTextConnectors() {
+    IngestionSpec sql =
+        new IngestionSpec(
+            List.of(
+                new SourcePlan(
+                    "single",
+                    new SourceSpec("sql", "sql:select 1", new SourceSpec.FormatSpec("csv"), null),
+                    new TransformSpec("schema://test/target/1.0", List.of()),
+                    1.0)),
+            null,
+            null,
+            new SinkSpec("log", "n/a", new SourceSpec.SchemaRef("schema://test/target/1.0"), null),
+            ExecutionMode.BOUNDED,
+            new DeliverySemantics(true, new ConcurrencySpec(1, 1), new FlowControlSpec(10)),
+            new ErrorPolicy("dead-letter", "retry"));
+    ActorSystem system = ActorSystem.create("caller-opened-sql");
+    try {
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              new PekkoIngestionRunner()
+                  .run(
+                      sql,
+                      () -> new java.io.ByteArrayInputStream(new byte[0]),
+                      system,
+                      row -> row,
+                      Sink.<Long, SourceRow>fold(0L, (count, ignored) -> count + 1)));
+    } finally {
+      system.terminate();
+    }
+  }
+
+  private static IngestionSpec streamSpec(Map<String, String> options) {
+    return new IngestionSpec(
+        List.of(
+            new SourcePlan(
+                "single",
+                new SourceSpec(
+                    "object-storage",
+                    "gs://bucket/feed.csv#1",
+                    new SourceSpec.FormatSpec("csv"),
+                    null,
+                    null,
+                    options),
+                new TransformSpec("schema://test/target/1.0", List.of()),
+                1.0)),
+        null,
+        null,
+        new SinkSpec("log", "n/a", new SourceSpec.SchemaRef("schema://test/target/1.0"), null),
+        ExecutionMode.BOUNDED,
+        new DeliverySemantics(true, new ConcurrencySpec(16, 32), new FlowControlSpec(5000)),
+        new ErrorPolicy("dead-letter", "retry"));
   }
 
   private static void writeCsv(Path file, int rowCount) throws IOException {

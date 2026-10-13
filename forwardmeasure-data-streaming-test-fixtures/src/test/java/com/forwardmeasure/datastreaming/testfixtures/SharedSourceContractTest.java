@@ -35,7 +35,7 @@ class SharedSourceContractTest {
 
   @Test
   void customerMasterFixtureUsesTheSharedSourceVocabulary() throws Exception {
-    var contract = shared("contracts/state-street-customer-master-source-v1.yaml");
+    var contract = shared("contracts/state-street-customer-master-source-schema-v1.yaml");
     var fields =
         headerFields(
             TestCustomerMasterFixtures.SAMPLE_CSV,
@@ -50,7 +50,7 @@ class SharedSourceContractTest {
 
   @Test
   void worldCheckTransportFixtureColumnsBelongToTheSharedSourceContract() throws Exception {
-    var contract = shared("contracts/worldcheck-source-v1.json");
+    var contract = shared("contracts/worldcheck-source-schema-v1.yaml");
     var fields =
         headerFields(
             WorldCheckFixtures.SAMPLE_TSV, contract.path("source").path("delimiter").asText());

@@ -21,8 +21,10 @@ import com.forwardmeasure.datastreaming.api.ExecutionPlan;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
+import com.forwardmeasure.datastreaming.api.TransformGraph;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec.FieldRule;
+import com.forwardmeasure.datastreaming.core.stateful.GraphFields;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -46,9 +48,8 @@ import java.util.Set;
  * keys are the target field names, not the original source column names), and {@code raw: true} -
  * required, not optional, because a target field whose real value is a structured {@code
  * List<Map<String,Object>>} (a mapped {@code names}/{@code identifiers}/{@code locations} value,
- * real for every WorldCheck/Customer-Master spec built so far) would otherwise be silently mangled
- * by {@code SourceRow#get}'s own {@code String.valueOf(...)} coercion - see {@link FieldRule#raw}'s
- * own javadoc.
+ * common in party-shaped specs) would otherwise be silently mangled by {@code SourceRow#get}'s own
+ * {@code String.valueOf(...)} coercion - see {@link FieldRule#raw}'s own javadoc.
  */
 public final class SparkHandoffSpecs {
 
@@ -57,10 +58,19 @@ public final class SparkHandoffSpecs {
   private SparkHandoffSpecs() {}
 
   /**
-   * @param kafkaBootstrapServers the real Kafka cluster's own bootstrap servers - deliberately a
-   *     caller-supplied runtime address, not read off {@code plan} itself, matching {@code
-   *     SparkIngestionRunner}'s own established convention that a compiled plan never carries
-   *     runtime infrastructure addresses.
+   * The delivery stage's spec. Spark hands off in one of three shapes:
+   *
+   * <ul>
+   *   <li><b>Spark ran part of the graph</b> ({@code graphSteps > 0}): one stream of those steps'
+   *       outputs on the handoff topic; the delivery stage runs the steps after them.
+   *   <li><b>Each source separately</b> - a continuous run, or a bounded one whose graph joins:
+   *       each source's mapped records on its own topic, so the delivery stage correlates or joins
+   *       them as it would the sources themselves.
+   *   <li><b>Correlated</b> (otherwise): one stream of merged records on the handoff topic.
+   * </ul>
+   *
+   * @param kafkaBootstrapServers the Kafka cluster's bootstrap servers - a runtime address the
+   *     caller supplies, never part of a compiled plan
    * @throws IllegalArgumentException if {@code plan} has no {@code sparkStage} to hand off from
    */
   public static IngestionSpec deliveryStageSpec(ExecutionPlan plan, String kafkaBootstrapServers) {
@@ -68,22 +78,37 @@ public final class SparkHandoffSpecs {
       throw new IllegalArgumentException(
           "SparkHandoffSpecs: plan has no sparkStage - there is nothing to hand off from");
     }
-    if (plan.profile().executionMode() == ExecutionMode.CONTINUOUS) {
+    int graphSteps = plan.sparkStage().get().graphSteps();
+    ExecutionMode mode = plan.profile().executionMode();
+    if (graphSteps > 0) {
+      TransformGraph graph = plan.transforms();
+      Set<String> sourceFields = new LinkedHashSet<>();
+      for (SourcePlan source : plan.sources())
+        for (FieldRule rule : source.mapper().fields()) sourceFields.add(rule.target());
+      List<String> fields = GraphFields.after(graph.first(graphSteps), sourceFields);
+      SourcePlan handoff =
+          new SourcePlan(
+              HANDOFF_SOURCE_KEY,
+              kafka(plan.sparkStage().get().handoffTopic(), kafkaBootstrapServers),
+              new TransformSpec(originalMapperTarget(plan), identityRules(fields)),
+              1.0);
+      return new IngestionSpec(
+          List.of(handoff),
+          null,
+          graph.after(graphSteps),
+          plan.destination(),
+          mode,
+          plan.delivery(),
+          plan.errors());
+    }
+    if (handsOffEachSource(plan)) {
       List<SourcePlan> sources = new ArrayList<>();
       for (int index = 0; index < plan.sources().size(); index++) {
         SourcePlan original = plan.sources().get(index);
-        SourceSpec kafka =
-            new SourceSpec(
-                "kafka",
-                "kafka:" + continuousTopic(plan, index) + "?brokers=" + kafkaBootstrapServers,
-                null,
-                null,
-                null,
-                Map.of());
         sources.add(
             new SourcePlan(
                 original.sourceKey(),
-                kafka,
+                kafka(sourceTopic(plan, index), kafkaBootstrapServers),
                 new TransformSpec(
                     original.mapper().target(), identityFieldRules(List.of(original))),
                 original.trustWeight()));
@@ -91,37 +116,63 @@ public final class SparkHandoffSpecs {
       return new IngestionSpec(
           sources,
           plan.blockingField(),
-          null,
+          plan.transforms(),
           plan.destination(),
-          ExecutionMode.CONTINUOUS,
+          mode,
           plan.delivery(),
           plan.errors());
     }
-    String handoffTopic = plan.sparkStage().get().handoffTopic();
     TransformSpec identityMapper =
         new TransformSpec(originalMapperTarget(plan), identityFieldRules(plan.sources()));
-    SourceSpec kafkaSource =
-        new SourceSpec(
-            "kafka",
-            "kafka:" + handoffTopic + "?brokers=" + kafkaBootstrapServers,
-            null,
-            null,
-            null,
-            Map.of());
-    SourcePlan sourcePlan = new SourcePlan(HANDOFF_SOURCE_KEY, kafkaSource, identityMapper, 1.0);
+    SourcePlan sourcePlan =
+        new SourcePlan(
+            HANDOFF_SOURCE_KEY,
+            kafka(plan.sparkStage().get().handoffTopic(), kafkaBootstrapServers),
+            identityMapper,
+            1.0);
     return new IngestionSpec(
         List.of(sourcePlan),
         null,
-        null,
+        plan.transforms(),
         plan.destination(),
         ExecutionMode.BOUNDED,
         plan.delivery(),
         plan.errors());
   }
 
-  /** Each original source keeps its own ordered contribution stream for continuous correlation. */
-  public static String continuousTopic(ExecutionPlan plan, int sourceIndex) {
+  /**
+   * Whether the Spark stage writes each source's mapped records to its own topic ({@link
+   * #sourceTopic}) instead of one stream: a continuous run (the delivery stage correlates as the
+   * records arrive), or a bounded multi-source run whose graph joins the sources - a join needs
+   * both sides, which merging would lose.
+   */
+  public static boolean handsOffEachSource(ExecutionPlan plan) {
+    if (plan.sparkStage().isEmpty() || plan.sparkStage().get().graphSteps() > 0) return false;
+    if (plan.profile().executionMode() == ExecutionMode.CONTINUOUS) return true;
+    return plan.sources().size() > 1 && plan.transforms() != null && plan.transforms().joins();
+  }
+
+  /** The topic the Spark stage writes source {@code sourceIndex}'s mapped records to. */
+  public static String sourceTopic(ExecutionPlan plan, int sourceIndex) {
     return plan.sparkStage().orElseThrow().handoffTopic() + "-source-" + sourceIndex;
+  }
+
+  /**
+   * The topic a continuous Spark stage writes source {@code sourceIndex}'s records to - {@link
+   * #sourceTopic}.
+   */
+  public static String continuousTopic(ExecutionPlan plan, int sourceIndex) {
+    return sourceTopic(plan, sourceIndex);
+  }
+
+  private static SourceSpec kafka(String topic, String kafkaBootstrapServers) {
+    return new SourceSpec(
+        "kafka",
+        "kafka:" + topic + "?brokers=" + kafkaBootstrapServers,
+        null,
+        null,
+        null,
+        Map.of());
   }
 
   private static String originalMapperTarget(ExecutionPlan plan) {
@@ -146,9 +197,13 @@ public final class SparkHandoffSpecs {
         targets.add(rule.target());
       }
     }
+    return identityRules(List.copyOf(targets));
+  }
+
+  private static List<FieldRule> identityRules(List<String> fields) {
     List<FieldRule> rules = new ArrayList<>();
-    for (String target : targets) {
-      rules.add(new FieldRule(target, target, null, null, null, true, false, Map.of(), true));
+    for (String field : fields) {
+      rules.add(new FieldRule(field, field, null, null, null, true, false, Map.of(), true));
     }
     return rules;
   }

@@ -23,6 +23,7 @@ import com.forwardmeasure.authzen.AuthorizationDecision;
 import com.forwardmeasure.authzen.AuthorizationRequest;
 import com.forwardmeasure.authzen.AuthorizationService;
 import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
 import com.forwardmeasure.datastreaming.api.DeliverySemantics;
 import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
@@ -107,7 +108,7 @@ final class DirectIngestionLauncherRealImageIntegrationTest {
    * file-sourced, all-{@code LIGHT}-transform spec always resolves to {@code PEKKO_STREAMS} via
    * {@code ExecutionPlanCompiler}. Revisit once that image is real.
    */
-  private static final String KAFKA_STREAMS_IMAGE_PLACEHOLDER = "unused";
+  private static final String SPARK_IMAGE_PLACEHOLDER = "unused";
 
   private static final String SEED_AND_RUN_COMMAND =
       "sh -c 'printf \"id,name\\nS1,Alice Anderson\\n\" > /tmp/source.csv && "
@@ -145,11 +146,14 @@ final class DirectIngestionLauncherRealImageIntegrationTest {
           new DirectIngestionLauncher(
               IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(PEKKO_IMAGE)),
               new PermitAllAuthorizationService(),
-              PEKKO_IMAGE,
-              SEED_AND_RUN_COMMAND,
-              KAFKA_STREAMS_IMAGE_PLACEHOLDER,
-              KAFKA_STREAMS_IMAGE_PLACEHOLDER,
-              List.of(PULL_SECRET_NAME));
+              new RunnerImages(
+                  DeliveryEngineKind.PEKKO_STREAMS,
+                  new RunnerImages.Runner(PEKKO_IMAGE, SEED_AND_RUN_COMMAND),
+                  null,
+                  new RunnerImages.Runner(SPARK_IMAGE_PLACEHOLDER, "false"),
+                  "unused:9092"),
+              List.of(PULL_SECRET_NAME),
+              Map.of());
       DirectLaunchRequest request =
           new DirectLaunchRequest(
               UUID.randomUUID().toString(),

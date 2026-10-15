@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements. See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with
+  the License. You may obtain a copy of the License at
+
+      https://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-parent</artifactId><version>${revision}</version></parent>
+  <artifactId>forwardmeasure-data-streaming-source-readers</artifactId>
+  <name>ForwardMeasure Data Streaming Source Readers</name>
+  <description>Engine-neutral readers for bounded sources: delimited and JSON text (from a Camel
+    endpoint or caller-opened content) and SQL result sets. No stream runtime: the Pekko engine
+    wraps them in its own stages, and the Kafka Streams loader calls them directly, so neither
+    engine's jars are needed here.</description>
+  <properties>
+    <maven.javadoc.skip>false</maven.javadoc.skip>
+  </properties>
+  <dependencies>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-mappers</artifactId></dependency>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-camel</artifactId></dependency>
+    <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId></dependency>
+    <dependency><groupId>org.apache.commons</groupId><artifactId>commons-csv</artifactId></dependency>
+    <dependency><groupId>org.apache.camel</groupId><artifactId>camel-file</artifactId></dependency>
+    <dependency><groupId>org.apache.camel</groupId><artifactId>camel-sql</artifactId></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+  </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <!-- the source readers are shared by both engines and carry neither. -->
+            <id>enforce-engine-independence</id>
+            <goals><goal>enforce</goal></goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <message>The delivery engines are independent: the source readers are shared by both engines and carry neither.</message>
+                  <searchTransitive>true</searchTransitive>
+                  <excludes>
+                    <exclude>org.apache.pekko:*:*:*:compile</exclude>
+                    <exclude>org.apache.pekko:*:*:*:runtime</exclude>
+                    <exclude>org.apache.kafka:kafka-streams:*:*:compile</exclude>
+                    <exclude>org.apache.kafka:kafka-streams:*:*:runtime</exclude>
+                  </excludes>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

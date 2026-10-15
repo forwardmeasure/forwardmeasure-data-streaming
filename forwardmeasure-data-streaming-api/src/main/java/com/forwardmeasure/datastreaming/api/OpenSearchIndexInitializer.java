@@ -33,14 +33,13 @@ import java.util.Map;
 
 /**
  * Creates a real {@code opensearch} sink's target index with a real mapping/settings document
- * before any row is written - added 2026-09-14, closing a real gap found while trying to reuse
- * {@code entity-intelligence-specifications}' own real, checked-in WorldCheck indexing spec ({@code
- * screening-records-worldcheck-opensearch-indexing-spec.json} - custom ngram/phonetic name
- * analyzers, nested {@code identifiers}/{@code locations}/{@code names} objects, typed dates)
- * against FDS: neither engine's own {@code opensearch} sink ever created the index at all before
- * this - both just started PUTting documents, leaving OpenSearch's own dynamic mapping to improvise
- * a flatter, wrong-typed index no real mapping/settings document could ever apply to after the fact
- * (an index's own analysis settings are fixed at creation).
+ * before any row is written - added 2026-09-14, closing a real gap found while applying a real
+ * product indexing spec (custom ngram/phonetic name analyzers, nested {@code identifiers}/{@code
+ * locations}/{@code names} objects, typed dates) against FDS: neither engine's own {@code
+ * opensearch} sink ever created the index at all before this - both just started PUTting documents,
+ * leaving OpenSearch's own dynamic mapping to improvise a flatter, wrong-typed index no real
+ * mapping/settings document could ever apply to after the fact (an index's own analysis settings
+ * are fixed at creation).
  *
  * <p>Shared between both engines (JDK-only, no Camel/Spark/Pekko dependency) since the actual HTTP
  * mechanics - check if the index exists, PUT the settings/mapping document if not - are identical

@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture;
 import com.forwardmeasure.datastreaming.launcher.application.AuthorizationAction;
+import com.forwardmeasure.datastreaming.testfixtures.TestTransformImages;
 import com.forwardmeasure.datastreaming.testfixtures.WorldCheckFixtures;
 import com.forwardmeasure.testcontainers.kubernetes.KubernetesTestContainer;
 import com.forwardmeasure.testcontainers.opensearch.OpenSearchTestContainer;
@@ -106,7 +107,8 @@ class DirectIngestionMatrixQuarkusPekkoSmokeTest {
         "expected the real document written by the dispatched pod: " + document.body());
     // wc-3 has a blank FIRST NAME and no ALIASES, so its own real, already-documented mapping
     // behavior (see PekkoWorldCheckToOpenSearchIntegrationTest's identical assertion) produces no
-    // "names" field at all - "entity_kind":"organization" (via classify_party_kind) is the real,
+    // "names" field at all - "entity_kind":"organization" (via test_classify_party_kind) is the
+    // real,
     // always-present field this row's own mapping actually populates.
     assertTrue(
         document.body().contains("\"entity_kind\":\"organization\""),
@@ -190,7 +192,8 @@ class DirectIngestionMatrixQuarkusPekkoSmokeTest {
 
       kubernetes = new KubernetesTestContainer().start();
       CurrentKubernetesTestContainer.set(kubernetes);
-      PEKKO_IMAGE = kubernetes.loadImageAndPinDigest(executorImage);
+      PEKKO_IMAGE =
+          kubernetes.loadImageAndPinDigest(TestTransformImages.withTestTransforms(executorImage));
       try (var client = kubernetes.createClient()) {
         client
             .namespaces()
@@ -230,6 +233,7 @@ class DirectIngestionMatrixQuarkusPekkoSmokeTest {
           // ExecutionsApi are produced eagerly regardless), so any non-blank value is sufficient.
           Map.entry("datastreaming.launcher.fowf.keycloak.client-id", "unused"),
           Map.entry("datastreaming.launcher.fowf.keycloak.client-secret", "unused"),
+          Map.entry("datastreaming.launcher.engine", "pekko-postgresql"),
           Map.entry("datastreaming.launcher.pekko.image", pekkoImage),
           Map.entry("datastreaming.launcher.pekko.command", pekkoCommand),
           Map.entry("datastreaming.launcher.kafka-streams.image", "unused"),

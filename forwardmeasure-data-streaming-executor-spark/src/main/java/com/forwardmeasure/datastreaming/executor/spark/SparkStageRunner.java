@@ -52,7 +52,8 @@ public final class SparkStageRunner {
     String specPath = args.length > 0 ? args[0] : requiredEnv("INGESTION_SPEC_PATH");
     IngestionSpec spec = IngestionSpec.load(Path.of(specPath));
     ExecutionPlan plan =
-        SparkIngestionRunner.withHandoffTopicOverride(ExecutionPlanCompiler.compile(spec));
+        SparkIngestionRunner.withHandoffTopicOverride(
+            ExecutionPlanCompiler.compile(spec, ExecutionPlanCompiler.installationEngine()));
     String kafkaBootstrapServers = SparkIngestionRunner.kafkaBootstrapServersFromEnv();
 
     SparkSession spark =

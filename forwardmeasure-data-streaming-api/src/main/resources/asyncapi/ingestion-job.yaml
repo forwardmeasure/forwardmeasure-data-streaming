@@ -33,6 +33,8 @@ channels:
           properties:
             namespace: {type: string}
             image: {type: string}
+            # Secrets in the Job's namespace used to pull a private image (the pod's imagePullSecrets).
+            imagePullSecretNames: {type: array, items: {type: string}}
   ingestion.events:
     servers: [cluster]
     subscribe:

@@ -24,7 +24,7 @@ import com.forwardmeasure.datastreaming.core.CorrelationMerge;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline.MalformedRecordPolicy;
 import com.forwardmeasure.datastreaming.mappers.FieldMappingEngine;
 import com.forwardmeasure.datastreaming.mappers.SourceRow;
-import com.forwardmeasure.datastreaming.transforms.NamedTransform;
+import com.forwardmeasure.datastreaming.transforms.NamedTransformCatalog;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -79,15 +79,15 @@ public final class PekkoCorrelationEngine {
       String blockingField,
       String sourceKey,
       double trustWeight,
-      Map<String, NamedTransform> supplementalTransforms,
+      NamedTransformCatalog transforms,
       MalformedRecordPolicy malformedRecordPolicy) {
-    FieldMappingEngine engine = new FieldMappingEngine();
+    FieldMappingEngine engine = new FieldMappingEngine(transforms);
     Source<SourceRow, ?> rows = PekkoIngestionRunner.rowSource(bridge, source);
     return rows.mapConcat(
             row -> {
               Map<String, Object> mapped;
               try {
-                mapped = engine.map(row, mapper, supplementalTransforms);
+                mapped = engine.map(row, mapper);
               } catch (RuntimeException mappingFailure) {
                 return handleMalformedRow(sourceKey, mappingFailure, malformedRecordPolicy);
               }

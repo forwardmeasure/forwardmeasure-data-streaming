@@ -96,6 +96,16 @@ final class ContinuousPekkoStreamsConsumerRunner {
             // cause, not drainAndShutdown() itself hanging.
             .withStopTimeout(java.time.Duration.ZERO);
     CommitterSettings committerSettings = CommitterSettings.create(system);
+    JournalGraph graph =
+        plan.transforms() == null
+            ? null
+            : new JournalGraph(
+                system,
+                com.forwardmeasure.datastreaming.api.ExecutionIdentity.of(
+                    plan, "fds-pekko-graph-", System.getenv("FDS_EXECUTION_ID")),
+                plan.transforms(),
+                plan.blockingField(),
+                IngestionPipeline.MalformedRecordPolicy.from(plan.errors()));
 
     Consumer.DrainingControl<Done> control =
         Consumer.committableSource(consumerSettings, Subscriptions.topics(sourceUri.topic()))
@@ -105,13 +115,71 @@ final class ContinuousPekkoStreamsConsumerRunner {
                     IngestionPipeline.withSinkFailureHandling(
                             sinkFailurePolicy,
                             () ->
-                                sendMappedRow(
-                                    msg.record().value(), source, plan, mapper, producerTemplate))
+                                graph == null
+                                    ? sendMappedRow(
+                                        msg.record().value(),
+                                        source,
+                                        plan,
+                                        mapper,
+                                        producerTemplate)
+                                    : sendThroughGraph(
+                                        msg.record(),
+                                        source,
+                                        plan,
+                                        mapper,
+                                        producerTemplate,
+                                        graph))
                         .thenApply(ignored -> (Committable) msg.committableOffset()))
             .toMat(Committer.sink(committerSettings), Consumer::createDrainingControl)
             .run(system);
 
-    return new PekkoStreamsExecutionHandle("fds-pekko-continuous", control, bridge);
+    return new PekkoStreamsExecutionHandle(
+        "fds-pekko-continuous", control, bridge, graph == null ? () -> {} : graph);
+  }
+
+  /**
+   * One record through the graph: its outputs written, in order, then its state changes made
+   * durable on the journal; a failed write drops the changes, so the redelivered record meets the
+   * state it met the first time.
+   */
+  private static CompletionStage<Void> sendThroughGraph(
+      org.apache.kafka.clients.consumer.ConsumerRecord<String, String> input,
+      SourcePlan source,
+      ExecutionPlan plan,
+      FieldMappingEngine mapper,
+      ProducerTemplate producerTemplate,
+      JournalGraph graph) {
+    Map<String, Object> raw;
+    try {
+      raw = JSON.readValue(input.value(), RECORD_TYPE);
+    } catch (IOException e) {
+      throw new UncheckedIOException("Unable to parse continuous record", e);
+    }
+    Map<String, Object> mapped = mapper.map(new MapSourceRow(raw), source.mapper());
+    CompletionStage<Void> written = java.util.concurrent.CompletableFuture.completedFuture(null);
+    for (Map<String, Object> output :
+        graph.process(
+            source.sourceKey(),
+            mapped,
+            new JournalGraph.InputPosition(input.topic(), input.partition(), input.offset()))) {
+      written =
+          written.thenCompose(
+              ignored ->
+                  PekkoIngestionRunner.sendOneRow(
+                      plan.destination(), producerTemplate, JSON, output));
+    }
+    return written
+        .thenCompose(ignored -> graph.commit())
+        .handle(
+            (done, failure) -> {
+              if (failure != null) {
+                graph.discard();
+                throw failure instanceof java.util.concurrent.CompletionException completion
+                    ? completion
+                    : new java.util.concurrent.CompletionException(failure);
+              }
+              return null;
+            });
   }
 
   private static CompletionStage<Void> sendMappedRow(

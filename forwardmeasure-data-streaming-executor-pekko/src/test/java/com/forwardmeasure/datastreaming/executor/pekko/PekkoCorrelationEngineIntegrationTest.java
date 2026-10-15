@@ -24,6 +24,7 @@ import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec.FieldRule;
 import com.forwardmeasure.datastreaming.connector.camel.CamelBridge;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline;
+import com.forwardmeasure.datastreaming.transforms.NamedTransformCatalog;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -84,7 +85,7 @@ class PekkoCorrelationEngineIntegrationTest {
                   "uid",
                   "core",
                   1.0,
-                  Map.of(),
+                  NamedTransformCatalog.installed(),
                   IngestionPipeline.MalformedRecordPolicy.SKIP)
               .toCompletableFuture()
               .get(15, TimeUnit.SECONDS);
@@ -97,7 +98,7 @@ class PekkoCorrelationEngineIntegrationTest {
                   "uid",
                   "enrichment",
                   0.4,
-                  Map.of(),
+                  NamedTransformCatalog.installed(),
                   IngestionPipeline.MalformedRecordPolicy.SKIP)
               .toCompletableFuture()
               .get(15, TimeUnit.SECONDS);
@@ -156,7 +157,7 @@ class PekkoCorrelationEngineIntegrationTest {
                   "uid",
                   "core",
                   1.0,
-                  Map.of(),
+                  NamedTransformCatalog.installed(),
                   IngestionPipeline.MalformedRecordPolicy.SKIP)
               .toCompletableFuture()
               .get(15, TimeUnit.SECONDS);

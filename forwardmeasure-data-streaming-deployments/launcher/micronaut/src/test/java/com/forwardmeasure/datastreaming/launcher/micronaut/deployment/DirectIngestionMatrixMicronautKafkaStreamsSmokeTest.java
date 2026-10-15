@@ -24,6 +24,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture;
 import com.forwardmeasure.datastreaming.launcher.application.AuthorizationAction;
+import com.forwardmeasure.datastreaming.testfixtures.TestTransformImages;
 import com.forwardmeasure.datastreaming.testfixtures.WorldCheckFixtures;
 import com.forwardmeasure.testcontainers.kafka.KafkaContainerConfiguration;
 import com.forwardmeasure.testcontainers.kafka.KafkaTestContainer;
@@ -109,7 +110,8 @@ class DirectIngestionMatrixMicronautKafkaStreamsSmokeTest implements TestPropert
             AuthorizationAction.INGESTION_RUN_READ.scope()));
 
     kubernetes = new KubernetesTestContainer().start();
-    KAFKA_STREAMS_IMAGE = kubernetes.loadImageAndPinDigest(executorImage);
+    KAFKA_STREAMS_IMAGE =
+        kubernetes.loadImageAndPinDigest(TestTransformImages.withTestTransforms(executorImage));
     CurrentKubernetesTestContainer.set(kubernetes);
     try (KubernetesClient client = kubernetes.createClient()) {
       client
@@ -152,6 +154,12 @@ class DirectIngestionMatrixMicronautKafkaStreamsSmokeTest implements TestPropert
         Map.entry("datastreaming.launcher.k8s.host-aliases", "host.docker.internal=" + gatewayIp),
         Map.entry("datastreaming.launcher.fowf.keycloak.client-id", "unused"),
         Map.entry("datastreaming.launcher.fowf.keycloak.client-secret", "unused"),
+        Map.entry("datastreaming.launcher.engine", "kafka-streams"),
+        Map.entry("datastreaming.launcher.loader.image", "unused-loader"),
+        Map.entry("datastreaming.launcher.loader.command", "false"),
+        Map.entry("datastreaming.launcher.spark.image", "unused-spark"),
+        Map.entry("datastreaming.launcher.spark.command", "false"),
+        Map.entry("datastreaming.launcher.kafka.bootstrap-servers", "unused:9092"),
         Map.entry("datastreaming.launcher.pekko.image", "unused"),
         Map.entry("datastreaming.launcher.pekko.command", "false"),
         Map.entry("datastreaming.launcher.kafka-streams.image", kafkaStreamsImage),

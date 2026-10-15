@@ -149,6 +149,10 @@ class LauncherRequestOutcomesSpringTest {
         () -> fixture.issuer() + "/protocol/openid-connect/token");
     registry.add("datastreaming.launcher.fowf.keycloak.client-id", () -> FOWF_CLIENT_ID);
     registry.add("datastreaming.launcher.fowf.keycloak.client-secret", () -> FOWF_CLIENT_SECRET);
+    registry.add("datastreaming.launcher.engine", () -> "pekko-postgresql");
+    registry.add("datastreaming.launcher.spark.image", () -> "unused-spark");
+    registry.add("datastreaming.launcher.spark.command", () -> "false");
+    registry.add("datastreaming.launcher.kafka.bootstrap-servers", () -> "unused:9092");
     registry.add("datastreaming.launcher.pekko.image", () -> "unused");
     registry.add("datastreaming.launcher.pekko.command", () -> "unused");
     registry.add("datastreaming.launcher.kafka-streams.image", () -> "unused");

@@ -139,6 +139,7 @@ class LauncherAuthorizationUnavailableQuarkusTest {
           Map.entry("datastreaming.launcher.k8s.image-pull-secrets", "unused"),
           Map.entry("datastreaming.launcher.fowf.keycloak.client-id", "unused"),
           Map.entry("datastreaming.launcher.fowf.keycloak.client-secret", "unused"),
+          Map.entry("datastreaming.launcher.engine", "pekko-postgresql"),
           Map.entry("datastreaming.launcher.pekko.image", "unused"),
           Map.entry("datastreaming.launcher.pekko.command", "unused"),
           Map.entry("datastreaming.launcher.kafka-streams.image", "unused"),

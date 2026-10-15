@@ -37,6 +37,8 @@
     <container-image.name>data-streaming-executor-spark</container-image.name>
   </properties>
   <dependencies>
+    <!-- Test-only transforms registered through the provider SPI. -->
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-test-fixtures</artifactId><scope>test</scope></dependency>
     <dependency><groupId>org.apache.kafka</groupId><artifactId>kafka-clients</artifactId></dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-core</artifactId></dependency>
@@ -82,6 +84,31 @@
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <!-- the Spark stage hands off to either engine and carries neither. -->
+            <id>enforce-engine-independence</id>
+            <goals><goal>enforce</goal></goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <message>The delivery engines are independent: the Spark stage hands off to either engine and carries neither.</message>
+                  <searchTransitive>true</searchTransitive>
+                  <excludes>
+                    <exclude>org.apache.pekko:*:*:*:compile</exclude>
+                    <exclude>org.apache.pekko:*:*:*:runtime</exclude>
+                    <exclude>org.apache.kafka:kafka-streams:*:*:compile</exclude>
+                    <exclude>org.apache.kafka:kafka-streams:*:*:runtime</exclude>
+                  </excludes>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-dependency-plugin</artifactId>
         <executions>
           <execution>
@@ -107,6 +134,9 @@
               <addClasspath>true</addClasspath>
               <classpathPrefix>dependency/</classpathPrefix>
             </manifest>
+            <!-- extensions/ lets a product (or a test image) add classes such as its own
+                 NamedTransformProvider without rebuilding this image. -->
+            <manifestEntries><Class-Path>extensions/</Class-Path></manifestEntries>
           </archive>
         </configuration>
       </plugin>

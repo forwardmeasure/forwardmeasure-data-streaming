@@ -106,6 +106,10 @@ class LauncherAuthorizationUnavailableSpringTest {
     registry.add("datastreaming.launcher.k8s.image-pull-secrets", () -> "unused");
     registry.add("datastreaming.launcher.fowf.keycloak.client-id", () -> "unused");
     registry.add("datastreaming.launcher.fowf.keycloak.client-secret", () -> "unused");
+    registry.add("datastreaming.launcher.engine", () -> "pekko-postgresql");
+    registry.add("datastreaming.launcher.spark.image", () -> "unused-spark");
+    registry.add("datastreaming.launcher.spark.command", () -> "false");
+    registry.add("datastreaming.launcher.kafka.bootstrap-servers", () -> "unused:9092");
     registry.add("datastreaming.launcher.pekko.image", () -> "unused");
     registry.add("datastreaming.launcher.pekko.command", () -> "unused");
     registry.add("datastreaming.launcher.kafka-streams.image", () -> "unused");

@@ -130,11 +130,18 @@ public final class ContinuousSparkStageRunner {
       try {
         JavaSparkContext context = JavaSparkContext.fromSparkContext(spark.sparkContext());
         ObjectMapper json = new ObjectMapper();
+        // A HEAVY transform inside the graph: this stage also runs the graph through that step.
+        ContinuousSparkGraph graph =
+            plan.sparkStage().orElseThrow().graphSteps() > 0
+                ? new ContinuousSparkGraph(context, plan, brokers)
+                : null;
+        List<String> sourceTopics = sources.stream().map(KafkaConnectorUri::topic).toList();
         while (!stopping.get()) {
           var records = consumer.poll(Duration.ofSeconds(1));
           if (records.isEmpty()) continue;
-          List<ProducerRecord<String, String>> handoff = new ArrayList<>();
-          for (int index = 0; index < sources.size(); index++) {
+          List<ProducerRecord<String, String>> handoff =
+              graph == null ? new ArrayList<>() : graph.process(records, sourceTopics);
+          for (int index = 0; graph == null && index < sources.size(); index++) {
             String topic = SparkHandoffSpecs.continuousTopic(plan, index);
             List<String> values = new ArrayList<>();
             records
@@ -185,7 +192,9 @@ public final class ContinuousSparkStageRunner {
             for (var record : handoff) producer.send(record).get();
             producer.sendOffsetsToTransaction(offsets, consumer.groupMetadata());
             producer.commitTransaction();
+            if (graph != null) graph.committed();
           } catch (Exception failure) {
+            if (graph != null) graph.discarded();
             try {
               producer.abortTransaction();
             } catch (Exception abort) {

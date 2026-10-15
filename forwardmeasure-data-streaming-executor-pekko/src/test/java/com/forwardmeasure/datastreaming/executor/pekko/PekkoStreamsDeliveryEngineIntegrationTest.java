@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
 import com.forwardmeasure.datastreaming.api.DeliverySemantics;
 import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.ExecutionPlan;
@@ -77,16 +78,21 @@ class PekkoStreamsDeliveryEngineIntegrationTest {
       LoggerFactory.getLogger(PekkoStreamsDeliveryEngineIntegrationTest.class);
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
+  private static PekkoJournalFixture journal;
   private static ActorSystem system;
 
+  /** Continuous correlation keeps its state on the journal, as a deployed worker does. */
   @BeforeAll
   static void startActorSystem() {
-    system = ActorSystem.create("pekko-streams-delivery-engine-test");
+    journal = PekkoJournalFixture.start(PekkoJournalFixture.Backend.POSTGRESQL);
+    system = journal.system("pekko-streams-delivery-engine-test");
   }
 
   @AfterAll
   static void stopActorSystem() {
     system.terminate();
+    system.getWhenTerminated().toCompletableFuture().join();
+    journal.close();
   }
 
   @Test
@@ -425,7 +431,7 @@ class PekkoStreamsDeliveryEngineIntegrationTest {
             mode,
             new DeliverySemantics(true, new ConcurrencySpec(1, null), null),
             null);
-    return ExecutionPlanCompiler.compile(spec);
+    return ExecutionPlanCompiler.compile(spec, DeliveryEngineKind.PEKKO_STREAMS);
   }
 
   private static SourcePlan kafkaSource(

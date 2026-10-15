@@ -27,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
 import com.forwardmeasure.datastreaming.api.ErrorPolicy;
 import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.ExecutionPlan;
@@ -164,7 +165,7 @@ class KafkaEntrypointContractTest {
             ExecutionMode.BOUNDED,
             null,
             null);
-    var plan = ExecutionPlanCompiler.compile(spec);
+    var plan = ExecutionPlanCompiler.compile(spec, DeliveryEngineKind.KAFKA_STREAMS);
     assertThrows(
         IllegalArgumentException.class,
         () -> new ContinuousKafkaStreamsCorrelationRunner(Map.of()).run(plan));
@@ -184,7 +185,7 @@ class KafkaEntrypointContractTest {
             plan.sources(),
             null,
             Optional.of(
-                new SparkStagePlan(List.of("screen_against_worldcheck_reference"), "unread-stage")),
+                new SparkStagePlan(List.of("test_screen_against_reference"), "unread-stage")),
             null,
             plan.destination(),
             null,
@@ -208,7 +209,8 @@ class KafkaEntrypointContractTest {
                 plan.destination(),
                 ExecutionMode.CONTINUOUS,
                 null,
-                null));
+                null),
+            DeliveryEngineKind.KAFKA_STREAMS);
     assertThrows(
         IllegalArgumentException.class,
         () -> new KafkaStreamsDeliveryEngine(Map.of()).execute(mixed, ExecutionMode.CONTINUOUS));

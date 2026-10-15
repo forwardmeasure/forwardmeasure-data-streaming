@@ -69,13 +69,13 @@ sources:
             name_type: ALIAS
         - target: entity_kind
           source: ENTITYS_TYPE
-          transform: classify_party_kind_test_customer_master
+          transform: test_classify_customer_master_party_kind
         - target: identifiers
           inputs:
             business_entity_record_id: BUSINESS_ENTITY_RECORD_ID
-            gems_id: GEMS_ID
+            kyc_id: KYC_ID
             entity_public_identifier: ENTITY_PUBLIC_IDENTIFIER
-          transform: build_test_customer_master_identifiers
+          transform: test_build_customer_master_identifiers
           optional: true
         - target: date_of_birth
           source: DATE_OF_BIRTH_DATE_OF_INCORPORATION
@@ -137,7 +137,7 @@ sources:
             city_3: ENTITY_LOCATION_3_CITY
             state_or_province_3: ENTITY_LOCATION_3_STATE_PROVINCE
             country_3: ENTITY_LOCATION_3_COUNTRY
-          transform: build_test_customer_master_locations
+          transform: test_build_customer_master_locations
           optional: true
         - target: screening_hits
           inputs:
@@ -149,7 +149,7 @@ sources:
             country: ENTITY_LOCATION_1_COUNTRY
             nationality: COUNTRY_OF_NATIONALITY
             dob: DATE_OF_BIRTH_DATE_OF_INCORPORATION
-          transform: screen_against_worldcheck_reference
+          transform: test_screen_against_reference
           optional: true
 
 sink:

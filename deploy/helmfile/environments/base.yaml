@@ -20,6 +20,9 @@
 # forwardmeasure-platform/deploy/helmfile/shared/, loaded last by helmfile.yaml.gotmpl.
 
 imagePullPolicy: IfNotPresent
+# The ServiceAccount fowf runs continuous workers as (helmfiles/launcher.yaml.gotmpl creates it;
+# forwardmeasure-openworkflow allowlists it for this product's tenants' Deployments).
+workerServiceAccountName: data-streaming-worker
 # Real, sha256-pinned executor images - org policy requires a pinned digest, not a floating tag
 # (AsyncApiKubernetesJobOperationExecutor's own real check). Digests below are current as of
 # 2026-09-26 (rebuilt/repushed the same day the stale-digest "unknown named transform" bug for
@@ -40,14 +43,19 @@ imageVersions:
       micronaut: forwardmeasure/data-streaming-launcher-micronaut
     tag: "1.1.0"
     digests:
-      quarkus: "sha256:8b9441f1182ad33743419aed5b36598f36197fffb41a5f01470dc3641edde65f"
+      quarkus: "sha256:6c011051ada25cb695fe317386ca1b29639d303b44e655575c517b2d5f327081"
       spring: ""
       micronaut: ""
   pekko:
     repository: docker.io/forwardmeasure/data-streaming-executor-pekko
     tag: "1.1.0"
-    digest: "sha256:6a9d53a2b30d01745c835565b6122c68bef1368852ac4e73210f8f23ab3e4874"
+    digest: "sha256:a960f6a1cf5d56dbb0f4a8f5f85452281f5f31e1d1eb637c787051896764f810"
+  # Kafka Streams installations only: the bounded-load first stage (forwardmeasure-data-streaming-loader).
+  loader:
+    repository: docker.io/forwardmeasure/data-streaming-loader
+    tag: "1.1.0"
+    digest: "sha256:34ae9117d7d6d3cd84b8126ec3cfceb32869e2000c99986b15703811bd0f9f90"
   spark:
     repository: docker.io/forwardmeasure/data-streaming-executor-spark
     tag: "1.1.0"
-    digest: "sha256:03728d48edfaf0583a7182a68a45be5a7659504e9de40557c7e29bc7338dad1b"
+    digest: "sha256:4d6764c4d62a5808fb2f1631352336caaa6cd5c5330225b16c3ef3516c08911c"

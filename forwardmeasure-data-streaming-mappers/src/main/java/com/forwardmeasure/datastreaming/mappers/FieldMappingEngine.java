@@ -18,8 +18,7 @@ package com.forwardmeasure.datastreaming.mappers;
 
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec.FieldRule;
-import com.forwardmeasure.datastreaming.transforms.NamedTransform;
-import com.forwardmeasure.datastreaming.transforms.NamedTransformRegistry;
+import com.forwardmeasure.datastreaming.transforms.NamedTransformCatalog;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -49,17 +48,9 @@ import org.slf4j.LoggerFactory;
  * sharing the same {@code target} contributes one element to a {@code List} at that target, per
  * {@link FieldRule}'s own documented semantics.
  *
- * <p>Truly source-specific named transforms - ones tied to one vendor's own private field-value
- * spelling, not shared cross-provider vocabulary - deliberately aren't in the shared {@code
- * NamedTransformRegistry} (D3/D7: that registry is the generic, cross-source pool). A caller with
- * transforms like that supplies them via the {@code supplementalTransforms} map on {@link
- * #map(SourceRow, TransformSpec, Map)} - checked first, falling back to the shared registry -
- * rather than this module ever growing source-specific logic of its own. See {@code
- * NamedTransformRegistry}'s own javadoc for the growing set of originally-WorldCheck-named
- * functions it has incorporated as genuinely generic sanctions/watchlist vocabulary instead - most
- * recently (2026-09-14) {@code classify_party_categories}/{@code parse_tilde_delimited_locations},
- * once a fully spec-driven pipeline (no custom Java, no supplemental registry to fall back on)
- * became the preferred way to run this exact pipeline.
+ * <p>Transform names resolve against the {@link NamedTransformCatalog} this engine was built with:
+ * {@link NamedTransformCatalog#installed()} by default, or a caller's own catalog carrying its
+ * product's transforms.
  */
 public final class FieldMappingEngine {
 
@@ -74,19 +65,25 @@ public final class FieldMappingEngine {
 
   private final AtomicLong callCount = new AtomicLong();
 
-  public Map<String, Object> map(SourceRow row, TransformSpec spec) {
-    return map(row, spec, Map.of());
+  private final NamedTransformCatalog catalog;
+
+  /** An engine using {@link NamedTransformCatalog#installed()}. */
+  public FieldMappingEngine() {
+    this(NamedTransformCatalog.installed());
   }
 
-  public Map<String, Object> map(
-      SourceRow row, TransformSpec spec, Map<String, NamedTransform> supplementalTransforms) {
+  public FieldMappingEngine(NamedTransformCatalog catalog) {
+    this.catalog = java.util.Objects.requireNonNull(catalog, "catalog");
+  }
+
+  public Map<String, Object> map(SourceRow row, TransformSpec spec) {
     Map<String, Object> result = new LinkedHashMap<>();
     if (spec.fields() == null) {
       return result;
     }
 
     for (FieldRule rule : spec.fields()) {
-      Object value = resolveValue(row, rule, supplementalTransforms);
+      Object value = resolveValue(row, rule);
       if (isEffectivelyEmpty(value)) {
         if (!rule.isOptional()) {
           LOGGER.debug(
@@ -145,8 +142,7 @@ public final class FieldMappingEngine {
     return element;
   }
 
-  private Object resolveValue(
-      SourceRow row, FieldRule rule, Map<String, NamedTransform> supplementalTransforms) {
+  private Object resolveValue(SourceRow row, FieldRule rule) {
     if (rule.isRaw()) {
       if (rule.source() == null) {
         throw new IllegalArgumentException(
@@ -161,16 +157,13 @@ public final class FieldMappingEngine {
       // Map.of rejects a null value outright; every ported transform already treats "" the same
       // as null (isBlank() guards), so this is a null-safety fix, not a behavior change.
       return rule.transform() != null
-          ? applyTransform(
-              rule.transform(),
-              Map.of("value", resolved == null ? "" : resolved),
-              supplementalTransforms)
+          ? applyTransform(rule.transform(), Map.of("value", resolved == null ? "" : resolved))
           : resolved;
     }
 
     Map<String, String> namedInputs = resolveNamedInputs(row, rule.effectiveInputs());
     if (rule.transform() != null) {
-      return applyTransform(rule.transform(), namedInputs, supplementalTransforms);
+      return applyTransform(rule.transform(), namedInputs);
     }
     return namedInputs.get("value");
   }
@@ -182,15 +175,8 @@ public final class FieldMappingEngine {
     return resolved;
   }
 
-  private Object applyTransform(
-      String transformName,
-      Map<String, String> namedInputs,
-      Map<String, NamedTransform> supplementalTransforms) {
-    NamedTransform transform = supplementalTransforms.get(transformName);
-    if (transform == null) {
-      transform = NamedTransformRegistry.get(transformName);
-    }
-    return transform.apply(namedInputs);
+  private Object applyTransform(String transformName, Map<String, String> namedInputs) {
+    return catalog.get(transformName).apply(namedInputs);
   }
 
   private String resolveTemplate(SourceRow row, String template) {

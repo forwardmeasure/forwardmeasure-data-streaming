@@ -194,7 +194,7 @@ components:
             type: string
         transform:
           type: [string, "null"]
-          description: A named transform (FDS's shared NamedTransformRegistry, or a caller's own supplementalTransforms map).
+          description: A named transform, resolved against the NamedTransformCatalog (FDS's built-ins plus any registered by a NamedTransformProvider or passed by the caller).
         optional:
           type: [boolean, "null"]
           default: false
@@ -219,7 +219,7 @@ components:
       type: object
       description: >
         Reserved authoring model. Nonempty graphs are rejected before dispatch; use source mapper
-        field transforms. Both WorldCheck and Customer Master use SourcePlan.mapper directly.
+        field transforms (SourcePlan.mapper).
       required: [entryNode, nodes]
       additionalProperties: false
       properties:

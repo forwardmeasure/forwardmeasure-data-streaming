@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
 import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.TransformGraph;
@@ -37,13 +38,22 @@ class IngestionLaunchPlannerTest {
   private final IngestionLaunchPlanner planner =
       new IngestionLaunchPlanner(
           IngestionJobPolicy.configured(Set.of("workers"), Set.of(IMAGE)),
-          IMAGE,
-          "pekko",
-          IMAGE,
-          "kafka",
-          IMAGE,
-          "spark",
-          "broker:9092",
+          new RunnerImages(
+              DeliveryEngineKind.PEKKO_STREAMS,
+              new RunnerImages.Runner(IMAGE, "pekko"),
+              null,
+              new RunnerImages.Runner(IMAGE, "spark"),
+              "broker:9092"),
+          List.of("registry"));
+  private final IngestionLaunchPlanner kafkaStreamsPlanner =
+      new IngestionLaunchPlanner(
+          IngestionJobPolicy.configured(Set.of("workers"), Set.of(IMAGE)),
+          new RunnerImages(
+              DeliveryEngineKind.KAFKA_STREAMS,
+              new RunnerImages.Runner(IMAGE, "kafka"),
+              new RunnerImages.Runner(IMAGE, "loader"),
+              new RunnerImages.Runner(IMAGE, "spark"),
+              "broker:9092"),
           List.of("registry"));
 
   private IngestionSpec heavy() {
@@ -126,14 +136,14 @@ class IngestionLaunchPlannerTest {
   }
 
   @Test
-  void neverDispatchesAPlanThatWouldSilentlyIgnoreAGraph() {
+  void aHeavyPlanCarriesItsGraphIntoTheSparkStage() {
     var spec = heavy();
     TransformGraph graph =
         new TransformGraph(
             "map",
             Map.of("map", new TransformGraph.TransformNode(spec.sources().getFirst().mapper())),
             List.of());
-    var unsupported =
+    var withGraph =
         new IngestionSpec(
             spec.sources(),
             spec.blockingField(),
@@ -142,10 +152,59 @@ class IngestionLaunchPlannerTest {
             spec.executionMode(),
             spec.delivery(),
             spec.errors());
-    var failure =
-        assertThrows(
-            IllegalArgumentException.class, () -> planner.compile(unsupported, "tenant:run"));
-    assertTrue(failure.getMessage().contains("TransformGraph"));
+    // The graph is not ignored: the Spark stage runs it, through its HEAVY map step.
+    var plan = planner.compile(withGraph, "tenant:run");
+    assertEquals(graph, plan.transforms());
+    assertEquals(1, plan.sparkStage().orElseThrow().graphSteps());
+  }
+
+  @Test
+  void aKafkaStreamsBoundedFileLoadIsALoaderThenAKafkaStreamsDelivery() {
+    var spec =
+        TestCustomerMasterFixtures.boundedFileSpec(
+            "file:/tmp?fileName=source.csv", "http://search:9200", Path.of(""));
+    var input =
+        kafkaStreamsPlanner.workflowInput(
+            new DirectLaunchRequest("run", "workers", spec, Map.of(), Map.of(), null),
+            "tenant:run");
+    assertEquals(true, input.get("hasDelivery"));
+    Map<?, ?> loader = (Map<?, ?>) input.get("primary");
+    Map<?, ?> delivery = (Map<?, ?>) input.get("delivery");
+    Map<?, ?> loaderEnv = (Map<?, ?>) loader.get("env");
+    String loadTopic = (String) loaderEnv.get("FDS_LOAD_TOPIC");
+    assertTrue(loadTopic.startsWith("fds-load-"));
+    assertEquals("broker:9092", loaderEnv.get("KAFKA_BOOTSTRAP_SERVERS"));
+    assertEquals("KAFKA_STREAMS", loaderEnv.get("FDS_DELIVERY_ENGINE"));
+    assertTrue(((List<?>) loader.get("args")).getFirst().toString().contains("exec loader "));
+    assertTrue(((List<?>) delivery.get("args")).getFirst().toString().contains("exec kafka "));
+    Map<?, ?> deliveryEnv = (Map<?, ?>) delivery.get("env");
+    var deliverySpec =
+        IngestionSpec.parseYaml(
+            new String(
+                java.util.Base64.getDecoder()
+                    .decode((String) deliveryEnv.get("INGESTION_SPEC_YAML_BASE64")),
+                java.nio.charset.StandardCharsets.UTF_8));
+    assertEquals("kafka", deliverySpec.sources().getFirst().source().connector());
+    assertEquals(
+        "kafka:" + loadTopic + "-source-0?brokers=broker:9092",
+        deliverySpec.sources().getFirst().source().uri());
+    assertEquals(spec.sources().getFirst().mapper(), deliverySpec.sources().getFirst().mapper());
+    assertEquals(spec.sink(), deliverySpec.sink());
+  }
+
+  @Test
+  void aPekkoBoundedFileLoadIsOnePekkoJob() {
+    var spec =
+        TestCustomerMasterFixtures.boundedFileSpec(
+            "file:/tmp?fileName=source.csv", "http://search:9200", Path.of(""));
+    var input =
+        planner.workflowInput(
+            new DirectLaunchRequest("run", "workers", spec, Map.of(), Map.of(), null),
+            "tenant:run");
+    assertEquals(false, input.get("hasDelivery"));
+    Map<?, ?> only = (Map<?, ?>) input.get("primary");
+    assertTrue(((List<?>) only.get("args")).getFirst().toString().contains("exec pekko "));
+    assertEquals("PEKKO_STREAMS", ((Map<?, ?>) only.get("env")).get("FDS_DELIVERY_ENGINE"));
   }
 
   @Test

@@ -17,7 +17,6 @@
 package com.forwardmeasure.datastreaming.core;
 
 import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
-import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.ExecutionPlan;
 import com.forwardmeasure.datastreaming.api.ExecutionProfile;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
@@ -29,7 +28,7 @@ import com.forwardmeasure.datastreaming.api.TransformCharacteristics.ExecutionCo
 import com.forwardmeasure.datastreaming.api.TransformCharacteristics.StateRequirement;
 import com.forwardmeasure.datastreaming.api.TransformGraph;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
-import com.forwardmeasure.datastreaming.mappers.TransformCharacteristicsRegistry;
+import com.forwardmeasure.datastreaming.transforms.NamedTransformCatalog;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -38,35 +37,54 @@ import org.slf4j.LoggerFactory;
 
 /**
  * The planner: compiles one author-facing {@link IngestionSpec} into the {@link ExecutionPlan} a
- * {@code DeliveryEngine} actually runs - the author names transforms, never an engine (see the
- * repo's own gap-bridging plan, "the planner" section). Reads every reachable {@link
- * TransformSpec.FieldRule#transform()} name against {@link TransformCharacteristicsRegistry}, folds
- * them, and resolves the rest against a fixed, honest table - no heuristic invented without a real
- * transform in this codebase to justify it (see this class's own {@code foldCharacteristics}).
- *
- * <p><b>{@link ExecutionMode#CONTINUOUS} always resolves to {@link
- * DeliveryEngineKind#PEKKO_STREAMS}</b> unless a {@code STATEFUL} transform forces {@code
- * KAFKA_STREAMS} - a continuous spec's source is inherently Kafka-shaped for either engine, so
- * "source connector is kafka" cannot discriminate between them the way it legitimately can in
- * {@code BOUNDED} mode. A caller that specifically wants the {@code CONTINUOUS}+{@code
- * KAFKA_STREAMS} combination (e.g. a test proving engine parity, not a real deployed spec's one
- * true automatic choice) constructs the {@link ExecutionPlan} directly instead of going through
- * this compiler - see the plan's own "Phase B addendum" for why that's the honest answer rather
- * than a fabricated 50/50 heuristic.
+ * {@code DeliveryEngine} runs. It reads every reachable {@link TransformSpec.FieldRule#transform()}
+ * name against a {@link NamedTransformCatalog} (each transform declares its own characteristics)
+ * and decides one thing: whether a {@code HEAVY} transform needs a Spark stage. The delivery engine
+ * is not the planner's choice - the caller passes the installation's engine (the platform {@code
+ * engine} setting, see {@link DeliveryEngineKind#fromPlatformEngine}), and every capability runs on
+ * either engine.
  */
 public final class ExecutionPlanCompiler {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(ExecutionPlanCompiler.class);
-  private static final String KAFKA_CONNECTOR = "kafka";
 
   private ExecutionPlanCompiler() {}
 
-  public static ExecutionPlan compile(IngestionSpec spec) {
-    TransformCharacteristics folded = foldCharacteristics(spec);
-    DeliveryEngineKind engine = resolveEngine(spec, folded);
+  /**
+   * The environment variable every launched Job carries: the installation's {@link
+   * DeliveryEngineKind} name.
+   */
+  public static final String DELIVERY_ENGINE_ENV = "FDS_DELIVERY_ENGINE";
+
+  /**
+   * This installation's delivery engine, from {@value #DELIVERY_ENGINE_ENV} - for a runner, such as
+   * the Spark stage, that is not itself a delivery engine.
+   */
+  public static DeliveryEngineKind installationEngine() {
+    String engine = System.getenv(DELIVERY_ENGINE_ENV);
+    if (engine == null || engine.isBlank()) {
+      throw new IllegalStateException(
+          "required environment variable '" + DELIVERY_ENGINE_ENV + "' is not set");
+    }
+    return DeliveryEngineKind.valueOf(engine.strip());
+  }
+
+  /** Compiles for {@code engine} against {@link NamedTransformCatalog#installed()}. */
+  public static ExecutionPlan compile(IngestionSpec spec, DeliveryEngineKind engine) {
+    return compile(spec, NamedTransformCatalog.installed(), engine);
+  }
+
+  /**
+   * Compiles for {@code engine} against {@code catalog}, which must know every transform {@code
+   * spec} names.
+   */
+  public static ExecutionPlan compile(
+      IngestionSpec spec, NamedTransformCatalog catalog, DeliveryEngineKind engine) {
+    java.util.Objects.requireNonNull(engine, "engine");
+    TransformCharacteristics folded = foldCharacteristics(spec, catalog);
     ExecutionProfile profile =
         new ExecutionProfile(spec.sourceCardinality(), spec.executionMode(), engine);
-    Optional<SparkStagePlan> sparkStage = resolveSparkStage(spec, folded);
+    Optional<SparkStagePlan> sparkStage = resolveSparkStage(spec, folded, catalog, engine);
     ExecutionPlan plan =
         new ExecutionPlan(
             profile,
@@ -91,46 +109,25 @@ public final class ExecutionPlanCompiler {
     return plan;
   }
 
-  private static DeliveryEngineKind resolveEngine(
-      IngestionSpec spec, TransformCharacteristics folded) {
-    if (folded.state() == StateRequirement.STATEFUL) {
-      return DeliveryEngineKind.KAFKA_STREAMS;
-    }
-    if (spec.executionMode() == ExecutionMode.BOUNDED && anySourceIsKafka(spec)) {
-      return DeliveryEngineKind.KAFKA_STREAMS;
-    }
-    return DeliveryEngineKind.PEKKO_STREAMS;
-  }
-
-  private static boolean anySourceIsKafka(IngestionSpec spec) {
-    for (SourcePlan source : spec.sources()) {
-      if (KAFKA_CONNECTOR.equals(source.source().connector())) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   /**
    * Present only when the fold is {@link ExecutionCost#HEAVY} - the {@link
    * TransformCharacteristics.Cardinality#CORRELATED}-at-scale trigger from {@code SparkStagePlan}'s
    * own javadoc is deliberately not implemented: no real correlated-at-scale spec exists anywhere
    * in this org's data to build that heuristic against honestly (see the repo's own gap-bridging
-   * plan). Not reachable by any WorldCheck/Customer-Master spec today - every registered transform
-   * is {@code LIGHT} - so {@code handoffTopic}'s deterministic-from-spec-content naming below is
-   * genuinely untested against real data; revisit once a real {@code HEAVY} transform exists to
-   * exercise it.
+   * plan).
    */
   private static Optional<SparkStagePlan> resolveSparkStage(
-      IngestionSpec spec, TransformCharacteristics folded) {
+      IngestionSpec spec,
+      TransformCharacteristics folded,
+      NamedTransformCatalog catalog,
+      DeliveryEngineKind engine) {
     if (folded.cost() != ExecutionCost.HEAVY) {
       return Optional.empty();
     }
-    List<String> heavyTransformNames = heavyTransformNames(spec);
+    List<String> heavyTransformNames = heavyTransformNames(spec, catalog);
     ExecutionPlan identityPlan =
         new ExecutionPlan(
-            new ExecutionProfile(
-                spec.sourceCardinality(), spec.executionMode(), resolveEngine(spec, folded)),
+            new ExecutionProfile(spec.sourceCardinality(), spec.executionMode(), engine),
             spec.sources(),
             spec.blockingField(),
             Optional.empty(),
@@ -142,24 +139,28 @@ public final class ExecutionPlanCompiler {
     String handoffTopic =
         com.forwardmeasure.datastreaming.api.ExecutionIdentity.of(
             identityPlan, "fds-spark-handoff-", System.getenv("FDS_EXECUTION_ID"));
-    return Optional.of(new SparkStagePlan(heavyTransformNames, handoffTopic));
+    return Optional.of(
+        new SparkStagePlan(
+            heavyTransformNames, handoffTopic, sparkGraphSteps(spec.transforms(), catalog)));
   }
 
-  private static List<String> heavyTransformNames(IngestionSpec spec) {
+  private static List<String> heavyTransformNames(
+      IngestionSpec spec, NamedTransformCatalog catalog) {
     List<String> names = new ArrayList<>();
     for (TransformSpec.FieldRule rule : allFieldRules(spec)) {
       String transformName = rule.transform();
       if (transformName == null) {
         continue;
       }
-      if (TransformCharacteristicsRegistry.get(transformName).cost() == ExecutionCost.HEAVY) {
+      if (catalog.characteristics(transformName).cost() == ExecutionCost.HEAVY) {
         names.add(transformName);
       }
     }
     return names;
   }
 
-  private static TransformCharacteristics foldCharacteristics(IngestionSpec spec) {
+  private static TransformCharacteristics foldCharacteristics(
+      IngestionSpec spec, NamedTransformCatalog catalog) {
     Cardinality cardinality = Cardinality.ONE;
     StateRequirement state = StateRequirement.STATELESS;
     ExecutionCost cost = ExecutionCost.LIGHT;
@@ -171,8 +172,7 @@ public final class ExecutionPlanCompiler {
       if (transformName == null) {
         continue;
       }
-      TransformCharacteristics characteristics =
-          TransformCharacteristicsRegistry.get(transformName);
+      TransformCharacteristics characteristics = catalog.characteristics(transformName);
       cardinality = worstCardinality(cardinality, characteristics.cardinality());
       if (characteristics.state() == StateRequirement.STATEFUL) {
         state = StateRequirement.STATEFUL;
@@ -197,19 +197,45 @@ public final class ExecutionPlanCompiler {
   }
 
   /**
-   * Every {@code FieldRule} reachable from {@code spec}: each source's own mapper, plus every node
-   * in {@code spec.transforms()} when a further stage graph is declared.
+   * How many graph steps, from the entry step, the Spark stage runs: through the last map step that
+   * uses a {@code HEAVY} transform, so every such step runs at Spark scale - stateful steps before
+   * it included, with the same semantics as on a delivery engine. Zero when no graph step needs
+   * Spark.
+   */
+  static int sparkGraphSteps(TransformGraph transforms, NamedTransformCatalog catalog) {
+    if (transforms == null) return 0;
+    List<TransformGraph.TransformNode> chain = transforms.chain();
+    int steps = 0;
+    for (int i = 0; i < chain.size(); i++) {
+      TransformGraph.TransformNode node = chain.get(i);
+      if (node.mapper() == null) continue;
+      for (TransformSpec.FieldRule rule : node.mapper().fields()) {
+        if (rule.transform() != null
+            && catalog.characteristics(rule.transform()).cost() == ExecutionCost.HEAVY) {
+          steps = i + 1;
+        }
+      }
+    }
+    return steps;
+  }
+
+  /**
+   * Every {@code FieldRule} reachable from {@code spec}: each source's own mapper, plus every map
+   * step of {@code spec.transforms()} - the other step kinds carry no field rules.
    */
   private static List<TransformSpec.FieldRule> allFieldRules(IngestionSpec spec) {
     List<TransformSpec.FieldRule> rules = new ArrayList<>();
     for (SourcePlan source : spec.sources()) {
       rules.addAll(source.mapper().fields());
     }
-    TransformGraph transforms = spec.transforms();
-    if (transforms != null) {
-      for (TransformGraph.TransformNode node : transforms.nodes().values()) {
-        rules.addAll(node.mapper().fields());
-      }
+    if (spec.transforms() != null) rules.addAll(graphFieldRules(spec.transforms()));
+    return rules;
+  }
+
+  private static List<TransformSpec.FieldRule> graphFieldRules(TransformGraph transforms) {
+    List<TransformSpec.FieldRule> rules = new ArrayList<>();
+    for (TransformGraph.TransformNode node : transforms.nodes().values()) {
+      if (node.mapper() != null) rules.addAll(node.mapper().fields());
     }
     return rules;
   }

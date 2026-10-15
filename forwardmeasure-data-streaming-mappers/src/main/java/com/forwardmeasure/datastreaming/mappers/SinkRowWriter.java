@@ -31,8 +31,8 @@ import java.util.Map;
  * <p>Deliberately carries no retry policy of its own - {@code write} either succeeds or throws.
  * Retry (see {@code IngestionPipeline.withSinkFailureHandlingBlocking} in {@code
  * forwardmeasure-data-streaming-core}) is the caller's job: this module does not depend on {@code
- * -core} (which itself depends on this module, for {@link TransformCharacteristicsRegistry}), so a
- * retry policy can't live here without a circular dependency.
+ * -core} (which itself depends on this module), so a retry policy can't live here without a
+ * circular dependency.
  */
 public interface SinkRowWriter extends AutoCloseable {
 

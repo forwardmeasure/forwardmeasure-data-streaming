@@ -251,6 +251,7 @@ class LauncherRequestOutcomesQuarkusTest {
               fixture.issuer() + "/protocol/openid-connect/token"),
           Map.entry("datastreaming.launcher.fowf.keycloak.client-id", FOWF_CLIENT_ID),
           Map.entry("datastreaming.launcher.fowf.keycloak.client-secret", FOWF_CLIENT_SECRET),
+          Map.entry("datastreaming.launcher.engine", "pekko-postgresql"),
           Map.entry("datastreaming.launcher.pekko.image", "unused"),
           Map.entry("datastreaming.launcher.pekko.command", "unused"),
           Map.entry("datastreaming.launcher.kafka-streams.image", "unused"),

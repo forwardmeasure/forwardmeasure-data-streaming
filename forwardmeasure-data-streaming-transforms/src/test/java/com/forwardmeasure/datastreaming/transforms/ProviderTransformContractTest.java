@@ -37,7 +37,7 @@ class ProviderTransformContractTest {
             "normalise_identifier",
             "parse_partial_date_ymd",
             "join_labeled_fields")) {
-      assertNull(NamedTransformRegistry.get(name).apply(Map.of()), name);
+      assertNull(NamedTransformCatalog.builtIns().get(name).apply(Map.of()), name);
     }
     for (String name :
         List.of(
@@ -46,25 +46,14 @@ class ProviderTransformContractTest {
             "parse_tilde_list",
             "parse_semicolon_iso2_list",
             "parse_url_list",
-            "extract_url_domains",
-            "classify_party_categories",
-            "parse_tilde_delimited_locations",
-            "build_test_customer_master_locations",
-            "build_test_customer_master_identifiers",
-            "screen_against_worldcheck_reference")) {
-      assertEquals(List.of(), NamedTransformRegistry.get(name).apply(Map.of()), name);
+            "extract_url_domains")) {
+      assertEquals(List.of(), NamedTransformCatalog.builtIns().get(name).apply(Map.of()), name);
     }
-    for (String name :
-        List.of(
-            "classify_party_category",
-            "classify_party_kind",
-            "classify_party_kind_test_customer_master")) {
-      assertEquals("unknown", NamedTransformRegistry.get(name).apply(Map.of()), name);
-    }
-    assertTrue(NamedTransformRegistry.names().contains("normalise_identifier"));
-    assertTrue(NamedTransformRegistry.contains("parse_yyyymmdd"));
+    assertTrue(NamedTransformCatalog.builtIns().names().contains("normalise_identifier"));
+    assertTrue(NamedTransformCatalog.builtIns().contains("parse_yyyymmdd"));
     assertThrows(
-        IllegalArgumentException.class, () -> NamedTransformRegistry.get("not-a-transform"));
+        IllegalArgumentException.class,
+        () -> NamedTransformCatalog.builtIns().get("not-a-transform"));
   }
 
   @Test
@@ -75,10 +64,12 @@ class ProviderTransformContractTest {
       assertNull(NamedTransformFunctions.parse_mmddyyyy(value), value);
     assertEquals(
         "2024-02-29",
-        NamedTransformRegistry.get("parse_yyyymmdd").apply(Map.of("value", "20240229")));
+        NamedTransformCatalog.builtIns().get("parse_yyyymmdd").apply(Map.of("value", "20240229")));
     assertEquals(
         "2024-02-29",
-        NamedTransformRegistry.get("parse_mmddyyyy").apply(Map.of("value", "02/29/2024")));
+        NamedTransformCatalog.builtIns()
+            .get("parse_mmddyyyy")
+            .apply(Map.of("value", "02/29/2024")));
     assertNull(NamedTransformFunctions.parse_yyyymmdd(" "));
     assertNull(NamedTransformFunctions.parse_mmddyyyy(" "));
   }
@@ -167,26 +158,5 @@ class ProviderTransformContractTest {
     assertTrue(NamedTransformFunctions.parse_semicolon_list(" ").isEmpty());
     assertTrue(NamedTransformFunctions.parse_tilde_list(" ").isEmpty());
     assertNull(NamedTransformFunctions.resolve_iso2_country("1!"));
-  }
-
-  @Test
-  void sparseAddressesRetainTheirPositionAndDoNotBecomeEmptyLocationRecords() {
-    for (String field :
-        List.of("address_line_1_", "address_line_2_", "city_", "state_or_province_", "country_")) {
-      var result =
-          NamedTransformFunctions.build_test_customer_master_locations(
-              Map.of(field + "2", "Example"));
-      assertEquals(1, result.size());
-      assertEquals("MAILING", result.getFirst().get("location_type"));
-      assertNull(result.getFirst().get("country_code"));
-    }
-    assertEquals(
-        List.of(),
-        NamedTransformFunctions.parse_tilde_delimited_locations(" ;garbage;~ ~ ;~ ~ UNKNOWN"));
-    var city = NamedTransformFunctions.parse_tilde_delimited_locations("~ Paris ~ ;~ ~ France");
-    assertEquals(2, city.size());
-    assertEquals("Paris", city.getFirst().get("city"));
-    assertNull(city.getFirst().get("country_code"));
-    assertEquals("FR", city.get(1).get("country_code"));
   }
 }

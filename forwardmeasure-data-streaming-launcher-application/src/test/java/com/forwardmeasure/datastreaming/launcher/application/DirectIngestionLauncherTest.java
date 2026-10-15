@@ -25,6 +25,7 @@ import com.forwardmeasure.authzen.AuthorizationDecision;
 import com.forwardmeasure.authzen.AuthorizationRequest;
 import com.forwardmeasure.authzen.AuthorizationService;
 import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
 import com.forwardmeasure.datastreaming.api.DeliverySemantics;
 import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
@@ -88,14 +89,7 @@ final class DirectIngestionLauncherTest {
   @Timeout(180)
   void launchReconstructsTheIngestionSpecInsideThePod(KubernetesTestContainer kubernetes)
       throws InterruptedException {
-    DirectIngestionLauncher launcher =
-        new DirectIngestionLauncher(
-            IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
-            AUTHORIZATION,
-            STAND_IN_IMAGE,
-            "grep -q " + MARKER,
-            STAND_IN_IMAGE,
-            "grep -q this-marker-only-exists-in-the-kafka-streams-path-never-in-this-test");
+    DirectIngestionLauncher launcher = launcher(pekko("grep -q " + MARKER));
     DirectLaunchRequest request =
         new DirectLaunchRequest(
             UUID.randomUUID().toString(),
@@ -119,22 +113,12 @@ final class DirectIngestionLauncherTest {
 
   @Test
   @Timeout(180)
-  void launchDispatchesToTheKafkaStreamsRunnerForAKafkaSourcedSpec(
-      KubernetesTestContainer kubernetes) throws InterruptedException {
-    // Deliberately distinguishing stand-in commands, not the same one for both engines: the pekko
-    // command looks for a marker that never appears in this spec's own source URI, so if dispatch
-    // ever picked the wrong (pekko) command by mistake, the Job would FAIL, not just "happen to
-    // also succeed" - a real, not incidental, proof that ExecutionPlanCompiler's own
-    // kafka-source-in-BOUNDED-mode -> KAFKA_STREAMS rule actually drove dispatch.
+  void aKafkaStreamsInstallationDispatchesItsKafkaStreamsRunner(KubernetesTestContainer kubernetes)
+      throws InterruptedException {
+    // Only the delivery command finds the marker, so a Job from the loader or Spark runner would
+    // FAIL: the installation's configured engine, not the spec, drove dispatch.
     DirectIngestionLauncher launcher =
-        new DirectIngestionLauncher(
-            IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
-            AUTHORIZATION,
-            STAND_IN_IMAGE,
-            "grep -q this-marker-only-exists-in-the-pekko-path-never-in-this-test",
-            STAND_IN_IMAGE,
-            "grep -q " + MARKER,
-            List.of());
+        launcher(kafkaStreams("grep -q " + MARKER, "grep -q never-the-loader-for-a-kafka-source"));
     DirectLaunchRequest request =
         new DirectLaunchRequest(
             UUID.randomUUID().toString(),
@@ -155,16 +139,89 @@ final class DirectIngestionLauncherTest {
   }
 
   @Test
+  @Timeout(180)
+  void aPekkoInstallationRunsAKafkaSourcedSpecOnPekko(KubernetesTestContainer kubernetes)
+      throws InterruptedException {
+    DirectIngestionLauncher launcher = launcher(pekko("grep -q " + MARKER));
+    DirectLaunchRequest request =
+        new DirectLaunchRequest(
+            UUID.randomUUID().toString(),
+            NAMESPACE,
+            ingestionSpecWithMarker("kafka"),
+            Map.of(),
+            Map.of(),
+            null);
+
+    try (KubernetesClient client = kubernetes.createClient()) {
+      launcher.launch(client, request, ACTOR);
+
+      assertEquals(
+          KubernetesJobObservation.Phase.SUCCEEDED,
+          pollUntilTerminal(launcher, client, request.correlationId()).phase());
+    }
+  }
+
+  @Test
+  @Timeout(240)
+  void aKafkaStreamsInstallationLoadsAFileSourceBeforeDelivering(KubernetesTestContainer kubernetes)
+      throws InterruptedException {
+    // The loader Job sees the original spec (its file URI carries the marker); the delivery Job
+    // sees the delivery spec, whose source is the run's load topic.
+    DirectIngestionLauncher launcher =
+        launcher(kafkaStreams("grep -q fds-load-", "grep -q " + MARKER));
+    DirectLaunchRequest request =
+        new DirectLaunchRequest(
+            UUID.randomUUID().toString(),
+            NAMESPACE,
+            ingestionSpecWithMarker("file"),
+            Map.of(),
+            Map.of(),
+            null);
+
+    try (KubernetesClient client = kubernetes.createClient()) {
+      launcher.launch(client, request, ACTOR);
+
+      assertEquals(
+          KubernetesJobObservation.Phase.SUCCEEDED,
+          pollUntilTerminal(launcher, client, request.correlationId()).phase());
+      var loader =
+          client
+              .batch()
+              .v1()
+              .jobs()
+              .inNamespace(NAMESPACE)
+              .withName(
+                  DirectIngestionLauncher.deterministicJobName(
+                      ACTOR, request.correlationId() + ":load"))
+              .get();
+      var environment =
+          loader.getSpec().getTemplate().getSpec().getContainers().getFirst().getEnv();
+      assertTrue(environment.stream().anyMatch(env -> "FDS_LOAD_TOPIC".equals(env.getName())));
+      assertTrue(
+          environment.stream()
+              .anyMatch(
+                  env ->
+                      "FDS_DELIVERY_ENGINE".equals(env.getName())
+                          && "KAFKA_STREAMS".equals(env.getValue())));
+      assertTrue(
+          client
+                  .batch()
+                  .v1()
+                  .jobs()
+                  .inNamespace(NAMESPACE)
+                  .withName(
+                      DirectIngestionLauncher.deterministicJobName(
+                          ACTOR, request.correlationId() + ":delivery"))
+                  .get()
+              != null,
+          "the delivery Job follows a successful load");
+    }
+  }
+
+  @Test
   @Timeout(60)
   void launchRejectsAContinuousSpecWithoutTouchingTheCluster(KubernetesTestContainer kubernetes) {
-    DirectIngestionLauncher launcher =
-        new DirectIngestionLauncher(
-            IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
-            AUTHORIZATION,
-            STAND_IN_IMAGE,
-            "grep -q " + MARKER,
-            STAND_IN_IMAGE,
-            "grep -q " + MARKER);
+    DirectIngestionLauncher launcher = launcher(pekko("grep -q " + MARKER));
     IngestionSpec continuousSpec = ingestionSpecWithMarker("kafka", ExecutionMode.CONTINUOUS);
     DirectLaunchRequest request =
         new DirectLaunchRequest(
@@ -189,14 +246,7 @@ final class DirectIngestionLauncherTest {
   @Timeout(180)
   void cancelDeletesARealRunningJob(KubernetesTestContainer kubernetes)
       throws InterruptedException {
-    DirectIngestionLauncher launcher =
-        new DirectIngestionLauncher(
-            IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
-            AUTHORIZATION,
-            STAND_IN_IMAGE,
-            "sh -c 'sleep 300 #'",
-            STAND_IN_IMAGE,
-            "sh -c 'sleep 300 #'");
+    DirectIngestionLauncher launcher = launcher(pekko("sh -c 'sleep 300 #'"));
     DirectLaunchRequest request =
         new DirectLaunchRequest(
             UUID.randomUUID().toString(),
@@ -297,18 +347,41 @@ final class DirectIngestionLauncherTest {
   }
 
   private static DirectIngestionLauncher stagedLauncher() {
+    return launcher(
+        new RunnerImages(
+            DeliveryEngineKind.PEKKO_STREAMS,
+            new RunnerImages.Runner(STAND_IN_IMAGE, "true"),
+            null,
+            new RunnerImages.Runner(STAND_IN_IMAGE, "grep -q " + MARKER),
+            "unused:9092"));
+  }
+
+  /** A Pekko installation whose Spark runner always fails, so a Spark Job would be visible. */
+  private static RunnerImages pekko(String deliveryCommand) {
+    return new RunnerImages(
+        DeliveryEngineKind.PEKKO_STREAMS,
+        new RunnerImages.Runner(STAND_IN_IMAGE, deliveryCommand),
+        null,
+        new RunnerImages.Runner(STAND_IN_IMAGE, "false"),
+        "unused:9092");
+  }
+
+  private static RunnerImages kafkaStreams(String deliveryCommand, String loaderCommand) {
+    return new RunnerImages(
+        DeliveryEngineKind.KAFKA_STREAMS,
+        new RunnerImages.Runner(STAND_IN_IMAGE, deliveryCommand),
+        new RunnerImages.Runner(STAND_IN_IMAGE, loaderCommand),
+        new RunnerImages.Runner(STAND_IN_IMAGE, "false"),
+        "unused:9092");
+  }
+
+  private static DirectIngestionLauncher launcher(RunnerImages runners) {
     return new DirectIngestionLauncher(
         IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
         AUTHORIZATION,
-        STAND_IN_IMAGE,
-        "true",
-        STAND_IN_IMAGE,
-        "true",
+        runners,
         List.of(),
-        Map.of(),
-        STAND_IN_IMAGE,
-        "grep -q " + MARKER,
-        "unused:9092");
+        Map.of());
   }
 
   private static IngestionSpec ingestionSpecWithMarker(String sourceConnector) {

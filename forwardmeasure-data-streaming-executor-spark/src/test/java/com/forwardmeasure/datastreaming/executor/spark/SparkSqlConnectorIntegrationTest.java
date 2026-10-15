@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline;
+import com.forwardmeasure.datastreaming.transforms.NamedTransformCatalog;
 import com.forwardmeasure.testcontainers.junit.postgresql.WithPostgreSqlContainer;
 import com.forwardmeasure.testcontainers.postgresql.PostgreSqlTestContainer;
 import java.sql.Connection;
@@ -97,7 +98,11 @@ class SparkSqlConnectorIntegrationTest {
 
     JavaRDD<Map<String, Object>> mapped =
         SparkCorrelationEngine.readAndMapSingleSource(
-            spark, source, identityMapper, Map.of(), IngestionPipeline.MalformedRecordPolicy.SKIP);
+            spark,
+            source,
+            identityMapper,
+            NamedTransformCatalog.installed(),
+            IngestionPipeline.MalformedRecordPolicy.SKIP);
     List<Map<String, Object>> rows = mapped.collect();
 
     assertEquals(
@@ -132,7 +137,11 @@ class SparkSqlConnectorIntegrationTest {
 
     JavaRDD<Map<String, Object>> mapped =
         SparkCorrelationEngine.readAndMapSingleSource(
-            spark, source, identityMapper, Map.of(), IngestionPipeline.MalformedRecordPolicy.SKIP);
+            spark,
+            source,
+            identityMapper,
+            NamedTransformCatalog.installed(),
+            IngestionPipeline.MalformedRecordPolicy.SKIP);
     List<Map<String, Object>> rows = mapped.collect();
 
     assertEquals(0, rows.size());

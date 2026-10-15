@@ -62,8 +62,8 @@ import org.junit.jupiter.api.io.TempDir;
  * <p>No supplemental transforms anymore (2026-09-13): {@code map_worldcheck_entity_kind}/{@code
  * parse_worldcheck_date} - fei's own original names, test-local stand-ins here until now - were
  * renamed and incorporated into the real {@code NamedTransformRegistry} as {@code
- * classify_party_kind}/{@code parse_partial_date_ymd} once their real functional capability was
- * recognized as common sanctions-provider vocabulary, not one vendor's private invention (see
+ * test_classify_party_kind}/{@code parse_partial_date_ymd} once their real functional capability
+ * was recognized as common sanctions-provider vocabulary, not one vendor's private invention (see
  * {@code NamedTransformFunctions}' own javadoc). {@code engine.map(row, spec.mapper())}'s plain
  * 2-arg form now resolves both from the real registry directly - the fei-side oracle values this
  * test asserts against are unchanged, since the port is verbatim, only renamed.
@@ -156,7 +156,7 @@ class PekkoWorldCheckParityIntegrationTest {
                 null,
                 null,
                 Map.of("value", "CATEGORY", "entity_indicator", "ENTITY_INDICATOR"),
-                "classify_party_kind",
+                "test_classify_party_kind",
                 null,
                 null),
             new TransformSpec.FieldRule(

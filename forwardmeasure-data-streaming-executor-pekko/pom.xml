@@ -45,6 +45,7 @@
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-core</artifactId></dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-mappers</artifactId></dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-camel</artifactId></dependency>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-source-readers</artifactId></dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-jdbc</artifactId><optional>true</optional></dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-object-storage</artifactId></dependency>
     <dependency>
@@ -53,6 +54,14 @@
       <artifactId>forwardmeasure-data-streaming-executor-streaming-api</artifactId>
     </dependency>
     <dependency><groupId>org.apache.pekko</groupId><artifactId>pekko-stream_${scala.binary.version}</artifactId></dependency>
+    <!-- D6: continuous-run state (graph and correlation) on the installation's journal. -->
+    <dependency><groupId>org.apache.pekko</groupId><artifactId>pekko-persistence-typed_${scala.binary.version}</artifactId></dependency>
+    <dependency><groupId>org.apache.pekko</groupId><artifactId>pekko-serialization-jackson_${scala.binary.version}</artifactId></dependency>
+    <dependency><groupId>org.apache.pekko</groupId><artifactId>pekko-persistence-jdbc_${scala.binary.version}</artifactId></dependency>
+    <dependency><groupId>org.apache.pekko</groupId><artifactId>pekko-persistence-cassandra_${scala.binary.version}</artifactId></dependency>
+    <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId></dependency>
+    <!-- The tenant registry the journal's tenant database is resolved through. -->
+    <dependency><groupId>com.forwardmeasure.jpa</groupId><artifactId>forwardmeasure-jpa-liquibase</artifactId></dependency>
     <dependency>
       <!-- Continuous-mode Kafka source/sink - merged in 2026-09-21 from the now-retired
            forwardmeasure-data-streaming-executor-pekko-streaming module. -->
@@ -107,7 +116,9 @@
          (forwardmeasure-data-streaming-connector-jdbc's own JpaPagingSourceTest does the same). -->
     <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-junit-jupiter</artifactId><scope>test</scope></dependency>
     <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-postgresql</artifactId><scope>test</scope></dependency>
-    <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-cassandra</artifactId><scope>test</scope></dependency>
+    <!-- The journal tests provision the real data_streaming schema, role and keyspaces. -->
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-migrations</artifactId><scope>test</scope></dependency>
     <!-- Test-only: proves the kafka sink/source against a real broker, not mocked, via the real
          @WithKafkaContainer extension (forwardmeasure-testcontainers-kafka module). -->
     <dependency><groupId>com.forwardmeasure.testcontainers</groupId><artifactId>forwardmeasure-testcontainers-kafka</artifactId><scope>test</scope></dependency>
@@ -147,6 +158,29 @@
          maven-jar-plugin points the jar's own manifest Class-Path at them, so `java -jar` alone
          resolves the full classpath - no hand-written -cp flag in the Dockerfile. -->
     <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <!-- the Pekko image carries no Kafka Streams. -->
+            <id>enforce-engine-independence</id>
+            <goals><goal>enforce</goal></goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <message>The delivery engines are independent: the Pekko image carries no Kafka Streams.</message>
+                  <searchTransitive>true</searchTransitive>
+                  <excludes>
+                    <exclude>org.apache.kafka:kafka-streams:*:*:compile</exclude>
+                    <exclude>org.apache.kafka:kafka-streams:*:*:runtime</exclude>
+                  </excludes>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
       <plugin>
         <!-- Test-scope only (test-compile/test-compile-custom, not compile/compile-custom) -
              PekkoGrpcRowSourceIntegrationTest's own toy .proto (src/test/proto) proving the gRPC source
@@ -201,6 +235,9 @@
               <addClasspath>true</addClasspath>
               <classpathPrefix>dependency/</classpathPrefix>
             </manifest>
+            <!-- extensions/ lets a product (or a test image) add classes such as its own
+                 NamedTransformProvider without rebuilding this image. -->
+            <manifestEntries><Class-Path>extensions/</Class-Path></manifestEntries>
           </archive>
         </configuration>
       </plugin>

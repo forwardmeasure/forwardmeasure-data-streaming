@@ -20,9 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.forwardmeasure.datastreaming.api.ExecutionMode;
-import com.forwardmeasure.datastreaming.api.ExecutionPlan;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
-import com.forwardmeasure.datastreaming.core.ExecutionPlanCompiler;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
@@ -75,7 +73,7 @@ class TestCustomerMasterFixturesTest {
   void sampleCsvHasTheRealFiveRowShape() {
     String[] lines = TestCustomerMasterFixtures.SAMPLE_CSV.split("\n");
     assertEquals(5, lines.length, "header + 4 real rows");
-    assertTrue(lines[0].startsWith("ENTITYS_UNIQUE_ID|BUSINESS_ENTITY_RECORD_ID|GEMS_ID"));
+    assertTrue(lines[0].startsWith("ENTITYS_UNIQUE_ID|BUSINESS_ENTITY_RECORD_ID|KYC_ID"));
   }
 
   @Test
@@ -85,48 +83,12 @@ class TestCustomerMasterFixturesTest {
   }
 
   @Test
-  void boundedFileSpecWithScreeningCompilesToAPlanWithARealSparkStage() {
-    IngestionSpec spec =
-        TestCustomerMasterFixtures.boundedFileSpecWithScreening(
-            "file:/tmp/test-customer-master.csv",
-            "http://opensearch:9200",
-            Path.of("/tmp/index.json"));
-    assertTrue(
-        spec.sources().get(0).mapper().fields().stream()
-            .anyMatch(f -> "screening_hits".equals(f.target())),
-        "expected the real screening_hits field rule to survive parsing");
-
-    ExecutionPlan plan = ExecutionPlanCompiler.compile(spec);
-
-    assertTrue(
-        plan.sparkStage().isPresent(),
-        "screen_against_worldcheck_reference is HEAVY - the compiler must insert a real"
-            + " SparkStagePlan, not silently ignore it");
-  }
-
-  @Test
   void sampleCsvWithScreeningMatchAddsOneRowWithTheKnownMatchingShape() {
     String[] baseLines = TestCustomerMasterFixtures.SAMPLE_CSV.split("\n");
     String[] extendedLines = TestCustomerMasterFixtures.sampleCsvWithScreeningMatch().split("\n");
     assertEquals(baseLines.length + 1, extendedLines.length, "base rows plus one matching row");
     assertTrue(extendedLines[extendedLines.length - 1].startsWith("KYC-SCREEN-1|"));
     assertTrue(extendedLines[extendedLines.length - 1].contains("Jose Smith"));
-  }
-
-  @Test
-  void boundedKafkaSpecWithScreeningCompilesToAPlanWithARealSparkStage() {
-    IngestionSpec spec =
-        TestCustomerMasterFixtures.boundedKafkaSpecWithScreening(
-            "kafka:9092",
-            "test-customer-master-rows",
-            "http://opensearch:9200",
-            Path.of("/tmp/index.json"));
-    assertEquals("kafka", spec.sources().get(0).source().connector());
-    assertEquals(
-        "kafka:9092", spec.sources().get(0).source().options().get("kafka.bootstrap.servers"));
-    assertEquals(
-        "test-customer-master-rows", spec.sources().get(0).source().options().get("subscribe"));
-    assertTrue(ExecutionPlanCompiler.compile(spec).sparkStage().isPresent());
   }
 
   @Test

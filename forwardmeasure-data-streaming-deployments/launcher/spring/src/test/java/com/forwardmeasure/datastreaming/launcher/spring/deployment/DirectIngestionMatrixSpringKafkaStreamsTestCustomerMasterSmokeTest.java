@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture;
 import com.forwardmeasure.datastreaming.launcher.application.AuthorizationAction;
 import com.forwardmeasure.datastreaming.testfixtures.TestCustomerMasterFixtures;
+import com.forwardmeasure.datastreaming.testfixtures.TestTransformImages;
 import com.forwardmeasure.testcontainers.kafka.KafkaContainerConfiguration;
 import com.forwardmeasure.testcontainers.kafka.KafkaTestContainer;
 import com.forwardmeasure.testcontainers.kubernetes.KubernetesTestContainer;
@@ -109,7 +110,8 @@ class DirectIngestionMatrixSpringKafkaStreamsTestCustomerMasterSmokeTest {
             AuthorizationAction.INGESTION_RUN_READ.scope()));
 
     kubernetes = new KubernetesTestContainer().start();
-    KAFKA_STREAMS_IMAGE = kubernetes.loadImageAndPinDigest(executorImage);
+    KAFKA_STREAMS_IMAGE =
+        kubernetes.loadImageAndPinDigest(TestTransformImages.withTestTransforms(executorImage));
     try (KubernetesClient client = kubernetes.createClient()) {
       client
           .namespaces()
@@ -169,6 +171,12 @@ class DirectIngestionMatrixSpringKafkaStreamsTestCustomerMasterSmokeTest {
     String kafkaStreamsImage = KAFKA_STREAMS_IMAGE;
     registry.add("datastreaming.launcher.k8s.images", () -> kafkaStreamsImage);
     registry.add("datastreaming.launcher.k8s.image-pull-secrets", () -> "unused");
+    registry.add("datastreaming.launcher.engine", () -> "kafka-streams");
+    registry.add("datastreaming.launcher.loader.image", () -> "unused-loader");
+    registry.add("datastreaming.launcher.loader.command", () -> "false");
+    registry.add("datastreaming.launcher.spark.image", () -> "unused-spark");
+    registry.add("datastreaming.launcher.spark.command", () -> "false");
+    registry.add("datastreaming.launcher.kafka.bootstrap-servers", () -> "unused:9092");
     registry.add("datastreaming.launcher.pekko.image", () -> "unused");
     registry.add("datastreaming.launcher.pekko.command", () -> "false");
     registry.add("datastreaming.launcher.kafka-streams.image", () -> kafkaStreamsImage);

@@ -150,6 +150,35 @@ final class ContinuousKafkaStreamsCorrelationRunner {
                     .thenComparing(SourcePlan::sourceKey))
             .toList();
 
+    IngestionPipeline.MalformedRecordPolicy policy =
+        IngestionPipeline.MalformedRecordPolicy.from(plan.errors());
+    if (plan.transforms() != null && plan.transforms().joins()) {
+      // The join replaces correlation: each source's mapped records, tagged with their source,
+      // into the graph's join node.
+      KStream<String, Map<String, Object>> all = null;
+      for (SourcePlan source : sources) {
+        KafkaConnectorUri sourceUri = KafkaConnectorUri.parse(source.source().uri());
+        KStream<String, Map<String, Object>> mapped =
+            KafkaStreamsGraph.tagged(
+                builder.stream(sourceUri.topic(), Consumed.with(Serdes.String(), Serdes.String()))
+                    .mapValues(
+                        record ->
+                            KafkaRecordMapping.map(
+                                record, source.mapper(), mapper, policy, blockingField))
+                    .filter((key, value) -> value != null),
+                source.sourceKey());
+        all = all == null ? mapped : all.merge(mapped);
+      }
+      KafkaStreamsGraph.attach(
+              builder, all, plan.transforms(), blockingField, null, policy, "fds-graph")
+          .foreach(
+              (key, output) ->
+                  IngestionPipeline.withSinkFailureHandlingBlocking(
+                      IngestionPipeline.SinkFailurePolicy.from(plan.errors()),
+                      () -> sinkRowWriter.write(output)));
+      return builder.build();
+    }
+
     KTable<String, Map<String, Object>> merged = null;
     for (SourcePlan source : byTrustDescending) {
       KTable<String, Map<String, Object>> table =
@@ -171,13 +200,17 @@ final class ContinuousKafkaStreamsCorrelationRunner {
 
     // One SinkRowWriter for the whole topology, not per record - same real, already-established
     // reasoning as ContinuousKafkaStreamsConsumerRunner's own identical choice.
-    merged
-        .toStream()
-        .foreach(
-            (key, mergedRow) ->
-                IngestionPipeline.withSinkFailureHandlingBlocking(
-                    IngestionPipeline.SinkFailurePolicy.from(plan.errors()),
-                    () -> sinkRowWriter.write(mergedRow)));
+    KStream<String, Map<String, Object>> correlated = merged.toStream();
+    if (plan.transforms() != null) {
+      correlated =
+          KafkaStreamsGraph.attach(
+              builder, correlated, plan.transforms(), blockingField, null, policy, "fds-graph");
+    }
+    correlated.foreach(
+        (key, mergedRow) ->
+            IngestionPipeline.withSinkFailureHandlingBlocking(
+                IngestionPipeline.SinkFailurePolicy.from(plan.errors()),
+                () -> sinkRowWriter.write(mergedRow)));
     return builder.build();
   }
 

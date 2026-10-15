@@ -23,6 +23,6 @@
  * <p>This is the one module in this library where MapStruct belongs (D3, corrected): converting a
  * JPA {@code @Entity} to/from a generated OpenAPI model class is a fixed-type, compile-time
  * boundary, unlike the runtime-interpreted source/target payload mapping the rest of this library
- * builds on {@code NamedTransformRegistry} for instead.
+ * builds on {@code NamedTransformCatalog} for instead.
  */
 package com.forwardmeasure.datastreaming.connector.jdbc;

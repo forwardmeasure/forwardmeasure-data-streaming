@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Licensed to the Apache Software Foundation (ASF) under one or more
+    contributor license agreements. See the NOTICE file distributed with
+    this work for additional information regarding copyright ownership.
+    The ASF licenses this file to You under the Apache License, Version 2.0
+    (the "License"); you may not use this file except in compliance with
+    the License. You may obtain a copy of the License at
+
+        https://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+-->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+    <!-- Applied into each tenant database's data_streaming schema: the Pekko journal and snapshots
+         FDS keeps continuous-run state on (correlation, deduplicate, window_aggregate,
+         window_join). Same table shapes as pekko-persistence-jdbc's own PostgreSQL schema. -->
+    <changeSet id="data-streaming-010-pekko-postgresql-persistence" author="forwardmeasure" dbms="postgresql">
+        <comment>Pekko journal and snapshots for FDS continuous-run state.</comment>
+        <sql splitStatements="true"><![CDATA[
+            CREATE TABLE event_journal (
+              ordering BIGSERIAL,
+              persistence_id VARCHAR(255) NOT NULL,
+              sequence_number BIGINT NOT NULL,
+              deleted BOOLEAN DEFAULT FALSE NOT NULL,
+              writer VARCHAR(255) NOT NULL,
+              write_timestamp BIGINT,
+              adapter_manifest VARCHAR(255),
+              event_ser_id INTEGER NOT NULL,
+              event_ser_manifest VARCHAR(255) NOT NULL,
+              event_payload BYTEA NOT NULL,
+              meta_ser_id INTEGER,
+              meta_ser_manifest VARCHAR(255),
+              meta_payload BYTEA,
+              PRIMARY KEY (persistence_id, sequence_number)
+            );
+            CREATE UNIQUE INDEX event_journal_ordering_idx ON event_journal(ordering);
+            CREATE TABLE event_tag (
+              event_id BIGINT NOT NULL,
+              tag VARCHAR(256) NOT NULL,
+              PRIMARY KEY (event_id, tag),
+              CONSTRAINT fk_pekko_event_journal FOREIGN KEY (event_id)
+                REFERENCES event_journal(ordering) ON DELETE CASCADE
+            );
+            CREATE TABLE snapshot (
+              persistence_id VARCHAR(255) NOT NULL,
+              sequence_number BIGINT NOT NULL,
+              created BIGINT NOT NULL,
+              snapshot_ser_id INTEGER NOT NULL,
+              snapshot_ser_manifest VARCHAR(255) NOT NULL,
+              snapshot_payload BYTEA NOT NULL,
+              meta_ser_id INTEGER,
+              meta_ser_manifest VARCHAR(255),
+              meta_payload BYTEA,
+              PRIMARY KEY (persistence_id, sequence_number)
+            );
+        ]]></sql>
+    </changeSet>
+</databaseChangeLog>

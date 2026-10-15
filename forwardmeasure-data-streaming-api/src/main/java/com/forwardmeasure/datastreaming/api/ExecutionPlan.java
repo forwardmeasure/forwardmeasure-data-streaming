@@ -74,11 +74,6 @@ public record ExecutionPlan(
   }
 
   public ExecutionPlan {
-    if (transforms != null) {
-      throw new IllegalArgumentException(
-          "TransformGraph execution is not supported: declare executable field transforms in each"
-              + " source mapper");
-    }
     mergePolicy = mergePolicy == null ? MergePolicy.defaults() : mergePolicy;
     Objects.requireNonNull(profile, "profile");
     sources = sources == null ? List.of() : List.copyOf(sources);
@@ -89,6 +84,15 @@ public record ExecutionPlan(
     if (correlated != (profile.sourceCardinality() == SourceCardinality.CORRELATED)) {
       throw new IllegalArgumentException(
           "sources.size() must agree with profile.sourceCardinality()");
+    }
+    if (transforms != null && transforms.joins()) {
+      TransformGraph.TransformNode join = transforms.chain().getFirst();
+      java.util.Set<String> keys =
+          sources.stream().map(SourcePlan::sourceKey).collect(java.util.stream.Collectors.toSet());
+      if (sources.size() != 2 || !keys.contains(join.left()) || !keys.contains(join.right())) {
+        throw new IllegalArgumentException(
+            "A window_join joins exactly the spec's two sources, named by left and right");
+      }
     }
     sparkStage = sparkStage == null ? Optional.empty() : sparkStage;
     Objects.requireNonNull(destination, "destination");

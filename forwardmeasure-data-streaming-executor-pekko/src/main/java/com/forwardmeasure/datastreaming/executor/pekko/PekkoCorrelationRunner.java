@@ -21,6 +21,7 @@ import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.MergePolicy;
 import com.forwardmeasure.datastreaming.connector.camel.CamelBridge;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline;
+import com.forwardmeasure.datastreaming.transforms.NamedTransformCatalog;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
@@ -95,7 +96,7 @@ public final class PekkoCorrelationRunner {
                               spec.blockingField(),
                               entry.sourceKey(),
                               entry.trustWeight(),
-                              Map.of(),
+                              NamedTransformCatalog.installed(),
                               malformedRecordPolicy)
                           .toCompletableFuture())
               .toList();
@@ -103,7 +104,26 @@ public final class PekkoCorrelationRunner {
       List<List<PekkoCorrelationEngine.PekkoCorrelationRecord>> mappedSources =
           reads.stream().map(CompletableFuture::join).toList();
 
-      List<Map<String, Object>> merged = PekkoCorrelationEngine.correlate(mappedSources, policy);
+      var graph = spec.transforms();
+      List<Map<String, Object>> merged =
+          graph != null && graph.joins()
+              ? List.of()
+              : PekkoCorrelationEngine.correlate(mappedSources, policy);
+      if (graph != null) {
+        merged =
+            com.forwardmeasure.datastreaming.core.stateful.GraphRecords.boundedCorrelated(
+                graph,
+                spec.blockingField(),
+                mappedSources.stream()
+                    .flatMap(List::stream)
+                    .map(
+                        record ->
+                            new com.forwardmeasure.datastreaming.core.stateful.GraphRecords.Sourced(
+                                record.sourceKey(), record.mappedFields()))
+                    .toList(),
+                merged,
+                malformedRecordPolicy);
+      }
 
       ObjectMapper objectMapper = new ObjectMapper();
       Sink<Map<String, Object>, CompletionStage<Done>> sink =

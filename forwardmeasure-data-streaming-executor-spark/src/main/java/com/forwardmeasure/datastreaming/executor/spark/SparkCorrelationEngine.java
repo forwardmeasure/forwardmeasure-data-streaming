@@ -26,7 +26,7 @@ import com.forwardmeasure.datastreaming.core.IngestionPipeline.MalformedRecordPo
 import com.forwardmeasure.datastreaming.mappers.FieldMappingEngine;
 import com.forwardmeasure.datastreaming.mappers.MapSourceRow;
 import com.forwardmeasure.datastreaming.mappers.SourceRow;
-import com.forwardmeasure.datastreaming.transforms.NamedTransform;
+import com.forwardmeasure.datastreaming.transforms.NamedTransformCatalog;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
@@ -79,15 +79,10 @@ public final class SparkCorrelationEngine {
       SparkSession spark,
       SparkSourceConfig sourceConfig,
       String blockingField,
-      Map<String, NamedTransform> supplementalTransforms,
+      NamedTransformCatalog transforms,
       MalformedRecordPolicy malformedRecordPolicy) {
     return readAndMap(
-        spark,
-        sourceConfig,
-        blockingField,
-        supplementalTransforms,
-        malformedRecordPolicy,
-        row -> {});
+        spark, sourceConfig, blockingField, transforms, malformedRecordPolicy, row -> {});
   }
 
   @FunctionalInterface
@@ -102,7 +97,7 @@ public final class SparkCorrelationEngine {
       SparkSession spark,
       SparkSourceConfig sourceConfig,
       String blockingField,
-      Map<String, NamedTransform> supplementalTransforms,
+      NamedTransformCatalog transforms,
       MalformedRecordPolicy malformedRecordPolicy,
       SourceValidator validator) {
     Dataset<Row> rawRows = readSource(spark, sourceConfig.source());
@@ -116,7 +111,7 @@ public final class SparkCorrelationEngine {
         .mapPartitions(
             (FlatMapFunction<Iterator<Row>, SparkCorrelationRecord>)
                 rowIterator -> {
-                  FieldMappingEngine engine = new FieldMappingEngine();
+                  FieldMappingEngine engine = new FieldMappingEngine(transforms);
                   ObjectMapper objectMapper = new ObjectMapper();
                   List<SparkCorrelationRecord> mappedRecords = new ArrayList<>();
                   while (rowIterator.hasNext()) {
@@ -125,7 +120,7 @@ public final class SparkCorrelationEngine {
                     try {
                       var sourceRow = sourceRowFor(connector, row, objectMapper);
                       validator.validate(sourceRow);
-                      mapped = engine.map(sourceRow, mapper, supplementalTransforms);
+                      mapped = engine.map(sourceRow, mapper);
                     } catch (RuntimeException mappingFailure) {
                       handleMalformedRow(sourceKey, mappingFailure, malformedRecordPolicy);
                       continue;
@@ -186,7 +181,7 @@ public final class SparkCorrelationEngine {
       SparkSession spark,
       SourceSpec source,
       TransformSpec mapper,
-      Map<String, NamedTransform> supplementalTransforms,
+      NamedTransformCatalog transforms,
       MalformedRecordPolicy malformedRecordPolicy) {
     Dataset<Row> rawRows = readSource(spark, source);
     String connector = source.connector();
@@ -195,17 +190,14 @@ public final class SparkCorrelationEngine {
         .mapPartitions(
             (FlatMapFunction<Iterator<Row>, Map<String, Object>>)
                 rowIterator -> {
-                  FieldMappingEngine engine = new FieldMappingEngine();
+                  FieldMappingEngine engine = new FieldMappingEngine(transforms);
                   ObjectMapper objectMapper = new ObjectMapper();
                   List<Map<String, Object>> mappedRows = new ArrayList<>();
                   while (rowIterator.hasNext()) {
                     Row row = rowIterator.next();
                     try {
                       mappedRows.add(
-                          engine.map(
-                              sourceRowFor(connector, row, objectMapper),
-                              mapper,
-                              supplementalTransforms));
+                          engine.map(sourceRowFor(connector, row, objectMapper), mapper));
                     } catch (RuntimeException mappingFailure) {
                       handleMalformedRow("(single source)", mappingFailure, malformedRecordPolicy);
                     }
@@ -286,7 +278,10 @@ public final class SparkCorrelationEngine {
       if ("csv".equals(format)) {
         options.putIfAbsent("header", "true");
       }
-      return spark.read().format(format).options(options).load(source.uri());
+      Dataset<Row> rows = spark.read().format(format).options(options).load(source.uri());
+      return "csv".equals(format) && "true".equalsIgnoreCase(options.get("header"))
+          ? CsvHeaderColumns.firstOccurrence(spark, rows, options, source.uri())
+          : rows;
     }
     if ("jdbc".equals(connector)) {
       options.putIfAbsent("url", source.uri());

@@ -74,19 +74,32 @@ final class ContinuousPekkoStreamsCorrelationRunner {
             "Continuous correlation sources must use the same Kafka cluster");
       }
     }
-    String identity = KafkaCorrelationState.identity(plan);
-    KafkaCorrelationState state = new KafkaCorrelationState(plan, brokers, identity);
+    String identity = JournalCorrelationState.identity(plan);
+    JournalGraph graph =
+        plan.transforms() == null
+            ? null
+            : new JournalGraph(
+                system,
+                identity,
+                plan.transforms(),
+                plan.blockingField(),
+                IngestionPipeline.MalformedRecordPolicy.from(plan.errors()));
+    JournalCorrelationState state =
+        plan.transforms() != null && plan.transforms().joins()
+            ? null
+            : new JournalCorrelationState(system, plan, identity);
     CamelBridge bridge;
     try {
       bridge = new CamelBridge();
     } catch (RuntimeException failure) {
-      state.close();
+      if (state != null) state.close();
+      if (graph != null) graph.close();
       throw failure;
     }
     ExecutorService writes = Executors.newSingleThreadExecutor();
     List<Consumer.DrainingControl<Done>> controls = new ArrayList<>();
     CompositeExecutionHandle handle =
-        new CompositeExecutionHandle(identity, controls, bridge, state, writes);
+        new CompositeExecutionHandle(identity, controls, bridge, state, graph, writes);
     try {
       ProducerTemplate producer = bridge.camelContext().createProducerTemplate();
       for (SourcePlan source : plan.sources()) {
@@ -116,6 +129,7 @@ final class ContinuousPekkoStreamsCorrelationRunner {
                                                 plan,
                                                 mapper,
                                                 state,
+                                                graph,
                                                 producer),
                                         writes))
                             .thenApply(ignored -> (Committable) message.committableOffset()))
@@ -143,7 +157,8 @@ final class ContinuousPekkoStreamsCorrelationRunner {
       SourcePlan source,
       ExecutionPlan plan,
       FieldMappingEngine mapper,
-      KafkaCorrelationState state,
+      JournalCorrelationState state,
+      JournalGraph graph,
       ProducerTemplate producer) {
     Map<String, Object> mapped;
     String key;
@@ -168,17 +183,53 @@ final class ContinuousPekkoStreamsCorrelationRunner {
           failure);
       return;
     }
+    JournalGraph.InputPosition position =
+        new JournalGraph.InputPosition(record.topic(), record.partition(), record.offset());
+    if (graph != null && plan.transforms().joins()) {
+      // The join replaces correlation: its state is the graph's, on the journal.
+      writeThroughGraph(graph, source.sourceKey(), mapped, position, plan, producer);
+      return;
+    }
     state.updateAndWrite(
-        new KafkaCorrelationState.Contribution(
+        new JournalCorrelationState.Contribution(
             key, source.sourceKey(), record.topic(), record.partition(), record.offset(), mapped),
-        merged -> PekkoIngestionRunner.sendOneRow(plan.destination(), producer, JSON, merged));
+        merged ->
+            graph == null
+                ? PekkoIngestionRunner.sendOneRow(plan.destination(), producer, JSON, merged)
+                : java.util.concurrent.CompletableFuture.runAsync(
+                    () -> writeThroughGraph(graph, null, merged, position, plan, producer)));
+  }
+
+  /**
+   * Writes a record's graph outputs, then commits its graph state; a failed write drops the state
+   * changes so the redelivered record recomputes them.
+   */
+  private static void writeThroughGraph(
+      JournalGraph graph,
+      String sourceKey,
+      Map<String, Object> record,
+      JournalGraph.InputPosition position,
+      ExecutionPlan plan,
+      ProducerTemplate producer) {
+    try {
+      for (Map<String, Object> output : graph.process(sourceKey, record, position)) {
+        PekkoIngestionRunner.sendOneRow(plan.destination(), producer, JSON, output)
+            .toCompletableFuture()
+            .join();
+      }
+      graph.commit().toCompletableFuture().join();
+    } catch (RuntimeException failure) {
+      graph.discard();
+      throw failure;
+    }
   }
 
   private static final class CompositeExecutionHandle implements ExecutionHandle {
     private final String id;
     private final List<Consumer.DrainingControl<Done>> controls;
     private final CamelBridge bridge;
-    private final KafkaCorrelationState state;
+    private final JournalCorrelationState state;
+    private final JournalGraph graph;
     private final ExecutorService writes;
     private final AtomicBoolean stopped = new AtomicBoolean();
     private final AtomicReference<Throwable> failure = new AtomicReference<>();
@@ -187,12 +238,14 @@ final class ContinuousPekkoStreamsCorrelationRunner {
         String id,
         List<Consumer.DrainingControl<Done>> controls,
         CamelBridge bridge,
-        KafkaCorrelationState state,
+        JournalCorrelationState state,
+        JournalGraph graph,
         ExecutorService writes) {
       this.id = id;
       this.controls = controls;
       this.bridge = bridge;
       this.state = state;
+      this.graph = graph;
       this.writes = writes;
     }
 
@@ -233,7 +286,8 @@ final class ContinuousPekkoStreamsCorrelationRunner {
         }
       } finally {
         writes.shutdownNow();
-        state.close();
+        if (state != null) state.close();
+        if (graph != null) graph.close();
         try {
           bridge.close();
         } catch (Exception problem) {

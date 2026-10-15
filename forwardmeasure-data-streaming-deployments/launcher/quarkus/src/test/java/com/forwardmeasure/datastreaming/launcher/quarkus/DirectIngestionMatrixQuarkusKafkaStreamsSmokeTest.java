@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture;
 import com.forwardmeasure.datastreaming.launcher.application.AuthorizationAction;
+import com.forwardmeasure.datastreaming.testfixtures.TestTransformImages;
 import com.forwardmeasure.datastreaming.testfixtures.WorldCheckFixtures;
 import com.forwardmeasure.testcontainers.kafka.KafkaTestContainer;
 import com.forwardmeasure.testcontainers.kubernetes.KubernetesTestContainer;
@@ -279,7 +280,8 @@ class DirectIngestionMatrixQuarkusKafkaStreamsSmokeTest {
 
       kubernetes = new KubernetesTestContainer().start();
       CurrentKubernetesTestContainer.set(kubernetes);
-      KAFKA_STREAMS_IMAGE = kubernetes.loadImageAndPinDigest(executorImage);
+      KAFKA_STREAMS_IMAGE =
+          kubernetes.loadImageAndPinDigest(TestTransformImages.withTestTransforms(executorImage));
       try (var client = kubernetes.createClient()) {
         client
             .namespaces()
@@ -321,6 +323,9 @@ class DirectIngestionMatrixQuarkusKafkaStreamsSmokeTest {
           Map.entry("datastreaming.launcher.k8s.host-aliases", "host.docker.internal=" + gatewayIp),
           Map.entry("datastreaming.launcher.fowf.keycloak.client-id", "unused"),
           Map.entry("datastreaming.launcher.fowf.keycloak.client-secret", "unused"),
+          Map.entry("datastreaming.launcher.engine", "kafka-streams"),
+          Map.entry("datastreaming.launcher.loader.image", "unused-loader"),
+          Map.entry("datastreaming.launcher.loader.command", "false"),
           Map.entry("datastreaming.launcher.pekko.image", "unused"),
           Map.entry("datastreaming.launcher.pekko.command", "false"),
           Map.entry("datastreaming.launcher.kafka-streams.image", kafkaStreamsImage),

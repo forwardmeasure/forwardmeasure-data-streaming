@@ -17,7 +17,7 @@ document:
   dsl: '1.0.3'
   namespace: data-streaming
   name: ingestion
-  version: '1.1.0'
+  version: '1.2.0'
   title: Planned data ingestion
 input:
   schema:
@@ -94,6 +94,8 @@ do:
             replicas: '${ $workflow.input.primary.replicas }'
             resources: '${ $workflow.input.primary.resources }'
             imagePullSecretNames: '${ $workflow.input.primary.imagePullSecretNames }'
+            databaseProxy: '${ $workflow.input.primary.databaseProxy }'
+            serviceAccountName: '${ $workflow.input.primary.serviceAccountName }'
   - awaitContinuousReadiness:
       if: '${ $workflow.input.continuous }'
       call: asyncapi
@@ -123,6 +125,8 @@ do:
             replicas: '${ $workflow.input.delivery.replicas }'
             resources: '${ $workflow.input.delivery.resources }'
             imagePullSecretNames: '${ $workflow.input.delivery.imagePullSecretNames }'
+            databaseProxy: '${ $workflow.input.delivery.databaseProxy }'
+            serviceAccountName: '${ $workflow.input.delivery.serviceAccountName }'
   - awaitContinuousDeliveryReadiness:
       if: '${ $workflow.input.continuous and $workflow.input.hasDelivery }'
       call: asyncapi

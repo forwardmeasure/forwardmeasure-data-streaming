@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec.FieldRule;
 import com.forwardmeasure.datastreaming.transforms.NamedTransform;
+import com.forwardmeasure.datastreaming.transforms.NamedTransformCatalog;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -191,7 +192,7 @@ class FieldMappingEngineTest {
   }
 
   @Test
-  void supplementalTransformIsCheckedBeforeTheSharedRegistry() {
+  void aCallersCatalogSuppliesItsProductsTransforms() {
     TransformSpec spec =
         new TransformSpec(
             "schema://party/2.0",
@@ -200,13 +201,17 @@ class FieldMappingEngineTest {
                     "entityKind", "category", null, null, "domain_specific", null, null)));
     NamedTransform domainSpecific = inputs -> "person";
 
-    Map<String, Object> mapped =
-        engine.map(
-            rowOf(Map.of("category", "INDIVIDUAL")),
-            spec,
-            Map.of("domain_specific", domainSpecific));
+    FieldMappingEngine productEngine =
+        new FieldMappingEngine(
+            NamedTransformCatalog.builtIns().with(Map.of("domain_specific", domainSpecific)));
+
+    Map<String, Object> mapped = productEngine.map(rowOf(Map.of("category", "INDIVIDUAL")), spec);
 
     assertEquals("person", mapped.get("entityKind"));
+    org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () -> engine.map(rowOf(Map.of("category", "INDIVIDUAL")), spec),
+        "an engine without the product's catalog must not know its transform");
   }
 
   @Test

@@ -24,8 +24,10 @@ import com.forwardmeasure.authzen.ActiveOrganization;
 import com.forwardmeasure.authzen.AuthorizationDecision;
 import com.forwardmeasure.authzen.AuthorizationRequest;
 import com.forwardmeasure.authzen.AuthorizationService;
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.testfixtures.TestCustomerMasterFixtures;
+import com.forwardmeasure.datastreaming.testfixtures.TestTransformImages;
 import com.forwardmeasure.jpa.tenancy.TenantId;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
 import com.forwardmeasure.testcontainers.junit.kafka.WithKafkaContainer;
@@ -65,11 +67,11 @@ import org.junit.jupiter.api.Timeout;
  * KubernetesTestContainer#loadImageAndPinDigest} loads straight from the host's local image cache,
  * same mechanism {@code RealFowfWorkflowBoundedIngestionTest} already proved live), dispatches
  * {@link TestCustomerMasterFixtures#boundedKafkaSpecWithScreening} (whose one {@code
- * screening_hits} field rule is the real {@code HEAVY screen_against_worldcheck_reference}
- * transform), and verifies the real, end-to-end result: a real Spark Job reads real seeded rows off
- * a real Kafka topic, screens each one against the transform's own bundled reference population,
- * writes every mapped row (including a genuine, non-empty {@code screening_hits} list for the one
- * row engineered to match) to a real handoff topic; {@link DirectIngestionLauncher#observe} then
+ * screening_hits} field rule is the real {@code HEAVY test_screen_against_reference} transform),
+ * and verifies the real, end-to-end result: a real Spark Job reads real seeded rows off a real
+ * Kafka topic, screens each one against the transform's own bundled reference population, writes
+ * every mapped row (including a genuine, non-empty {@code screening_hits} list for the one row
+ * engineered to match) to a real handoff topic; {@link DirectIngestionLauncher#observe} then
  * reconciles a second, real delivery Job (always {@code KafkaStreamsDeliveryEngine} for a
  * Spark-staged plan - {@link com.forwardmeasure.datastreaming.core.SparkHandoffSpecs}'s own derived
  * spec is always {@code kafka}-sourced, so {@code ExecutionPlanCompiler} always resolves {@code
@@ -92,7 +94,7 @@ final class DirectIngestionLauncherSparkTwoJobRealImageIntegrationTest {
    * This repo's own real, locally-built images ({@code ${project.version}}) - no Docker Hub
    * reference needed at all, same reasoning as {@code RealFowfWorkflowBoundedIngestionTest}'s own
    * {@code PEKKO_LOCAL_IMAGE}. The Spark image was rebuilt 2026-09-25 specifically to bake in the
-   * new {@code screen_against_worldcheck_reference} transform + its real {@code
+   * new {@code test_screen_against_reference} transform + its real {@code
    * forwardmeasure-entity-matching-core} dependency - the Kafka Streams image needed no rebuild
    * (the delivery stage's own field rules are always {@code raw: true} identity passthroughs, never
    * invoking any transform - see {@code SparkHandoffSpecs#identityFieldRules}).
@@ -140,23 +142,26 @@ final class DirectIngestionLauncherSparkTwoJobRealImageIntegrationTest {
       // host's local image cache, digest-pinned - AsyncApiKubernetesJobOperationExecutor's own
       // sibling KubernetesJobLifecycle enforces this org's standing digest-pinning policy on every
       // dispatched Job image.
-      String sparkImage = kubernetes.loadImageAndPinDigest(SPARK_LOCAL_IMAGE);
-      String kafkaStreamsImage = kubernetes.loadImageAndPinDigest(KAFKA_STREAMS_LOCAL_IMAGE);
+      String sparkImage =
+          kubernetes.loadImageAndPinDigest(
+              TestTransformImages.withTestTransforms(SPARK_LOCAL_IMAGE));
+      String kafkaStreamsImage =
+          kubernetes.loadImageAndPinDigest(
+              TestTransformImages.withTestTransforms(KAFKA_STREAMS_LOCAL_IMAGE));
 
       DirectIngestionLauncher launcher =
           new DirectIngestionLauncher(
               IngestionJobPolicy.configured(
                   Set.of(NAMESPACE), Set.of(sparkImage, kafkaStreamsImage)),
               new PermitAllAuthorizationService(),
-              "unused",
-              "true",
-              kafkaStreamsImage,
-              RUN_COMMAND,
+              new RunnerImages(
+                  DeliveryEngineKind.KAFKA_STREAMS,
+                  new RunnerImages.Runner(kafkaStreamsImage, RUN_COMMAND),
+                  new RunnerImages.Runner("unused-loader", "false"),
+                  new RunnerImages.Runner(sparkImage, RUN_COMMAND),
+                  kafka.hostDockerInternalBootstrapServers()),
               List.of(),
-              Map.of("host.docker.internal", gatewayIp),
-              sparkImage,
-              RUN_COMMAND,
-              kafka.hostDockerInternalBootstrapServers());
+              Map.of("host.docker.internal", gatewayIp));
       DirectLaunchRequest request =
           new DirectLaunchRequest(
               UUID.randomUUID().toString(), NAMESPACE, spec, Map.of(), Map.of(), null);

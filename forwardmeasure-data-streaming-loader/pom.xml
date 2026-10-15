@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements. See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with
+  the License. You may obtain a copy of the License at
+
+      https://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.forwardmeasure.datastreaming</groupId>
+    <artifactId>forwardmeasure-data-streaming-parent</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>forwardmeasure-data-streaming-loader</artifactId>
+  <name>ForwardMeasure Data Streaming Loader</name>
+  <description>The Kafka Streams installation's bounded-load first stage: reads a file, text or SQL
+    source with the engine-neutral source readers and writes each source row, unmapped, to a per-run
+    topic, which the Kafka Streams delivery Job then consumes. A plain Kafka producer - neither
+    delivery engine's runtime is on its classpath (enforced below). Also a library, so a product
+    can load content it opens itself.</description>
+
+  <properties>
+    <!-- Build runtime/frontend assemblies fresh; cache reuse is reserved for libraries. -->
+    <maven.build.cache.skipCache>true</maven.build.cache.skipCache>
+    <maven.build.cache.skipSave>true</maven.build.cache.skipSave>
+
+    <maven.javadoc.skip>false</maven.javadoc.skip>
+    <container-image.name>data-streaming-loader</container-image.name>
+  </properties>
+
+  <dependencies>
+    <!-- Test-only transforms registered through the provider SPI. -->
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-test-fixtures</artifactId><scope>test</scope></dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-source-readers</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-mappers</artifactId>
+    </dependency>
+    <dependency>
+      <!-- LoaderHandoffSpecs: the per-source topic names the delivery stage reads. -->
+      <groupId>${project.groupId}</groupId>
+      <artifactId>forwardmeasure-data-streaming-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.kafka</groupId>
+      <artifactId>kafka-clients</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <!-- Real (not test-scope): with no SLF4J provider on the runtime classpath, every LOGGER.*
+         call in this module's own code (and Kafka Streams' own internal logging) silently goes
+         nowhere in the real deployed image - the identical gap fei's own ingestion-worker pom
+         already documented and fixed for the same reason, and the same fix just applied to this
+         repo's own -executor-pekko sibling module. slf4j-simple is the minimal, zero-config
+         provider (stdout, no separate config file) appropriate for a plain worker jar. -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-simple</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Real Kafka broker for the end-to-end spike test, via the real @WithKafkaContainer
+         extension (forwardmeasure-testcontainers-kafka module). -->
+    <dependency>
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.forwardmeasure.testcontainers</groupId>
+      <artifactId>forwardmeasure-testcontainers-kafka</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <!-- A plain Java main() entrypoint (SourceLoader), packaged like the executors:
+         maven-dependency-plugin copies runtime deps to target/dependency/ and the jar's manifest
+         Class-Path points at them, so `java -jar` alone resolves the classpath. -->
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <!-- the loader runs before either engine and carries neither. -->
+            <id>enforce-engine-independence</id>
+            <goals><goal>enforce</goal></goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <message>The delivery engines are independent: the loader runs before either engine and carries neither.</message>
+                  <searchTransitive>true</searchTransitive>
+                  <excludes>
+                    <exclude>org.apache.pekko:*:*:*:compile</exclude>
+                    <exclude>org.apache.pekko:*:*:*:runtime</exclude>
+                    <exclude>org.apache.kafka:kafka-streams:*:*:compile</exclude>
+                    <exclude>org.apache.kafka:kafka-streams:*:*:runtime</exclude>
+                  </excludes>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>copy-dependencies</id>
+            <phase>prepare-package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/dependency</outputDirectory>
+              <includeScope>runtime</includeScope>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifest>
+              <mainClass>com.forwardmeasure.datastreaming.loader.SourceLoader</mainClass>
+              <addClasspath>true</addClasspath>
+              <classpathPrefix>dependency/</classpathPrefix>
+            </manifest>
+            <!-- extensions/ lets a product (or a test image) add classes such as its own
+                 NamedTransformProvider without rebuilding this image. -->
+            <manifestEntries><Class-Path>extensions/</Class-Path></manifestEntries>
+          </archive>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <id>container-image</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>io.fabric8</groupId>
+            <artifactId>docker-maven-plugin</artifactId>
+            <configuration>
+              <images>
+                <image>
+                  <name>${container-image.registry}/${container-image.group}/${container-image.name}:${container-image.tag}</name>
+                  <build>
+                    <contextDir>${project.basedir}</contextDir>
+                    <dockerFile>src/main/docker/Dockerfile.jvm</dockerFile>
+                    <args>
+                      <APPLICATION_JAR>target/${project.build.finalName}.jar</APPLICATION_JAR>
+                      <DEPENDENCY_DIR>target/dependency</DEPENDENCY_DIR>
+                      <BASE_IMAGE>${container-image.base-jre}</BASE_IMAGE>
+                    </args>
+                  </build>
+                </image>
+              </images>
+            </configuration>
+            <executions>
+              <execution>
+                <id>build-container-image</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>build</goal>
+                </goals>
+              </execution>
+              <execution>
+                <id>push-container-image</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>push</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

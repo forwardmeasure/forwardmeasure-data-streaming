@@ -23,6 +23,7 @@ import com.forwardmeasure.datastreaming.core.IngestionPipeline.MalformedRecordPo
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.function.Function;
 import org.apache.pekko.actor.ActorSystem;
 import org.apache.pekko.stream.OverflowStrategy;
@@ -49,6 +50,21 @@ public final class PekkoIngestionPipeline {
       Function<S, T> transform,
       Sink<T, Mat> sink,
       ActorSystem system) {
+    return run(source, delivery, errors, transform, sink, system, false);
+  }
+
+  /**
+   * As above; {@code ordered} keeps records in source order through the concurrent transform, which
+   * a stateful graph after it needs so every engine sees the same order.
+   */
+  public static <S, T, Mat> Mat run(
+      Source<S, ?> source,
+      DeliverySemantics delivery,
+      ErrorPolicy errors,
+      Function<S, T> transform,
+      Sink<T, Mat> sink,
+      ActorSystem system,
+      boolean ordered) {
     int parallelism = IngestionPipeline.effectiveParallelism(delivery.concurrency());
     Integer maxInFlight =
         delivery.flowControl() == null ? null : delivery.flowControl().maxInFlightRecords();
@@ -57,20 +73,22 @@ public final class PekkoIngestionPipeline {
     Source<S, ?> flowControlled =
         maxInFlight == null ? source : source.buffer(maxInFlight, OverflowStrategy.backpressure());
 
-    return flowControlled
-        .mapAsyncUnordered(
-            parallelism,
-            item ->
-                CompletableFuture.supplyAsync(
-                    () -> mapOrHandle(item, transform, malformedRecordPolicy)))
-        .mapConcat(mapped -> mapped.isPresent() ? List.of(mapped.get()) : List.of())
+    org.apache.pekko.japi.function.Function<S, CompletionStage<Optional<T>>> mapped =
+        item ->
+            CompletableFuture.supplyAsync(
+                () -> mapOrHandle(item, transform, malformedRecordPolicy));
+    return (ordered
+            ? flowControlled.mapAsync(parallelism, mapped)
+            : flowControlled.mapAsyncUnordered(parallelism, mapped))
+        .mapConcat(result -> result.isPresent() ? List.of(result.get()) : List.of())
         .runWith(sink, system);
   }
 
+  /** A {@code null} from {@code transform} means the caller skipped the row itself. */
   private static <S, T> Optional<T> mapOrHandle(
       S item, Function<S, T> transform, MalformedRecordPolicy policy) {
     try {
-      return Optional.of(transform.apply(item));
+      return Optional.ofNullable(transform.apply(item));
     } catch (RuntimeException failure) {
       switch (policy) {
         case FAIL -> throw failure;

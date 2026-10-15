@@ -28,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.forwardmeasure.openworkflow.definition.WorkflowErrorTypes;
 import com.forwardmeasure.testcontainers.gcs.GcsEmulatorTestContainer;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -164,8 +165,12 @@ class FowfStartInputRuntimeMatrixAcceptanceTest {
               202);
       var failed = awaitTerminal(api, token, rejected.path("id").asText());
       assertEquals("FAILED", failed.path("state").asText(), failed.toString());
+      failed = awaitFailureProjection(api, token, rejected.path("id").asText());
       assertFalse(
           failed.path("error").isNull() || failed.path("error").isMissingNode(), failed.toString());
+      assertEquals(WorkflowErrorTypes.VALIDATION, failed.path("error").path("code").asText());
+      assertEquals("/input/schema", failed.path("error").path("taskPath").asText());
+      assertFalse(failed.path("error").path("retryable").asBoolean());
 
       UUID recoveryRevision = publish(definition, token, workflow(true));
       ObjectNode recoveryInput = inputBytes(65536);
@@ -241,6 +246,31 @@ class FowfStartInputRuntimeMatrixAcceptanceTest {
       Thread.sleep(250);
     }
     throw new AssertionError("No terminal execution: " + last);
+  }
+
+  private static JsonNode awaitFailureProjection(String api, String token, String id)
+      throws Exception {
+    // A Pekko acknowledgement can mark the execution FAILED before its journal projection has
+    // delivered the error. Require convergence of both the result and the persisted failure fact.
+    long deadline = System.nanoTime() + Duration.ofMinutes(1).toNanos();
+    JsonNode last = null;
+    while (System.nanoTime() < deadline) {
+      last = request(api, "/v1/workflow-executions/" + id, token, "GET", null, null, 200);
+      assertEquals("FAILED", last.path("state").asText(), last.toString());
+      if (last.path("error").isObject()) {
+        var history =
+            request(
+                api, "/v1/workflow-executions/" + id + "/history", token, "GET", null, null, 200);
+        for (var event : history.path("items")) {
+          if (!"FAILED".equals(event.path("type").asText())) continue;
+          assertEquals(last.path("error").path("code"), event.path("data").path("code"));
+          assertEquals(last.path("error").path("message"), event.path("data").path("message"));
+          return last;
+        }
+      }
+      Thread.sleep(250);
+    }
+    throw new AssertionError("Failed execution did not project its error and history: " + last);
   }
 
   private static void awaitTimer(String api, String token, String id) throws Exception {

@@ -77,9 +77,11 @@ class ExecutionContractTest {
         () -> plan(List.of(source, source("b", Map.of())), SINGLE, SINK));
     var graph =
         new TransformGraph("map", Map.of("map", new TransformGraph.TransformNode(MAPPING)), null);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ExecutionPlan(SINGLE, List.of(source), null, null, graph, SINK, null, null));
+    // Both delivery engines and the Spark stage run transform graphs, so a plan carries one.
+    assertEquals(
+        graph,
+        new ExecutionPlan(SINGLE, List.of(source), null, null, graph, SINK, null, null)
+            .transforms());
     var sources = new ArrayList<>(List.of(source, source("b", Map.of())));
     var transforms = new ArrayList<>(List.of("correlate"));
     var stage = new SparkStagePlan(transforms, "handoff");
@@ -160,13 +162,23 @@ class ExecutionContractTest {
       assertThrows(
           IllegalArgumentException.class,
           () -> new TransformGraph("start", Map.of("start", node), List.of(edge)));
+    // No transform tags its output, so an edge cannot route on a condition.
+    var conditional =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new TransformGraph(
+                    "start",
+                    Map.of("start", node, "end", node),
+                    List.of(new TransformGraph.TransformEdge("start", "end", "valid"))));
+    assertTrue(conditional.getMessage().contains("Conditional edges"));
     var nodes = new LinkedHashMap<>(Map.of("start", node, "end", node));
-    var edges = new ArrayList<>(List.of(new TransformGraph.TransformEdge("start", "end", "valid")));
+    var edges = new ArrayList<>(List.of(new TransformGraph.TransformEdge("start", "end", null)));
     var graph = new TransformGraph("start", nodes, edges);
     nodes.clear();
     edges.clear();
     assertEquals(2, graph.nodes().size());
-    assertEquals("valid", graph.edges().getFirst().condition());
+    assertEquals("end", graph.edges().getFirst().to());
   }
 
   @Test

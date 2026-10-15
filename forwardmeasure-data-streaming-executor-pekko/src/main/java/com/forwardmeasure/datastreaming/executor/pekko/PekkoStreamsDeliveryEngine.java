@@ -16,6 +16,7 @@
  */
 package com.forwardmeasure.datastreaming.executor.pekko;
 
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
 import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.ExecutionPlan;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
@@ -82,7 +83,7 @@ public final class PekkoStreamsDeliveryEngine implements DeliveryEngine {
   public static void main(String[] args) throws Exception {
     String specPath = args.length > 0 ? args[0] : requiredEnv("INGESTION_SPEC_PATH");
     IngestionSpec spec = IngestionSpec.load(Path.of(specPath));
-    ExecutionPlan plan = ExecutionPlanCompiler.compile(spec);
+    ExecutionPlan plan = ExecutionPlanCompiler.compile(spec, DeliveryEngineKind.PEKKO_STREAMS);
 
     // This entrypoint owns draining. Pekko's parallel JVM hook would stop Kafka actors
     // before our stream has committed its acknowledged sink writes.
@@ -91,6 +92,7 @@ public final class PekkoStreamsDeliveryEngine implements DeliveryEngine {
             "fds-pekko-streams-delivery-engine",
             com.typesafe.config.ConfigFactory.parseString(
                     "pekko.coordinated-shutdown.run-by-jvm-shutdown-hook=off")
+                .withFallback(PekkoJournalProfiles.fromEnvironment())
                 .withFallback(com.typesafe.config.ConfigFactory.load()));
     int exitCode = 0;
     try {

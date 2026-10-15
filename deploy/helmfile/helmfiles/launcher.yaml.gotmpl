@@ -26,6 +26,15 @@ releases:
     chart: ../releases/data-streaming-credentials
     installed: false
     labels: {stage: launcher, component: retired-client-writer}
+  # The ServiceAccount continuous workers run as: on GCP it carries their Workload Identity, which
+  # authorizes the Cloud SQL Auth Proxy sidecar beside each journal-backed Pekko worker.
+  - name: data-streaming-worker-identity
+    namespace: {{ .Values.platform.namespaces.dataStreaming }}
+    chart: ../releases/data-streaming-worker-identity
+    labels: {stage: launcher, component: worker-identity}
+    values:
+      - name: {{ .Values.workerServiceAccountName | quote }}
+        gcpServiceAccount: {{ dig "platform" "cloud" "gcp" "dataStreaming" "serviceAccount" "" .Values | quote }}
   - name: data-streaming-launcher
     namespace: {{ .Values.platform.namespaces.dataStreaming }}
     # Same shared chart forwardmeasure-openworkflow's own execution-management/definition-management
@@ -92,13 +101,54 @@ releases:
             env:
               # Direct-mode (bypass-fowf) dispatch target - this release's own namespace only.
               DATASTREAMING_LAUNCHER_K8S_NAMESPACES: {{ .Values.platform.namespaces.dataStreaming | quote }}
-              DATASTREAMING_LAUNCHER_PEKKO_IMAGE: {{ printf "%s@%s" .Values.imageVersions.pekko.repository .Values.imageVersions.pekko.digest | quote }}
-              DATASTREAMING_LAUNCHER_PEKKO_COMMAND: "java -jar /deployments/application.jar"
-              DATASTREAMING_LAUNCHER_KAFKA_STREAMS_IMAGE: {{ printf "%s@%s" .Values.imageVersions.dataStreamingExecutorKafkaStreams.repository .Values.imageVersions.dataStreamingExecutorKafkaStreams.digest | quote }}
+              # The installation's one delivery engine (forwardmeasure-platform's platform.engine);
+              # the launcher dispatches only that engine's runner, plus the loader on Kafka Streams.
+              DATASTREAMING_LAUNCHER_ENGINE: {{ .Values.platform.engine | quote }}
+              {{- /* repository@digest once pinned; repository:tag until the image is pushed and pinned. */}}
+              {{- $ref := dict }}
+              {{- range $name, $pin := dict "pekko" .Values.imageVersions.pekko "kafkaStreams" .Values.imageVersions.dataStreamingExecutorKafkaStreams "loader" .Values.imageVersions.loader "spark" .Values.imageVersions.spark "proxy" .Values.imageVersions.cloudSqlProxy }}
+              {{- $_ := set $ref $name (ternary (printf "%s@%s" $pin.repository $pin.digest) (printf "%s:%s" $pin.repository $pin.tag) (ne (default "" $pin.digest) "")) }}
+              {{- end }}
+              {{- $pekko := $ref.pekko }}
+              {{- $kafkaStreams := $ref.kafkaStreams }}
+              {{- $loader := $ref.loader }}
+              {{- $spark := $ref.spark }}
+              {{- $journalProxy := and (ne .Values.platform.engine "pekko-cassandra") (dig "cloudSqlProxy" "enabled" false .Values) }}
+              {{- if eq .Values.platform.engine "kafka-streams" }}
+              DATASTREAMING_LAUNCHER_KAFKA_STREAMS_IMAGE: {{ $kafkaStreams | quote }}
               DATASTREAMING_LAUNCHER_KAFKA_STREAMS_COMMAND: "java -jar /deployments/application.jar"
-              DATASTREAMING_LAUNCHER_SPARK_IMAGE: {{ printf "%s@%s" .Values.imageVersions.spark.repository .Values.imageVersions.spark.digest | quote }}
+              DATASTREAMING_LAUNCHER_LOADER_IMAGE: {{ $loader | quote }}
+              DATASTREAMING_LAUNCHER_LOADER_COMMAND: "java -jar /deployments/application.jar"
+              DATASTREAMING_LAUNCHER_K8S_IMAGES: {{ printf "%s,%s,%s" $kafkaStreams $loader $spark | quote }}
+              {{- else }}
+              DATASTREAMING_LAUNCHER_PEKKO_IMAGE: {{ $pekko | quote }}
+              DATASTREAMING_LAUNCHER_PEKKO_COMMAND: "java -jar /deployments/application.jar"
+              DATASTREAMING_LAUNCHER_K8S_IMAGES: {{ if $journalProxy }}{{ printf "%s,%s,%s" $pekko $spark $ref.proxy | quote }}{{ else }}{{ printf "%s,%s" $pekko $spark | quote }}{{ end }}
+              # Continuous Pekko runs that correlate or keep state hold it on the Pekko journal:
+              # the data_streaming schema of each tenant's database (pekko-postgresql), found
+              # through the control plane's tenant_registry as the datastreaming role, or FDS's own
+              # keyspaces on fowf's Cassandra (pekko-cassandra). The password is a secretKeyRef on
+              # the worker - data-streaming-database-credentials, delivered by platform-secrets.
+              {{- $role := .Values.platform.databases.runtimeRoles.dataStreaming }}
+              {{- if eq .Values.platform.engine "pekko-cassandra" }}
+              {{- $cassandra := printf "openworkflow-dc1-service.%s.svc.cluster.local:9042" .Values.platform.namespaces.openworkflow }}
+              DATASTREAMING_LAUNCHER_JOURNAL_ENV: {{ printf "FDS_JOURNAL_CASSANDRA_CONTACT_POINTS=%s;FDS_JOURNAL_CASSANDRA_LOCAL_DATACENTER=%s;FDS_JOURNAL_CASSANDRA_USERNAME=%s" (dig "journal" "cassandra" "contactPoints" $cassandra .Values) (dig "journal" "cassandra" "localDatacenter" "dc1" .Values) $role | quote }}
+              DATASTREAMING_LAUNCHER_JOURNAL_SECRET_ENV: {{ printf "FDS_JOURNAL_CASSANDRA_PASSWORD=%s/password" .Values.platform.secrets.dataStreamingDatabase | quote }}
+              {{- else }}
+              DATASTREAMING_LAUNCHER_JOURNAL_ENV: {{ printf "FDS_JOURNAL_CONTROL_PLANE_URL=jdbc:postgresql://localhost:5432/%s;FDS_JOURNAL_POSTGRES_USER=%s" .Values.platform.databases.controlPlane $role | quote }}
+              DATASTREAMING_LAUNCHER_JOURNAL_SECRET_ENV: {{ printf "FDS_JOURNAL_POSTGRES_PASSWORD=%s/password" .Values.platform.secrets.dataStreamingDatabase | quote }}
+              {{- end }}
+              {{- if $journalProxy }}
+              # The worker reaches its tenant database on localhost:5432 through a Cloud SQL Auth
+              # Proxy sidecar fowf adds beside it (instance name from the same Secret).
+              DATASTREAMING_LAUNCHER_JOURNAL_DATABASE_PROXY_IMAGE: {{ $ref.proxy | quote }}
+              DATASTREAMING_LAUNCHER_JOURNAL_DATABASE_PROXY_INSTANCE_SECRET: {{ printf "%s/db-cloud-sql-instance" .Values.platform.secrets.dataStreamingDatabase | quote }}
+              # The proxy authorizes as the worker's Workload Identity (data-streaming-worker-identity).
+              DATASTREAMING_LAUNCHER_JOURNAL_DATABASE_PROXY_SERVICE_ACCOUNT: {{ .Values.workerServiceAccountName | quote }}
+              {{- end }}
+              {{- end }}
+              DATASTREAMING_LAUNCHER_SPARK_IMAGE: {{ $spark | quote }}
               DATASTREAMING_LAUNCHER_SPARK_COMMAND: "java -jar /deployments/application.jar"
-              DATASTREAMING_LAUNCHER_K8S_IMAGES: {{ printf "%s@%s,%s@%s,%s@%s" .Values.imageVersions.pekko.repository .Values.imageVersions.pekko.digest .Values.imageVersions.dataStreamingExecutorKafkaStreams.repository .Values.imageVersions.dataStreamingExecutorKafkaStreams.digest .Values.imageVersions.spark.repository .Values.imageVersions.spark.digest | quote }}
               DATASTREAMING_LAUNCHER_K8S_IMAGE_PULL_SECRETS: {{ .Values.platform.secrets.imagePull | quote }}
               DATASTREAMING_LAUNCHER_KAFKA_BOOTSTRAP_SERVERS: {{ .Values.platform.endpoints.kafka.bootstrapServers | quote }}
               DATASTREAMING_LAUNCHER_FOWF_BASE_URL: {{ .Values.platform.endpoints.openworkflow.executionBaseUrl | quote }}

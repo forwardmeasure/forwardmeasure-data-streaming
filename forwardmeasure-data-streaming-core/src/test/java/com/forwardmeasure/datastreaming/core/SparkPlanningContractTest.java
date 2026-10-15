@@ -40,16 +40,20 @@ class SparkPlanningContractTest {
   @Test
   void actualScreeningTransformRequiresSparkAndStableDestinationSpecificHandoff() {
     var spec = spec(ExecutionMode.BOUNDED, "one", false);
-    var plan = ExecutionPlanCompiler.compile(spec);
+    var plan = ExecutionPlanCompiler.compile(spec, DeliveryEngineKind.PEKKO_STREAMS);
     var spark = plan.sparkStage().orElseThrow();
-    assertEquals(List.of("screen_against_worldcheck_reference"), spark.transformNames());
+    assertEquals(List.of("test_screen_against_reference"), spark.transformNames());
     assertEquals(DeliveryEngineKind.PEKKO_STREAMS, plan.profile().deliveryEngine());
     assertEquals(
         spark.handoffTopic(),
-        ExecutionPlanCompiler.compile(spec).sparkStage().orElseThrow().handoffTopic());
+        ExecutionPlanCompiler.compile(spec, DeliveryEngineKind.PEKKO_STREAMS)
+            .sparkStage()
+            .orElseThrow()
+            .handoffTopic());
     assertNotEquals(
         spark.handoffTopic(),
-        ExecutionPlanCompiler.compile(spec(ExecutionMode.BOUNDED, "two", false))
+        ExecutionPlanCompiler.compile(
+                spec(ExecutionMode.BOUNDED, "two", false), DeliveryEngineKind.PEKKO_STREAMS)
             .sparkStage()
             .orElseThrow()
             .handoffTopic());
@@ -62,14 +66,16 @@ class SparkPlanningContractTest {
                 delivery.sources().getFirst().mapper());
     assertEquals(Map.of("uid", "42", "names", names, "matches", List.of("other")), result);
     assertTrue(
-        ExecutionPlanCompiler.compile(delivery).sparkStage().isEmpty(),
+        ExecutionPlanCompiler.compile(delivery, DeliveryEngineKind.PEKKO_STREAMS)
+            .sparkStage()
+            .isEmpty(),
         "Delivery must not run screening again");
   }
 
   @Test
   void continuousCorrelatedHandoffKeepsSeparateSourcesKeysWeightsAndBlocking() {
     var original = spec(ExecutionMode.CONTINUOUS, "one", true);
-    var plan = ExecutionPlanCompiler.compile(original);
+    var plan = ExecutionPlanCompiler.compile(original, DeliveryEngineKind.PEKKO_STREAMS);
     var delivery = SparkHandoffSpecs.deliveryStageSpec(plan, "broker:9092");
     assertEquals(ExecutionMode.CONTINUOUS, delivery.executionMode());
     assertEquals("uid", delivery.blockingField());
@@ -94,19 +100,20 @@ class SparkPlanningContractTest {
   }
 
   @Test
-  void unsupportedGraphsAndUnknownTransformsCannotBecomeExecutablePlans() {
+  void graphsCompileButUnknownTransformsCannotBecomeExecutablePlans() {
     var spec = spec(ExecutionMode.BOUNDED, "one", false);
     var graph =
         new TransformGraph(
             "node",
             Map.of("node", new TransformGraph.TransformNode(spec.sources().getFirst().mapper())),
             List.of());
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            ExecutionPlanCompiler.compile(
+    assertEquals(
+        graph,
+        ExecutionPlanCompiler.compile(
                 new IngestionSpec(
-                    spec.sources(), null, graph, spec.sink(), spec.executionMode(), null, null)));
+                    spec.sources(), null, graph, spec.sink(), spec.executionMode(), null, null),
+                DeliveryEngineKind.PEKKO_STREAMS)
+            .transforms());
     var bad =
         new SourcePlan(
             "one",
@@ -122,7 +129,8 @@ class SparkPlanningContractTest {
         () ->
             ExecutionPlanCompiler.compile(
                 new IngestionSpec(
-                    List.of(bad), null, null, spec.sink(), spec.executionMode(), null, null)));
+                    List.of(bad), null, null, spec.sink(), spec.executionMode(), null, null),
+                DeliveryEngineKind.PEKKO_STREAMS));
   }
 
   private static IngestionSpec spec(ExecutionMode mode, String destination, boolean correlated) {
@@ -133,13 +141,7 @@ class SparkPlanningContractTest {
                 new FieldRule("uid", "id", null, null, null, false, false),
                 new FieldRule("names", "name", null, null, "parse_semicolon_list", false, false),
                 new FieldRule(
-                    "matches",
-                    "name",
-                    null,
-                    null,
-                    "screen_against_worldcheck_reference",
-                    true,
-                    false)));
+                    "matches", "name", null, null, "test_screen_against_reference", true, false)));
     var one = new SourcePlan("one", new SourceSpec("file", "/input.csv", null, null), mapper, 0.9);
     var two = new SourcePlan("two", new SourceSpec("file", "/other.csv", null, null), mapper, 0.4);
     return new IngestionSpec(

@@ -23,6 +23,7 @@ import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SparkStagePlan;
 import com.forwardmeasure.datastreaming.core.ExecutionPlanCompiler;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline;
+import com.forwardmeasure.datastreaming.transforms.NamedTransformCatalog;
 import java.nio.file.Path;
 import java.util.Map;
 import org.apache.spark.api.java.JavaRDD;
@@ -75,9 +76,24 @@ public final class SparkIngestionRunner {
     SourcePlan sourcePlan = plan.sources().get(0);
     IngestionPipeline.MalformedRecordPolicy malformedRecordPolicy =
         IngestionPipeline.MalformedRecordPolicy.from(plan.errors());
-    JavaRDD<Map<String, Object>> mapped =
+    JavaRDD<Map<String, Object>> sourceRows =
         SparkCorrelationEngine.readAndMapSingleSource(
-                spark, sourcePlan.source(), sourcePlan.mapper(), Map.of(), malformedRecordPolicy)
+            spark,
+            sourcePlan.source(),
+            sourcePlan.mapper(),
+            NamedTransformCatalog.installed(),
+            malformedRecordPolicy);
+    // The graph steps this stage owns, when a HEAVY transform sits inside the graph.
+    String sourceKey = sourcePlan.sourceKey();
+    JavaRDD<Map<String, Object>> mapped =
+        (plan.sparkStage().get().graphSteps() > 0
+                ? SparkGraphSteps.run(
+                    plan,
+                    sourceRows.map(
+                        row ->
+                            new com.forwardmeasure.datastreaming.core.stateful.GraphRecords.Sourced(
+                                sourceKey, row)))
+                : sourceRows)
             .cache();
     long recordsWritten = mapped.count();
     SinkSpec handoffSink = handoffSink(plan, kafkaBootstrapServers);
@@ -119,8 +135,7 @@ public final class SparkIngestionRunner {
     if (override == null || override.isBlank() || plan.sparkStage().isEmpty()) {
       return plan;
     }
-    SparkStagePlan overridden =
-        new SparkStagePlan(plan.sparkStage().get().transformNames(), override.trim());
+    SparkStagePlan overridden = plan.sparkStage().get().withHandoffTopic(override.trim());
     return new ExecutionPlan(
         plan.profile(),
         plan.sources(),
@@ -136,7 +151,9 @@ public final class SparkIngestionRunner {
   public static void main(String[] args) throws Exception {
     String specPath = args.length > 0 ? args[0] : requiredEnv("INGESTION_SPEC_PATH");
     IngestionSpec spec = IngestionSpec.load(Path.of(specPath));
-    ExecutionPlan plan = withHandoffTopicOverride(ExecutionPlanCompiler.compile(spec));
+    ExecutionPlan plan =
+        withHandoffTopicOverride(
+            ExecutionPlanCompiler.compile(spec, ExecutionPlanCompiler.installationEngine()));
     String kafkaBootstrapServers = kafkaBootstrapServersFromEnv();
 
     SparkSession spark =

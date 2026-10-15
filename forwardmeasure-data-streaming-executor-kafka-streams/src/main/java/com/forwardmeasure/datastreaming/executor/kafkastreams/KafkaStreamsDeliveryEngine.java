@@ -16,6 +16,7 @@
  */
 package com.forwardmeasure.datastreaming.executor.kafkastreams;
 
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
 import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.ExecutionPlan;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
@@ -82,7 +83,7 @@ public final class KafkaStreamsDeliveryEngine implements DeliveryEngine {
     String id = "fds-kafka-streams-bounded-" + UUID.randomUUID();
     if (plan.sources().size() == 1) {
       BoundedKafkaStreamsConsumerRunner.run(
-          plan.sources().get(0), plan.destination(), plan.errors(), mapper);
+          plan.sources().get(0), plan.destination(), plan.errors(), mapper, plan.transforms());
     } else {
       BoundedKafkaStreamsCorrelationRunner.run(
           plan.sources(),
@@ -90,7 +91,8 @@ public final class KafkaStreamsDeliveryEngine implements DeliveryEngine {
           plan.destination(),
           plan.errors(),
           mapper,
-          plan.mergePolicy());
+          plan.mergePolicy(),
+          plan.transforms());
     }
     return new CompletedExecutionHandle(id);
   }
@@ -111,7 +113,7 @@ public final class KafkaStreamsDeliveryEngine implements DeliveryEngine {
   public static void main(String[] args) throws Exception {
     String specPath = args.length > 0 ? args[0] : requiredEnv("INGESTION_SPEC_PATH");
     IngestionSpec spec = IngestionSpec.load(Path.of(specPath));
-    ExecutionPlan plan = ExecutionPlanCompiler.compile(spec);
+    ExecutionPlan plan = ExecutionPlanCompiler.compile(spec, DeliveryEngineKind.KAFKA_STREAMS);
 
     int exitCode = 0;
     try {

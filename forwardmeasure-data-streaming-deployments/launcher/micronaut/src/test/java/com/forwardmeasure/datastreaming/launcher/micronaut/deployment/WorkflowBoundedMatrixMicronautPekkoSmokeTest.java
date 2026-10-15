@@ -23,6 +23,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture;
 import com.forwardmeasure.datastreaming.launcher.application.AuthorizationAction;
 import com.forwardmeasure.datastreaming.launcher.application.fowf.RealFowfWorkflowFixture;
+import com.forwardmeasure.datastreaming.testfixtures.TestTransformImages;
 import com.forwardmeasure.datastreaming.testfixtures.WorldCheckFixtures;
 import com.forwardmeasure.openworkflow.definition.management.api.model.CreateWorkflowDefinitionRequest;
 import com.forwardmeasure.openworkflow.definition.management.api.model.CreateWorkflowRequest;
@@ -105,7 +106,10 @@ class WorkflowBoundedMatrixMicronautPekkoSmokeTest implements TestPropertyProvid
           .create();
     }
     CurrentKubernetesTestContainer.set(fixture.kubernetes());
-    String pekkoImage = fixture.kubernetes().loadImageAndPinDigest(PEKKO_LOCAL_IMAGE);
+    String pekkoImage =
+        fixture
+            .kubernetes()
+            .loadImageAndPinDigest(TestTransformImages.withTestTransforms(PEKKO_LOCAL_IMAGE));
 
     opensearch = new com.forwardmeasure.testcontainers.opensearch.OpenSearchTestContainer().start();
     String openSearchUrlForPod =
@@ -200,6 +204,10 @@ class WorkflowBoundedMatrixMicronautPekkoSmokeTest implements TestPropertyProvid
         Map.entry("datastreaming.launcher.k8s.images", pekkoImage),
         Map.entry("datastreaming.launcher.k8s.image-pull-secrets", "unused"),
         Map.entry("datastreaming.launcher.k8s.host-aliases", "host.docker.internal=" + gatewayIp),
+        Map.entry("datastreaming.launcher.engine", "pekko-postgresql"),
+        Map.entry("datastreaming.launcher.spark.image", "unused-spark"),
+        Map.entry("datastreaming.launcher.spark.command", "false"),
+        Map.entry("datastreaming.launcher.kafka.bootstrap-servers", "unused:9092"),
         Map.entry("datastreaming.launcher.pekko.image", pekkoImage),
         Map.entry("datastreaming.launcher.pekko.command", "true #"),
         Map.entry("datastreaming.launcher.kafka-streams.image", pekkoImage),

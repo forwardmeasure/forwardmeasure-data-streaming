@@ -156,6 +156,12 @@ class WorkflowContinuousMatrixSpringKafkaStreamsSmokeTest {
     registry.add("datastreaming.launcher.k8s.images", () -> IMAGE);
     registry.add("datastreaming.launcher.k8s.image-pull-secrets", () -> "unused");
     registry.add("datastreaming.launcher.k8s.host-aliases", () -> "unused=127.0.0.1");
+    registry.add("datastreaming.launcher.engine", () -> "kafka-streams");
+    registry.add("datastreaming.launcher.loader.image", () -> "unused-loader");
+    registry.add("datastreaming.launcher.loader.command", () -> "false");
+    registry.add("datastreaming.launcher.spark.image", () -> "unused-spark");
+    registry.add("datastreaming.launcher.spark.command", () -> "false");
+    registry.add("datastreaming.launcher.kafka.bootstrap-servers", () -> "unused:9092");
     registry.add("datastreaming.launcher.pekko.image", () -> IMAGE);
     registry.add("datastreaming.launcher.pekko.command", () -> "false");
     registry.add("datastreaming.launcher.kafka-streams.image", () -> IMAGE);

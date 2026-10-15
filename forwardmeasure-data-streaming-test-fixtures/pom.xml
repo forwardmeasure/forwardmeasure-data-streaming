@@ -20,30 +20,27 @@
   <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-parent</artifactId><version>${revision}</version></parent>
   <artifactId>forwardmeasure-data-streaming-test-fixtures</artifactId>
   <name>ForwardMeasure Data Streaming Test Fixtures</name>
-  <description>Shared, real (never fictional/simplified) source-data and IngestionSpec fixtures for
-    integration tests that need them - WorldCheck today, a real customer-master shape following the
-    identical pattern. A real `main`-scope dependency (not a test-jar), deliberately: Phase G/H's
-    18/36-cell integration-test matrix needs the exact same fixture reachable from three separate
-    framework-binding test suites (Quarkus/Spring/Micronaut), so it has to be a real compile-time
-    dependency
-    each of those can add, not something copy-pasted three times or reachable only from one
-    module's own test classpath. Each real fixture (e.g. WorldCheckFixtures) mirrors the shape
-    already proven in forwardmeasure-data-streaming-executor-pekko's own
-    PekkoWorldCheckToOpenSearchIntegrationTest - copied, not reinvented, from the org's own real
-    entity-intelligence-specifications mapping/schema, byte-for-byte faithful column names.</description>
+  <description>Test-only fixtures for FDS: realistic party-, sanctions- and KYC-shaped source data,
+    ingestion specs, and test-only named transforms (TestTransforms, every name prefixed test_)
+    registered through the NamedTransformProvider SPI. Consumed only in test scope; the root pom's
+    enforcer rule fails any build that puts this module on a main classpath.</description>
   <properties>
     <!-- Has real public classes to document (unlike this repo's still-scaffolded modules) - see
          the parent pom's default. -->
     <maven.javadoc.skip>false</maven.javadoc.skip>
   </properties>
   <dependencies>
-    <dependency><groupId>com.forwardmeasure.platform</groupId><artifactId>forwardmeasure-platform-data-contracts</artifactId><scope>test</scope></dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
+    <!-- TestTransforms registers through the same NamedTransformProvider SPI a product uses. -->
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-transforms</artifactId></dependency>
+    <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId></dependency>
+    <!-- StatefulGraphParity feeds engine parity runs through real topics. -->
+    <dependency><groupId>org.apache.kafka</groupId><artifactId>kafka-clients</artifactId></dependency>
+    <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-core</artifactId></dependency>
+    <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId></dependency>
+    <!-- TestTransformImages builds an executor image's test variant through the Docker client. -->
+    <dependency><groupId>org.testcontainers</groupId><artifactId>testcontainers</artifactId></dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-mappers</artifactId><scope>test</scope></dependency>
-    <!-- Test-scope only, to verify boundedFileSpecWithScreening actually compiles to a plan with a
-         real sparkStage - a real acceptance check on this fixture's own reason for existing, not
-         needed by any main-scope code here. -->
-    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-core</artifactId><scope>test</scope></dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
   </dependencies>
 </project>

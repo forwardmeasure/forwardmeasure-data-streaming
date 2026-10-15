@@ -33,6 +33,7 @@ import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.SparkStagePlan;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline;
+import com.forwardmeasure.datastreaming.transforms.NamedTransformCatalog;
 import com.forwardmeasure.testcontainers.junit.kafka.WithKafkaContainer;
 import com.forwardmeasure.testcontainers.kafka.KafkaTestContainer;
 import java.io.BufferedWriter;
@@ -178,7 +179,11 @@ class SparkIngestionRunnerIntegrationTest {
 
     JavaRDD<Map<String, Object>> mapped =
         SparkCorrelationEngine.readAndMapSingleSource(
-                spark, source, mapper, Map.of(), IngestionPipeline.MalformedRecordPolicy.SKIP)
+                spark,
+                source,
+                mapper,
+                NamedTransformCatalog.installed(),
+                IngestionPipeline.MalformedRecordPolicy.SKIP)
             .repartition(4);
 
     CollectionAccumulator<String> threadNames =

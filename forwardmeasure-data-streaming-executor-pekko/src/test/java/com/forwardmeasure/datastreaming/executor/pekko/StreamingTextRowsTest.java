@@ -83,6 +83,39 @@ class StreamingTextRowsTest {
   }
 
   @Test
+  void providerExportWithTrailingCopiesAndATrailingDelimiterReadsTheOriginalColumns()
+      throws Exception {
+    Path file = directory.resolve("customer-master.psv");
+    Files.writeString(
+        file,
+        "UID|FULL_NAME|CITY|PLACE_OF_BIRTH|FULL_NAME|CITY|\n"
+            + "1|Original Name|Boston|Paris|Original Name|Boston|\n"
+            + "2|Second Name|Denver||||\n");
+    var tab = source(file);
+    var pipe =
+        new SourceSpec(
+            tab.connector(), tab.uri(), tab.format(), null, null, Map.of("delimiter", "|"));
+    var system = ActorSystem.create("provider-export-header");
+    try (var bridge = new CamelBridge()) {
+      var rows =
+          PekkoIngestionRunner.rowSource(bridge, pipe)
+              .runWith(Sink.seq(), system)
+              .toCompletableFuture()
+              .get(15, TimeUnit.SECONDS);
+      assertEquals(2, rows.size());
+      assertEquals("Original Name", rows.get(0).get("FULL_NAME"));
+      assertEquals("Second Name", rows.get(1).get("FULL_NAME"));
+      assertEquals("Denver", rows.get(1).get("CITY"));
+      assertEquals(
+          java.util.List.of("UID", "FULL_NAME", "CITY", "PLACE_OF_BIRTH"),
+          java.util.List.copyOf(rows.get(1).rawFields().keySet()));
+    } finally {
+      system.terminate();
+      system.getWhenTerminated().toCompletableFuture().get(10, TimeUnit.SECONDS);
+    }
+  }
+
+  @Test
   void literalQuoteDialectPreservesProviderTextIncludingLeadingAndUnmatchedQuotes()
       throws Exception {
     Path file = directory.resolve("literal-quotes.tsv");

@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
 import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
@@ -157,8 +158,12 @@ class SparkEntrypointContractTest {
 
   @Test
   void wrongRunnerCardinalityFailsBeforeReadingSource(@TempDir Path directory) throws Exception {
-    var single = ExecutionPlanCompiler.compile(spec(directory, false, true));
-    var correlated = ExecutionPlanCompiler.compile(spec(directory, true, true));
+    var single =
+        ExecutionPlanCompiler.compile(
+            spec(directory, false, true), DeliveryEngineKind.PEKKO_STREAMS);
+    var correlated =
+        ExecutionPlanCompiler.compile(
+            spec(directory, true, true), DeliveryEngineKind.PEKKO_STREAMS);
     assertThrows(
         IllegalArgumentException.class, () -> SparkCorrelationRunner.run(null, single, "unused"));
     assertThrows(
@@ -179,7 +184,7 @@ class SparkEntrypointContractTest {
               null,
               null,
               Map.of("full_name", "name"),
-              "screen_against_worldcheck_reference",
+              "test_screen_against_reference",
               false,
               false));
     var one =
@@ -234,6 +239,8 @@ class SparkEntrypointContractTest {
             "KAFKA_BOOTSTRAP_SERVERS",
             "SPARK_MASTER",
             "FDS_EXECUTION_ID")) builder.environment().remove(key);
+    // The launcher always tells a Spark Job the installation's delivery engine.
+    builder.environment().put("FDS_DELIVERY_ENGINE", "KAFKA_STREAMS");
     builder.environment().putAll(environment);
     return builder.start();
   }

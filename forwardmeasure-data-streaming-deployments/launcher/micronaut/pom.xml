@@ -189,6 +189,31 @@
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <!-- the launcher dispatches either engine and carries neither. -->
+            <id>enforce-engine-independence</id>
+            <goals><goal>enforce</goal></goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <message>The delivery engines are independent: the launcher dispatches either engine and carries neither.</message>
+                  <searchTransitive>true</searchTransitive>
+                  <excludes>
+                    <exclude>org.apache.pekko:*:*:*:compile</exclude>
+                    <exclude>org.apache.pekko:*:*:*:runtime</exclude>
+                    <exclude>org.apache.kafka:kafka-streams:*:*:compile</exclude>
+                    <exclude>org.apache.kafka:kafka-streams:*:*:runtime</exclude>
+                  </excludes>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
         <configuration>
           <proc>full</proc>

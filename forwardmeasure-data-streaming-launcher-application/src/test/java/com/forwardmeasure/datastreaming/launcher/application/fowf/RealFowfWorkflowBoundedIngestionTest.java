@@ -31,6 +31,7 @@ import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.launcher.application.AuthorizationAction;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowLaunchRequest;
+import com.forwardmeasure.datastreaming.testfixtures.TestTransformImages;
 import com.forwardmeasure.datastreaming.testfixtures.WorldCheckFixtures;
 import com.forwardmeasure.openworkflow.definition.management.api.model.CreateWorkflowDefinitionRequest;
 import com.forwardmeasure.openworkflow.definition.management.api.model.CreateWorkflowRequest;
@@ -135,7 +136,10 @@ class RealFowfWorkflowBoundedIngestionTest {
       }
       // See PEKKO_LOCAL_IMAGE's own javadoc for why this is needed - K3s's containerd can't see the
       // host daemon's cache on its own, and the dispatched Job's own image must be digest-pinned.
-      String pekkoImage = fixture.kubernetes().loadImageAndPinDigest(PEKKO_LOCAL_IMAGE);
+      String pekkoImage =
+          fixture
+              .kubernetes()
+              .loadImageAndPinDigest(TestTransformImages.withTestTransforms(PEKKO_LOCAL_IMAGE));
 
       com.forwardmeasure.testcontainers.opensearch.OpenSearchTestContainer opensearch =
           new com.forwardmeasure.testcontainers.opensearch.OpenSearchTestContainer().start();

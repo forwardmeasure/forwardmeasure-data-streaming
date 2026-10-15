@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.forwardmeasure.datastreaming.launcher.application.AuthorizationAction;
 import com.forwardmeasure.datastreaming.launcher.application.fowf.RealFowfWorkflowFixture;
 import com.forwardmeasure.datastreaming.testfixtures.TestCustomerMasterFixtures;
+import com.forwardmeasure.datastreaming.testfixtures.TestTransformImages;
 import com.forwardmeasure.openworkflow.definition.management.api.model.CreateWorkflowDefinitionRequest;
 import com.forwardmeasure.openworkflow.definition.management.api.model.CreateWorkflowRequest;
 import com.forwardmeasure.openworkflow.definition.management.api.model.Workflow;
@@ -159,7 +160,10 @@ class WorkflowBoundedMatrixQuarkusKafkaStreamsTestCustomerMasterSmokeTest {
                 new NamespaceBuilder().withNewMetadata().withName(NAMESPACE).endMetadata().build())
             .create();
       }
-      String pekkoImage = fixture.kubernetes().loadImageAndPinDigest(PEKKO_LOCAL_IMAGE);
+      String pekkoImage =
+          fixture
+              .kubernetes()
+              .loadImageAndPinDigest(TestTransformImages.withTestTransforms(PEKKO_LOCAL_IMAGE));
 
       opensearch =
           new com.forwardmeasure.testcontainers.opensearch.OpenSearchTestContainer().start();
@@ -248,6 +252,9 @@ class WorkflowBoundedMatrixQuarkusKafkaStreamsTestCustomerMasterSmokeTest {
           Map.entry("datastreaming.launcher.k8s.images", pekkoImage),
           Map.entry("datastreaming.launcher.k8s.image-pull-secrets", "unused"),
           Map.entry("datastreaming.launcher.k8s.host-aliases", "host.docker.internal=" + gatewayIp),
+          Map.entry("datastreaming.launcher.engine", "kafka-streams"),
+          Map.entry("datastreaming.launcher.loader.image", "unused-loader"),
+          Map.entry("datastreaming.launcher.loader.command", "false"),
           Map.entry("datastreaming.launcher.pekko.image", pekkoImage),
           Map.entry("datastreaming.launcher.pekko.command", "true #"),
           Map.entry("datastreaming.launcher.kafka-streams.image", pekkoImage),

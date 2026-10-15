@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture;
 import com.forwardmeasure.datastreaming.launcher.application.AuthorizationAction;
 import com.forwardmeasure.datastreaming.testfixtures.TestCustomerMasterFixtures;
+import com.forwardmeasure.datastreaming.testfixtures.TestTransformImages;
 import com.forwardmeasure.testcontainers.kubernetes.KubernetesTestContainer;
 import com.forwardmeasure.testcontainers.opensearch.OpenSearchTestContainer;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
@@ -133,7 +134,7 @@ class DirectIngestionMatrixQuarkusPekkoTestCustomerMasterSmokeTest {
     private static String PEKKO_IMAGE;
 
     /**
-     * Real Customer Master header + the real, well-populated organisation row (ss-3, "iShares
+     * Real Customer Master header + the real, well-populated organisation row (cm-3, "iShares
      * V..."), both extracted directly from {@link TestCustomerMasterFixtures#SAMPLE_CSV} - never
      * hand-retyped.
      */
@@ -179,7 +180,8 @@ class DirectIngestionMatrixQuarkusPekkoTestCustomerMasterSmokeTest {
 
       kubernetes = new KubernetesTestContainer().start();
       CurrentKubernetesTestContainer.set(kubernetes);
-      PEKKO_IMAGE = kubernetes.loadImageAndPinDigest(executorImage);
+      PEKKO_IMAGE =
+          kubernetes.loadImageAndPinDigest(TestTransformImages.withTestTransforms(executorImage));
       try (var client = kubernetes.createClient()) {
         client
             .namespaces()
@@ -214,6 +216,7 @@ class DirectIngestionMatrixQuarkusPekkoTestCustomerMasterSmokeTest {
           Map.entry("datastreaming.launcher.k8s.host-aliases", "host.docker.internal=" + gatewayIp),
           Map.entry("datastreaming.launcher.fowf.keycloak.client-id", "unused"),
           Map.entry("datastreaming.launcher.fowf.keycloak.client-secret", "unused"),
+          Map.entry("datastreaming.launcher.engine", "pekko-postgresql"),
           Map.entry("datastreaming.launcher.pekko.image", pekkoImage),
           Map.entry("datastreaming.launcher.pekko.command", pekkoCommand),
           Map.entry("datastreaming.launcher.kafka-streams.image", "unused"),

@@ -48,3 +48,8 @@ authorizationClientId: datastreaming
 # exist yet. Nothing here invents a value for it.
 credentialsSecretName: data-streaming-launcher-credentials
 
+# Continuous Pekko workers reach their tenant database's journal through a Cloud SQL Auth Proxy
+# sidecar (helmfiles/launcher.yaml.gotmpl) - same as forwardmeasure-entity-intelligence's services on
+# a platform cluster.
+cloudSqlProxy:
+  enabled: true

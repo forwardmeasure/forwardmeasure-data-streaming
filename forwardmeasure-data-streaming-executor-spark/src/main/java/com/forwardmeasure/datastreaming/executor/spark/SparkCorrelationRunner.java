@@ -19,9 +19,15 @@ package com.forwardmeasure.datastreaming.executor.spark;
 import com.forwardmeasure.datastreaming.api.ExecutionPlan;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.api.SinkSpec;
+import com.forwardmeasure.datastreaming.api.SourcePlan;
+import com.forwardmeasure.datastreaming.api.TransformGraph;
 import com.forwardmeasure.datastreaming.core.ExecutionPlanCompiler;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline;
+import com.forwardmeasure.datastreaming.core.SparkHandoffSpecs;
+import com.forwardmeasure.datastreaming.core.stateful.GraphRecords.Sourced;
+import com.forwardmeasure.datastreaming.transforms.NamedTransformCatalog;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.apache.spark.api.java.JavaRDD;
@@ -69,6 +75,54 @@ public final class SparkCorrelationRunner {
     }
     IngestionPipeline.MalformedRecordPolicy malformedRecordPolicy =
         IngestionPipeline.MalformedRecordPolicy.from(plan.errors());
+    int graphSteps = plan.sparkStage().get().graphSteps();
+    TransformGraph graph = plan.transforms();
+
+    if (SparkHandoffSpecs.handsOffEachSource(plan) || (graphSteps > 0 && graph.joins())) {
+      // A joining graph needs each source's own records: merging would lose the two sides.
+      List<JavaRDD<Sourced>> perSource = new ArrayList<>();
+      for (SourcePlan source : plan.sources()) {
+        String sourceKey = source.sourceKey();
+        perSource.add(
+            SparkCorrelationEngine.readAndMapSingleSource(
+                    spark,
+                    source.source(),
+                    source.mapper(),
+                    NamedTransformCatalog.installed(),
+                    malformedRecordPolicy)
+                .map(row -> new Sourced(sourceKey, row)));
+      }
+      if (graphSteps == 0) {
+        // The delivery stage joins: each source on its own topic.
+        long written = 0;
+        for (int index = 0; index < perSource.size(); index++) {
+          JavaRDD<Map<String, Object>> rows = perSource.get(index).map(Sourced::record).cache();
+          written += rows.count();
+          SparkSinks.write(
+              spark,
+              rows,
+              new SinkSpec(
+                  "kafka",
+                  kafkaBootstrapServers,
+                  SparkHandoffSpecs.sourceTopic(plan, index),
+                  null,
+                  null,
+                  Map.of()),
+              plan.errors());
+        }
+        return new CorrelationResult(plan.sources().size(), written);
+      }
+      JavaRDD<Map<String, Object>> joined =
+          SparkGraphSteps.run(plan, SparkGraphSteps.joinOrder(graph, perSource)).cache();
+      long count = joined.count();
+      SparkSinks.write(
+          spark,
+          joined,
+          SparkIngestionRunner.handoffSink(plan, kafkaBootstrapServers),
+          plan.errors());
+      return new CorrelationResult(plan.sources().size(), count);
+    }
+
     List<JavaRDD<SparkCorrelationRecord>> mapped =
         plan.sources().stream()
             .map(
@@ -78,15 +132,21 @@ public final class SparkCorrelationRunner {
                         new SparkSourceConfig(
                             entry.sourceKey(), entry.source(), entry.mapper(), entry.trustWeight()),
                         plan.blockingField(),
-                        Map.of(),
+                        NamedTransformCatalog.installed(),
                         malformedRecordPolicy))
             .toList();
 
     // Cached deliberately: count() below and the write() call are two separate actions on the
     // same lazily-evaluated RDD - without caching, Spark would recompute the entire
     // read/map/correlate/merge pipeline (across every source) a second time for the write alone.
+    JavaRDD<Map<String, Object>> correlated =
+        SparkCorrelationEngine.correlate(mapped, plan.mergePolicy());
     JavaRDD<Map<String, Object>> merged =
-        SparkCorrelationEngine.correlate(mapped, plan.mergePolicy()).cache();
+        (graphSteps > 0
+                ? SparkGraphSteps.run(
+                    plan, SparkGraphSteps.mergedOrder(graph, plan.blockingField(), correlated))
+                : correlated)
+            .cache();
     long groupCount = merged.count();
     SinkSpec handoffSink = SparkIngestionRunner.handoffSink(plan, kafkaBootstrapServers);
     SparkSinks.write(spark, merged, handoffSink, plan.errors());
@@ -99,7 +159,8 @@ public final class SparkCorrelationRunner {
     // See SparkIngestionRunner#withHandoffTopicOverride's own javadoc for the real bug this
     // guards against - the identical fix applies here.
     ExecutionPlan plan =
-        SparkIngestionRunner.withHandoffTopicOverride(ExecutionPlanCompiler.compile(spec));
+        SparkIngestionRunner.withHandoffTopicOverride(
+            ExecutionPlanCompiler.compile(spec, ExecutionPlanCompiler.installationEngine()));
     String kafkaBootstrapServers = SparkIngestionRunner.kafkaBootstrapServersFromEnv();
 
     SparkSession spark =

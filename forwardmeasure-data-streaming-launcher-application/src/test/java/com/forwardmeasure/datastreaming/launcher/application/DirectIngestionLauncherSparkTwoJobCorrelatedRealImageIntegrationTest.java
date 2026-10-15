@@ -24,6 +24,7 @@ import com.forwardmeasure.authzen.ActiveOrganization;
 import com.forwardmeasure.authzen.AuthorizationDecision;
 import com.forwardmeasure.authzen.AuthorizationRequest;
 import com.forwardmeasure.authzen.AuthorizationService;
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
 import com.forwardmeasure.datastreaming.api.DeliverySemantics;
 import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
@@ -32,6 +33,7 @@ import com.forwardmeasure.datastreaming.api.SourcePlan;
 import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec.FieldRule;
+import com.forwardmeasure.datastreaming.testfixtures.TestTransformImages;
 import com.forwardmeasure.jpa.tenancy.TenantId;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
 import com.forwardmeasure.testcontainers.junit.kafka.WithKafkaContainer;
@@ -73,7 +75,7 @@ import org.junit.jupiter.api.Timeout;
  *
  * <p>Two Kafka-sourced sources, correlated on {@code uid}: {@code core} carries the full screening
  * mapper (name/entity-type/country/nationality/dob -&gt; {@code screening_hits} via the real {@code
- * HEAVY screen_against_worldcheck_reference} transform, entirely from its own columns - the current
+ * HEAVY test_screen_against_reference} transform, entirely from its own columns - the current
  * architecture has no post-merge transform stage, so a transform needing fields from *both* sources
  * isn't expressible yet, a real, separate, out-of-scope gap, not something this test pretends to
  * cover); {@code alias} contributes one extra {@code position} field per {@code uid}, merged in by
@@ -131,23 +133,26 @@ final class DirectIngestionLauncherSparkTwoJobCorrelatedRealImageIntegrationTest
               new NamespaceBuilder().withNewMetadata().withName(NAMESPACE).endMetadata().build())
           .create();
 
-      String sparkImage = kubernetes.loadImageAndPinDigest(SPARK_LOCAL_IMAGE);
-      String kafkaStreamsImage = kubernetes.loadImageAndPinDigest(KAFKA_STREAMS_LOCAL_IMAGE);
+      String sparkImage =
+          kubernetes.loadImageAndPinDigest(
+              TestTransformImages.withTestTransforms(SPARK_LOCAL_IMAGE));
+      String kafkaStreamsImage =
+          kubernetes.loadImageAndPinDigest(
+              TestTransformImages.withTestTransforms(KAFKA_STREAMS_LOCAL_IMAGE));
 
       DirectIngestionLauncher launcher =
           new DirectIngestionLauncher(
               IngestionJobPolicy.configured(
                   Set.of(NAMESPACE), Set.of(sparkImage, kafkaStreamsImage)),
               new PermitAllAuthorizationService(),
-              "unused",
-              "true",
-              kafkaStreamsImage,
-              RUN_COMMAND,
+              new RunnerImages(
+                  DeliveryEngineKind.KAFKA_STREAMS,
+                  new RunnerImages.Runner(kafkaStreamsImage, RUN_COMMAND),
+                  new RunnerImages.Runner("unused-loader", "false"),
+                  new RunnerImages.Runner(sparkImage, RUN_COMMAND),
+                  kafkaUriForPod),
               List.of(),
-              Map.of("host.docker.internal", gatewayIp),
-              sparkImage,
-              RUN_COMMAND,
-              kafkaUriForPod);
+              Map.of("host.docker.internal", gatewayIp));
       DirectLaunchRequest request =
           new DirectLaunchRequest(
               UUID.randomUUID().toString(), NAMESPACE, spec, Map.of(), Map.of(), null);
@@ -208,8 +213,8 @@ final class DirectIngestionLauncherSparkTwoJobCorrelatedRealImageIntegrationTest
 
   /**
    * Two sources correlated on {@code uid}. {@code core}'s own mapper is self-contained (every
-   * {@code screen_against_worldcheck_reference} input comes from {@code core}'s own columns) since
-   * there is no post-merge transform stage today - see this class's own javadoc.
+   * {@code test_screen_against_reference} input comes from {@code core}'s own columns) since there
+   * is no post-merge transform stage today - see this class's own javadoc.
    */
   private static IngestionSpec correlatedScreeningSpec(String kafkaBrokers, int opensearchPort) {
     SourceSpec coreSource =
@@ -253,7 +258,7 @@ final class DirectIngestionLauncherSparkTwoJobCorrelatedRealImageIntegrationTest
                         "country", "COUNTRY",
                         "nationality", "NATIONALITY",
                         "dob", "DOB"),
-                    "screen_against_worldcheck_reference",
+                    "test_screen_against_reference",
                     true,
                     null,
                     Map.of(),

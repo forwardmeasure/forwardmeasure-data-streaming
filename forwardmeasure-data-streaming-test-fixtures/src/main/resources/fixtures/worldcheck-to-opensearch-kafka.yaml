@@ -52,7 +52,7 @@ sources:
           inputs:
             value: CATEGORY
             entity_indicator: "E/I"
-          transform: classify_party_kind
+          transform: test_classify_party_kind
         - target: date_of_birth
           source: DOB
           transform: parse_partial_date_ymd
@@ -98,11 +98,11 @@ sources:
           optional: true
         - target: categories
           source: "SPECIAL INTEREST CATEGORIES"
-          transform: classify_party_categories
+          transform: test_classify_party_categories
           optional: true
         - target: locations
           source: LOCATIONS
-          transform: parse_tilde_delimited_locations
+          transform: test_parse_tilde_delimited_locations
           optional: true
 
 sink:

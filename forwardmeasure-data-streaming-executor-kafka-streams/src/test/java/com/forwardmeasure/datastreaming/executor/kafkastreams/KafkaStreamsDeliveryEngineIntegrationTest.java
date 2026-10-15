@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
 import com.forwardmeasure.datastreaming.api.DeliverySemantics;
 import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.ExecutionPlan;
@@ -141,7 +142,7 @@ class KafkaStreamsDeliveryEngineIntegrationTest {
             ExecutionMode.BOUNDED,
             new DeliverySemantics(true, new ConcurrencySpec(1, null), null),
             null);
-    ExecutionPlan plan = ExecutionPlanCompiler.compile(spec);
+    ExecutionPlan plan = ExecutionPlanCompiler.compile(spec, DeliveryEngineKind.KAFKA_STREAMS);
 
     ExecutionHandle handle =
         new KafkaStreamsDeliveryEngine(Map.of()).execute(plan, ExecutionMode.BOUNDED);
@@ -196,7 +197,7 @@ class KafkaStreamsDeliveryEngineIntegrationTest {
             ExecutionMode.CONTINUOUS,
             new DeliverySemantics(true, new ConcurrencySpec(1, null), null),
             null);
-    ExecutionPlan plan = ExecutionPlanCompiler.compile(spec);
+    ExecutionPlan plan = ExecutionPlanCompiler.compile(spec, DeliveryEngineKind.KAFKA_STREAMS);
     ExecutionHandle handle =
         new KafkaStreamsDeliveryEngine(Map.of()).execute(plan, ExecutionMode.CONTINUOUS);
     try {
@@ -336,7 +337,9 @@ class KafkaStreamsDeliveryEngineIntegrationTest {
                 new com.forwardmeasure.datastreaming.api.ErrorPolicy(policy, "fail"));
         var handle =
             new KafkaStreamsDeliveryEngine(Map.of())
-                .execute(ExecutionPlanCompiler.compile(spec), ExecutionMode.CONTINUOUS);
+                .execute(
+                    ExecutionPlanCompiler.compile(spec, DeliveryEngineKind.KAFKA_STREAMS),
+                    ExecutionMode.CONTINUOUS);
         try {
           try (var producer =
               new org.apache.kafka.clients.producer.KafkaProducer<String, String>(
@@ -430,7 +433,8 @@ class KafkaStreamsDeliveryEngineIntegrationTest {
           produce(kafka, topic, "K1", Map.of("uid", "K1", "name", "Retry subject"));
           var handle =
               new KafkaStreamsDeliveryEngine(Map.of())
-                  .execute(ExecutionPlanCompiler.compile(spec), mode);
+                  .execute(
+                      ExecutionPlanCompiler.compile(spec, DeliveryEngineKind.KAFKA_STREAMS), mode);
           try {
             long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
             while (attempts.get() < 3 && handle.failure().isEmpty() && System.nanoTime() < deadline)
@@ -484,7 +488,7 @@ class KafkaStreamsDeliveryEngineIntegrationTest {
               .send(new org.apache.kafka.clients.producer.ProducerRecord<>(topic, "bad", "{broken"))
               .get();
         }
-        var plan = ExecutionPlanCompiler.compile(spec);
+        var plan = ExecutionPlanCompiler.compile(spec, DeliveryEngineKind.KAFKA_STREAMS);
         var engine = new KafkaStreamsDeliveryEngine(Map.of());
         if (mode == ExecutionMode.BOUNDED) {
           assertThrows(IllegalArgumentException.class, () -> engine.execute(plan, mode));
@@ -668,7 +672,7 @@ class KafkaStreamsDeliveryEngineIntegrationTest {
             ExecutionMode.BOUNDED,
             new DeliverySemantics(true, new ConcurrencySpec(1, null), null),
             null);
-    return ExecutionPlanCompiler.compile(spec);
+    return ExecutionPlanCompiler.compile(spec, DeliveryEngineKind.KAFKA_STREAMS);
   }
 
   private static ExecutionPlan continuousPlan(
@@ -682,7 +686,7 @@ class KafkaStreamsDeliveryEngineIntegrationTest {
             ExecutionMode.CONTINUOUS,
             new DeliverySemantics(true, new ConcurrencySpec(1, null), null),
             null);
-    return ExecutionPlanCompiler.compile(spec);
+    return ExecutionPlanCompiler.compile(spec, DeliveryEngineKind.KAFKA_STREAMS);
   }
 
   static SourcePlan kafkaSource(KafkaTestContainer kafka, String topic) {

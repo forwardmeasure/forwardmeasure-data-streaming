@@ -24,6 +24,7 @@ import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec.FieldRule;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline;
+import com.forwardmeasure.datastreaming.transforms.NamedTransformCatalog;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -92,10 +93,18 @@ class SparkCorrelationEngineIntegrationTest {
     LOGGER.info("Running correlation: 2 source(s), blocking on 'uid'");
     JavaRDD<SparkCorrelationRecord> mappedA =
         SparkCorrelationEngine.readAndMap(
-            spark, sourceA, "uid", Map.of(), IngestionPipeline.MalformedRecordPolicy.SKIP);
+            spark,
+            sourceA,
+            "uid",
+            NamedTransformCatalog.installed(),
+            IngestionPipeline.MalformedRecordPolicy.SKIP);
     JavaRDD<SparkCorrelationRecord> mappedB =
         SparkCorrelationEngine.readAndMap(
-            spark, sourceB, "uid", Map.of(), IngestionPipeline.MalformedRecordPolicy.SKIP);
+            spark,
+            sourceB,
+            "uid",
+            NamedTransformCatalog.installed(),
+            IngestionPipeline.MalformedRecordPolicy.SKIP);
     List<Map<String, Object>> merged =
         SparkCorrelationEngine.correlate(List.of(mappedA, mappedB)).collect();
     LOGGER.info("Correlation finished: groupCount={}", merged.size());
@@ -134,7 +143,11 @@ class SparkCorrelationEngineIntegrationTest {
 
     JavaRDD<Map<String, Object>> mapped =
         SparkCorrelationEngine.readAndMapSingleSource(
-            spark, source, mappingA(), Map.of(), IngestionPipeline.MalformedRecordPolicy.SKIP);
+            spark,
+            source,
+            mappingA(),
+            NamedTransformCatalog.installed(),
+            IngestionPipeline.MalformedRecordPolicy.SKIP);
     List<Map<String, Object>> rows = mapped.collect();
 
     assertEquals(2, rows.size());
@@ -174,11 +187,14 @@ class SparkCorrelationEngineIntegrationTest {
             IngestionPipeline.MalformedRecordPolicy.SKIP,
             IngestionPipeline.MalformedRecordPolicy.DEAD_LETTER)) {
       var rows =
-          SparkCorrelationEngine.readAndMap(spark, config, "uid", transforms, policy).collect();
+          SparkCorrelationEngine.readAndMap(
+                  spark, config, "uid", NamedTransformCatalog.builtIns().with(transforms), policy)
+              .collect();
       assertEquals(1, rows.size());
       assertEquals("VALID", rows.getFirst().blockingKey());
       var uncorrelated =
-          SparkCorrelationEngine.readAndMapSingleSource(spark, source, mapper, transforms, policy)
+          SparkCorrelationEngine.readAndMapSingleSource(
+                  spark, source, mapper, NamedTransformCatalog.builtIns().with(transforms), policy)
               .collect();
       assertEquals(
           3, uncorrelated.size(), "Single-source mapping does not require correlation keys");
@@ -187,13 +203,21 @@ class SparkCorrelationEngineIntegrationTest {
         Exception.class,
         () ->
             SparkCorrelationEngine.readAndMap(
-                    spark, config, "uid", transforms, IngestionPipeline.MalformedRecordPolicy.FAIL)
+                    spark,
+                    config,
+                    "uid",
+                    NamedTransformCatalog.builtIns().with(transforms),
+                    IngestionPipeline.MalformedRecordPolicy.FAIL)
                 .collect());
     assertThrows(
         Exception.class,
         () ->
             SparkCorrelationEngine.readAndMapSingleSource(
-                    spark, source, mapper, transforms, IngestionPipeline.MalformedRecordPolicy.FAIL)
+                    spark,
+                    source,
+                    mapper,
+                    NamedTransformCatalog.builtIns().with(transforms),
+                    IngestionPipeline.MalformedRecordPolicy.FAIL)
                 .collect());
     assertThrows(IllegalArgumentException.class, () -> SparkCorrelationEngine.correlate(List.of()));
   }

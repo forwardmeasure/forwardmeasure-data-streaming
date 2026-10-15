@@ -22,6 +22,7 @@ import com.forwardmeasure.authzen.AuthorizationService;
 import com.forwardmeasure.authzen.client.AuthzenAuthorizationFactory;
 import com.forwardmeasure.datastreaming.launcher.application.DirectIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.IngestionJobPolicy;
+import com.forwardmeasure.datastreaming.launcher.application.RunnerImages;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.auth.TenantWorkflowExecutions;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.IngestionRunResource;
@@ -172,27 +173,46 @@ public class LauncherSpringBinding {
   DirectIngestionLauncher directIngestionLauncher(
       IngestionJobPolicy policy,
       AuthorizationService authorization,
-      @Value("${datastreaming.launcher.pekko.image}") String pekkoImage,
-      @Value("${datastreaming.launcher.pekko.command}") String pekkoCommand,
-      @Value("${datastreaming.launcher.kafka-streams.image}") String kafkaStreamsImage,
-      @Value("${datastreaming.launcher.kafka-streams.command}") String kafkaStreamsCommand,
+      @Value("${datastreaming.launcher.engine}") String engine,
+      @Value("${datastreaming.launcher.pekko.image:}") String pekkoImage,
+      @Value("${datastreaming.launcher.pekko.command:}") String pekkoCommand,
+      @Value("${datastreaming.launcher.kafka-streams.image:}") String kafkaStreamsImage,
+      @Value("${datastreaming.launcher.kafka-streams.command:}") String kafkaStreamsCommand,
+      @Value("${datastreaming.launcher.loader.image:}") String loaderImage,
+      @Value("${datastreaming.launcher.loader.command:}") String loaderCommand,
       @Value("${datastreaming.launcher.k8s.image-pull-secrets}") String pullSecrets,
       @Value("${datastreaming.launcher.k8s.host-aliases}") String hostAliases,
       @Value("${datastreaming.launcher.spark.image:}") String sparkImage,
       @Value("${datastreaming.launcher.spark.command:}") String sparkCommand,
-      @Value("${datastreaming.launcher.kafka.bootstrap-servers:}") String kafkaBootstrapServers) {
+      @Value("${datastreaming.launcher.kafka.bootstrap-servers:}") String kafkaBootstrapServers,
+      @Value("${datastreaming.launcher.journal.env:}") String journalEnv,
+      @Value("${datastreaming.launcher.journal.secret-env:}") String journalSecretEnv,
+      @Value("${datastreaming.launcher.journal.database-proxy.image:}") String databaseProxyImage,
+      @Value("${datastreaming.launcher.journal.database-proxy.instance-secret:}")
+          String databaseProxyInstanceSecret,
+      @Value("${datastreaming.launcher.journal.database-proxy.service-account:}")
+          String databaseProxyServiceAccount) {
     return new DirectIngestionLauncher(
         policy,
         authorization,
-        pekkoImage,
-        pekkoCommand,
-        kafkaStreamsImage,
-        kafkaStreamsCommand,
+        RunnerImages.configured(
+            engine,
+            pekkoImage,
+            pekkoCommand,
+            kafkaStreamsImage,
+            kafkaStreamsCommand,
+            loaderImage,
+            loaderCommand,
+            sparkImage,
+            sparkCommand,
+            kafkaBootstrapServers,
+            journalEnv,
+            journalSecretEnv,
+            databaseProxyImage,
+            databaseProxyInstanceSecret,
+            databaseProxyServiceAccount),
         commaSeparatedList(pullSecrets),
-        commaSeparatedMap(hostAliases),
-        blankToNull(sparkImage),
-        blankToNull(sparkCommand),
-        blankToNull(kafkaBootstrapServers));
+        commaSeparatedMap(hostAliases));
   }
 
   @Bean

@@ -18,6 +18,7 @@ package com.forwardmeasure.datastreaming.executor.pekko;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.forwardmeasure.datastreaming.api.SourceSpec;
@@ -25,7 +26,9 @@ import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.api.TransformSpec.FieldRule;
 import com.forwardmeasure.datastreaming.connector.camel.CamelBridge;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline.MalformedRecordPolicy;
+import com.forwardmeasure.datastreaming.sourcereaders.SqlDataSources;
 import com.forwardmeasure.datastreaming.transforms.NamedTransform;
+import com.forwardmeasure.datastreaming.transforms.NamedTransformCatalog;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -110,15 +113,27 @@ class PekkoSourceContractTest {
           assertInstanceOf(IllegalArgumentException.class, failure.getCause());
         else assertInstanceOf(java.io.UncheckedIOException.class, failure.getCause());
       }
+      // Without maxMessages a bounded Kafka read stops at the end offsets captured at start, as on
+      // Kafka Streams; the source is built without connecting. A malformed bound still fails.
       for (var options : List.of(Map.<String, String>of(), Map.of("maxMessages", " "))) {
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                PekkoIngestionRunner.rowSource(
-                    bridge,
-                    new SourceSpec(
-                        "kafka", "kafka:never?brokers=127.0.0.1:1", null, null, null, options)));
+        assertNotNull(
+            PekkoIngestionRunner.rowSource(
+                bridge,
+                new SourceSpec(
+                    "kafka", "kafka:never?brokers=127.0.0.1:1", null, null, null, options)));
       }
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              PekkoIngestionRunner.rowSource(
+                  bridge,
+                  new SourceSpec(
+                      "kafka",
+                      "kafka:never?brokers=127.0.0.1:1",
+                      null,
+                      null,
+                      null,
+                      Map.of("maxMessages", "many"))));
       for (String query : new String[] {null, " "}) {
         assertThrows(
             IllegalArgumentException.class,
@@ -167,7 +182,15 @@ class PekkoSourceContractTest {
                 Map.of());
         var result =
             PekkoCorrelationEngine.readAndMap(
-                    bridge, system, source, mapper, "uid", "source", 1.0, transforms, policy)
+                    bridge,
+                    system,
+                    source,
+                    mapper,
+                    "uid",
+                    "source",
+                    1.0,
+                    NamedTransformCatalog.builtIns().with(transforms),
+                    policy)
                 .toCompletableFuture();
         if (policy == MalformedRecordPolicy.FAIL) {
           var error =
@@ -211,7 +234,7 @@ class PekkoSourceContractTest {
                     "uid",
                     "source",
                     1.0,
-                    Map.of(),
+                    NamedTransformCatalog.installed(),
                     MalformedRecordPolicy.FAIL)
                 .toCompletableFuture();
         var error = assertThrows(ExecutionException.class, () -> result.get(10, TimeUnit.SECONDS));

@@ -58,7 +58,7 @@ class IngestionSpecTest {
                 inputs:
                   value: entityType
                   entity_indicator: entityIndicator
-                transform: classify_party_kind
+                transform: test_classify_party_kind
               - target: locations
                 source: locations
                 transform: parse_worldcheck_locations
@@ -164,7 +164,7 @@ class IngestionSpecTest {
     assertEquals(Map.of("value", "dateOfBirth"), dob.effectiveInputs());
 
     TransformSpec.FieldRule entityKind = reference.mapper().fields().get(2);
-    assertEquals("classify_party_kind", entityKind.transform());
+    assertEquals("test_classify_party_kind", entityKind.transform());
     assertEquals(
         Map.of("value", "entityType", "entity_indicator", "entityIndicator"),
         entityKind.effectiveInputs());

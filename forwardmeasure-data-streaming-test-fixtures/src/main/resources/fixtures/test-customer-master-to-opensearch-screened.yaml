@@ -24,15 +24,15 @@
 #
 # Three net-new-beyond-plan named transforms were needed to port this mapping faithfully against
 # FieldMappingEngine's real constraints (the plan's own text anticipated one -
-# classify_party_kind_test_customer_master): FieldMappingEngine's repeated+metadata accumulation (see its
+# test_classify_customer_master_party_kind): FieldMappingEngine's repeated+metadata accumulation (see its
 # own javadoc) only composes several single-valued rules that all share one fixed per-rule tag - it
 # has no way to also merge in a rule whose own transform already returns a fully-formed, variably-
 # shaped structure (Customer Master's own `locations` needs 3 structured blocks assembled from 15
 # distinct source columns; `identifiers` needs 2 fixed-scheme sources merged with
 # parse_identifier_pairs' own variably-scheme output) onto the same target field. Each of
-# build_test_customer_master_locations/build_test_customer_master_identifiers resolves its entire target list in
+# test_build_customer_master_locations/test_build_customer_master_identifiers resolves its entire target list in
 # one rule instead - the same "one rule returns the whole target list" shape
-# parse_tilde_delimited_locations (worldcheck-to-opensearch.yaml's own sibling field) already uses.
+# test_parse_tilde_delimited_locations (worldcheck-to-opensearch.yaml's own sibling field) already uses.
 # join_labeled_fields (generic, not Customer-Master-specific) exists because `template`'s own
 # all-placeholders-or-null semantics is wrong for further_information's 7 optional
 # business-relationship fields, which the legacy mapping happily leaves partially populated.
@@ -45,7 +45,7 @@
 # behavior, not a gap).
 #
 # Deliberate sibling of test-customer-master-to-opensearch.yaml, not an edit to it: this variant adds
-# one extra field rule (screening_hits, via the HEAVY screen_against_worldcheck_reference transform)
+# one extra field rule (screening_hits, via the HEAVY test_screen_against_reference transform)
 # specifically to trigger ExecutionPlanCompiler.resolveSparkStage - the real business use case is
 # screening an onboarded customer against the WorldCheck sanctions/PEP reference population (see that
 # transform's own javadoc). Editing the base spec in place would flip every one of the 12 already-
@@ -92,13 +92,13 @@ sources:
             name_type: ALIAS
         - target: entity_kind
           source: ENTITYS_TYPE
-          transform: classify_party_kind_test_customer_master
+          transform: test_classify_customer_master_party_kind
         - target: identifiers
           inputs:
             business_entity_record_id: BUSINESS_ENTITY_RECORD_ID
-            gems_id: GEMS_ID
+            kyc_id: KYC_ID
             entity_public_identifier: ENTITY_PUBLIC_IDENTIFIER
-          transform: build_test_customer_master_identifiers
+          transform: test_build_customer_master_identifiers
           optional: true
         - target: date_of_birth
           source: DATE_OF_BIRTH_DATE_OF_INCORPORATION
@@ -160,7 +160,7 @@ sources:
             city_3: ENTITY_LOCATION_3_CITY
             state_or_province_3: ENTITY_LOCATION_3_STATE_PROVINCE
             country_3: ENTITY_LOCATION_3_COUNTRY
-          transform: build_test_customer_master_locations
+          transform: test_build_customer_master_locations
           optional: true
         - target: screening_hits
           inputs:
@@ -172,7 +172,7 @@ sources:
             country: ENTITY_LOCATION_1_COUNTRY
             nationality: COUNTRY_OF_NATIONALITY
             dob: DATE_OF_BIRTH_DATE_OF_INCORPORATION
-          transform: screen_against_worldcheck_reference
+          transform: test_screen_against_reference
           optional: true
 
 sink:

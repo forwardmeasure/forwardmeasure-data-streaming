@@ -37,6 +37,7 @@ import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.launcher.application.DirectIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.DirectLaunchRequest;
 import com.forwardmeasure.datastreaming.launcher.application.IngestionJobPolicy;
+import com.forwardmeasure.datastreaming.launcher.application.RunnerImages;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.dto.RunAccepted;
 import com.forwardmeasure.jpa.tenancy.TenantId;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
@@ -70,15 +71,6 @@ final class IngestionRunResourceTest {
           + "73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662";
   private static final String MARKER = "ingestion-run-resource-marker-2b6d";
 
-  /**
-   * Every spec here uses a {@code file} source, which {@code ExecutionPlanCompiler} always resolves
-   * to {@code PEKKO_STREAMS} - this command is never actually exec'd, only configured so {@link
-   * DirectIngestionLauncher}'s constructor (which requires both engines' images/commands) can be
-   * satisfied.
-   */
-  private static final String KAFKA_STREAMS_STAND_IN_COMMAND =
-      "grep -q this-marker-only-exists-in-the-kafka-streams-path-never-in-this-test";
-
   private static final ActiveOrganization ACTOR =
       new ActiveOrganization(
           new TenantId(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef")),
@@ -109,10 +101,9 @@ final class IngestionRunResourceTest {
               new DirectIngestionLauncher(
                   IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
                   AUTHORIZATION,
-                  STAND_IN_IMAGE,
-                  "grep -q " + MARKER,
-                  STAND_IN_IMAGE,
-                  KAFKA_STREAMS_STAND_IN_COMMAND),
+                  pekkoInstallation("grep -q " + MARKER),
+                  java.util.List.of(),
+                  java.util.Map.of()),
               client,
               ORGANIZATIONS);
       DirectLaunchRequest request =
@@ -147,10 +138,9 @@ final class IngestionRunResourceTest {
               new DirectIngestionLauncher(
                   IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
                   AUTHORIZATION,
-                  STAND_IN_IMAGE,
-                  "grep -q " + MARKER,
-                  STAND_IN_IMAGE,
-                  KAFKA_STREAMS_STAND_IN_COMMAND),
+                  pekkoInstallation("grep -q " + MARKER),
+                  java.util.List.of(),
+                  java.util.Map.of()),
               client,
               ORGANIZATIONS);
 
@@ -173,10 +163,9 @@ final class IngestionRunResourceTest {
               new DirectIngestionLauncher(
                   IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
                   AUTHORIZATION,
-                  STAND_IN_IMAGE,
-                  "grep -q " + MARKER,
-                  STAND_IN_IMAGE,
-                  KAFKA_STREAMS_STAND_IN_COMMAND),
+                  pekkoInstallation("grep -q " + MARKER),
+                  java.util.List.of(),
+                  java.util.Map.of()),
               client,
               ORGANIZATIONS);
 
@@ -195,10 +184,9 @@ final class IngestionRunResourceTest {
               new DirectIngestionLauncher(
                   IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(STAND_IN_IMAGE)),
                   AUTHORIZATION,
-                  STAND_IN_IMAGE,
-                  "sh -c 'sleep 300 #'",
-                  STAND_IN_IMAGE,
-                  "sh -c 'sleep 300 #'"),
+                  pekkoInstallation("sh -c 'sleep 300 #'"),
+                  java.util.List.of(),
+                  java.util.Map.of()),
               client,
               ORGANIZATIONS);
       DirectLaunchRequest request =
@@ -291,5 +279,14 @@ final class IngestionRunResourceTest {
     } catch (NotFoundException missing) {
       return false;
     }
+  }
+
+  private static RunnerImages pekkoInstallation(String deliveryCommand) {
+    return new RunnerImages(
+        com.forwardmeasure.datastreaming.api.DeliveryEngineKind.PEKKO_STREAMS,
+        new RunnerImages.Runner(STAND_IN_IMAGE, deliveryCommand),
+        null,
+        new RunnerImages.Runner(STAND_IN_IMAGE, "false"),
+        "unused:9092");
   }
 }

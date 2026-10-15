@@ -23,6 +23,7 @@ import com.forwardmeasure.authzen.ActiveOrganization;
 import com.forwardmeasure.authzen.AuthorizationDecision;
 import com.forwardmeasure.authzen.AuthorizationRequest;
 import com.forwardmeasure.authzen.AuthorizationService;
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
 import com.forwardmeasure.datastreaming.testfixtures.WorldCheckFixtures;
 import com.forwardmeasure.jpa.tenancy.TenantId;
@@ -147,10 +148,12 @@ final class DirectIngestionLauncherKafkaStreamsRealImageIntegrationTest {
           new DirectIngestionLauncher(
               IngestionJobPolicy.configured(Set.of(NAMESPACE), Set.of(KAFKA_STREAMS_IMAGE)),
               new PermitAllAuthorizationService(),
-              "unused",
-              "true",
-              KAFKA_STREAMS_IMAGE,
-              RUN_COMMAND,
+              new RunnerImages(
+                  DeliveryEngineKind.KAFKA_STREAMS,
+                  new RunnerImages.Runner(KAFKA_STREAMS_IMAGE, RUN_COMMAND),
+                  new RunnerImages.Runner("unused-loader", "false"),
+                  new RunnerImages.Runner("unused-spark", "false"),
+                  "unused:9092"),
               List.of(PULL_SECRET_NAME),
               Map.of("host.docker.internal", gatewayIp));
       DirectLaunchRequest request =

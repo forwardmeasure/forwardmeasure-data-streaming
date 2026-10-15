@@ -16,27 +16,37 @@
  */
 package com.forwardmeasure.datastreaming.transforms;
 
+import com.forwardmeasure.datastreaming.api.TransformCharacteristics;
 import java.io.Serializable;
 import java.util.Map;
+import java.util.Objects;
 
 /**
- * One named transform - single- or multi-input, always the same shape. Ported verbatim from {@code
- * forwardmeasure-entity-intelligence}'s own {@code NamedTransform} (D3, corrected): every
- * transform, regardless of arity, is a function from its named inputs to a value; {@link
- * NamedTransformRegistry} is one flat map, no arity-based branching anywhere.
- *
- * <p>A single-input transform's one input is keyed {@code "value"} by convention (see {@code
- * com.forwardmeasure.datastreaming.api.TransformSpec.FieldRule#effectiveInputs()}).
- *
- * <p>Extends {@link Serializable}: a caller's own domain-specific transforms (e.g. WorldCheck's own
- * location-string parser, {@code parse_worldcheck_locations} - deliberately not in this module's
- * own {@code NamedTransformRegistry}, see its own javadoc for which ones are and aren't) are
- * supplied per-call as {@code supplementalTransforms} (see {@code FieldMappingEngine#map(SourceRow,
- * TransformSpec, Map)}), and on the Spark executor that map crosses a real closure/shuffle boundary
- * (D4) - a method reference or lambda only serializes there if the functional interface it targets
- * is itself declared {@code Serializable}.
+ * A named row function a {@code TransformSpec} field rule refers to. It declares its own {@link
+ * TransformCharacteristics}, so the planner learns what it needs from the transform itself rather
+ * than from a separate table. The default is {@link TransformCharacteristics#PURE_ROW_FUNCTION}.
  */
 @FunctionalInterface
 public interface NamedTransform extends Serializable {
   Object apply(Map<String, String> inputs);
+
+  default TransformCharacteristics characteristics() {
+    return TransformCharacteristics.PURE_ROW_FUNCTION;
+  }
+
+  /** A transform with characteristics other than the pure-row-function default. */
+  static NamedTransform of(TransformCharacteristics characteristics, NamedTransform function) {
+    Objects.requireNonNull(characteristics, "characteristics");
+    Objects.requireNonNull(function, "function");
+    return new Declared(characteristics, function);
+  }
+
+  /** {@link #of}'s implementation. */
+  record Declared(TransformCharacteristics characteristics, NamedTransform function)
+      implements NamedTransform {
+    @Override
+    public Object apply(Map<String, String> inputs) {
+      return function.apply(inputs);
+    }
+  }
 }

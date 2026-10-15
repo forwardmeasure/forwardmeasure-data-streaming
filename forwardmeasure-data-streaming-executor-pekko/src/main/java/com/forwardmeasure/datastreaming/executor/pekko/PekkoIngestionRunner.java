@@ -32,6 +32,9 @@ import com.forwardmeasure.datastreaming.core.IngestionPipeline;
 import com.forwardmeasure.datastreaming.mappers.FieldMappingEngine;
 import com.forwardmeasure.datastreaming.mappers.MapSourceRow;
 import com.forwardmeasure.datastreaming.mappers.SourceRow;
+import com.forwardmeasure.datastreaming.sourcereaders.SqlDataSources;
+import com.forwardmeasure.datastreaming.sourcereaders.StreamingTextRows;
+import com.forwardmeasure.datastreaming.sourcereaders.TextContent;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URLEncoder;
@@ -156,6 +159,9 @@ public final class PekkoIngestionRunner {
       Source<SourceRow, ?> source = rowSource(bridge, sourcePlan.source());
       Sink<Map<String, Object>, CompletionStage<Done>> sink =
           buildSink(bridge, spec.sink(), spec.delivery(), spec.errors(), objectMapper, processed);
+      if (spec.transforms() != null) {
+        sink = PekkoGraphStages.bounded(spec, sourcePlan.sourceKey()).toMat(sink, Keep.right());
+      }
       CompletionStage<Done> resultStage =
           PekkoIngestionPipeline.run(
               source,
@@ -163,7 +169,8 @@ public final class PekkoIngestionRunner {
               spec.errors(),
               row -> engine.map(row, sourcePlan.mapper()),
               sink,
-              system);
+              system,
+              spec.transforms() != null);
       resultStage.toCompletableFuture().join();
     } catch (CompletionException e) {
       // join() always wraps a stage's real failure here, even one this method otherwise promises
@@ -517,23 +524,28 @@ public final class PekkoIngestionRunner {
    * exchange, the whole result set, once {@code consumer.useIterator=false} is set), Camel's kafka
    * consumer is a genuinely unbounded polling route with no built-in "read a snapshot and stop"
    * notion at all - each message is its own exchange, arriving whenever it arrives. So this
-   * connector requires an explicit {@code maxMessages} entry in {@code options} (not a sensible
-   * default the way {@code header=true} is for csv): {@code take(maxMessages)} is this run's own
-   * bounded-read policy, the same reactive-streams-cancellation-stops-the-route mechanism {@link
-   * #textRowSource} already relies on, just parameterized by count instead of "one file, one read".
-   * Each message body is parsed as one JSON object directly (a Kafka message is already one
-   * discrete unit, unlike a file's "whole content in one exchange that then needs splitting") -
-   * {@code format.type()} defaults to {@code json} here, not {@code csv}, since a delimited-text
-   * message body isn't a realistic Kafka payload shape.
+   * connector takes a {@code maxMessages} entry in {@code options} - without one, the run reads the
+   * topic up to the end offsets captured when it starts ({@link KafkaFrontierReader}), the shape of
+   * a stage handoff: {@code take(maxMessages)} is this run's own bounded-read policy, the same
+   * reactive-streams-cancellation-stops-the-route mechanism {@link #textRowSource} already relies
+   * on, just parameterized by count instead of "one file, one read". Each message body is parsed as
+   * one JSON object directly (a Kafka message is already one discrete unit, unlike a file's "whole
+   * content in one exchange that then needs splitting") - {@code format.type()} defaults to {@code
+   * json} here, not {@code csv}, since a delimited-text message body isn't a realistic Kafka
+   * payload shape.
    */
   private static Source<SourceRow, ?> kafkaRowSource(CamelBridge bridge, SourceSpec source) {
     String maxMessagesValue = source.options().get("maxMessages");
     if (maxMessagesValue == null || maxMessagesValue.isBlank()) {
-      throw new IllegalArgumentException(
-          "PekkoIngestionRunner: a 'kafka' source needs a 'maxMessages' entry in its own options"
-              + " map - Camel's own kafka consumer has no built-in 'read a snapshot and stop'"
-              + " semantics, so this run needs an explicit bound on how many messages make up one"
-              + " complete read");
+      // No count given: read the topic as it stands when the run starts - every record up to the
+      // end offsets captured then, as Kafka Streams' bounded runner does (a stage handoff topic).
+      com.forwardmeasure.datastreaming.api.KafkaConnectorUri uri =
+          com.forwardmeasure.datastreaming.api.KafkaConnectorUri.parse(source.uri());
+      return Source.unfoldResource(
+              () -> new KafkaFrontierReader(uri.bootstrapServers(), uri.topic()),
+              reader -> java.util.Optional.ofNullable(reader.next()),
+              KafkaFrontierReader::close)
+          .map(PekkoIngestionRunner::parseOneJsonRow);
     }
     int maxMessages = Integer.parseInt(maxMessagesValue.strip());
     Publisher<String> messagePublisher = bridge.source(source.uri(), String.class);

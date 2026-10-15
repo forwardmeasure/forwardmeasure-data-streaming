@@ -24,6 +24,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
+import com.forwardmeasure.datastreaming.testfixtures.TestTransformImages;
 import com.forwardmeasure.datastreaming.testfixtures.WorldCheckFixtures;
 import com.forwardmeasure.testcontainers.opensearch.OpenSearchTestContainer;
 import java.net.URI;
@@ -66,9 +67,10 @@ public final class ContinuousDeliveryAcceptanceFixture implements AutoCloseable 
           runtime
               .kubernetes()
               .loadImageAndPinDigest(
-                  Objects.requireNonNull(
-                      System.getProperty("fds.acceptance." + engine + ".image"),
-                      "A current local " + engine + " executor image is required"));
+                  TestTransformImages.withTestTransforms(
+                      Objects.requireNonNull(
+                          System.getProperty("fds.acceptance." + engine + ".image"),
+                          "A current local " + engine + " executor image is required")));
       configureDisposableDns(runtime);
       try (var admin =
           AdminClient.create(Map.of("bootstrap.servers", runtime.kafka().bootstrapServers()))) {

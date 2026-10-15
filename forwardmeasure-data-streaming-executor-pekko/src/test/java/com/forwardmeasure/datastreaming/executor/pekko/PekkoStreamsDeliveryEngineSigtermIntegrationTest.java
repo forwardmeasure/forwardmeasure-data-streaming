@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forwardmeasure.datastreaming.api.ConcurrencySpec;
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
 import com.forwardmeasure.datastreaming.api.DeliverySemantics;
 import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
@@ -144,7 +145,8 @@ class PekkoStreamsDeliveryEngineSigtermIntegrationTest {
       adminProperties.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.bootstrapServers());
       String group =
           com.forwardmeasure.datastreaming.api.ExecutionIdentity.of(
-              com.forwardmeasure.datastreaming.core.ExecutionPlanCompiler.compile(spec),
+              com.forwardmeasure.datastreaming.core.ExecutionPlanCompiler.compile(
+                  spec, DeliveryEngineKind.PEKKO_STREAMS),
               "fds-pekko-continuous-",
               System.getenv("FDS_EXECUTION_ID"));
       try (Admin admin = Admin.create(adminProperties)) {
@@ -211,7 +213,8 @@ class PekkoStreamsDeliveryEngineSigtermIntegrationTest {
       properties.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.bootstrapServers());
       String group =
           com.forwardmeasure.datastreaming.api.ExecutionIdentity.of(
-              com.forwardmeasure.datastreaming.core.ExecutionPlanCompiler.compile(spec),
+              com.forwardmeasure.datastreaming.core.ExecutionPlanCompiler.compile(
+                  spec, DeliveryEngineKind.PEKKO_STREAMS),
               "fds-pekko-continuous-",
               System.getenv("FDS_EXECUTION_ID"));
       try (Admin admin = Admin.create(properties)) {

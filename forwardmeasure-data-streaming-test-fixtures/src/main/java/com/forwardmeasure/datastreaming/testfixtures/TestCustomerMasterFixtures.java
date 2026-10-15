@@ -33,7 +33,7 @@ import java.util.Map;
  * an invented shape. {@link #SAMPLE_CSV}'s 4 rows are real, unmodified rows sliced directly out of
  * a real customer-master POV dataset (~175k + ~45k rows total, path likewise withheld) - two {@code
  * Individual} rows (one with SSN/DOB/location populated, one with almost every optional field
- * blank), one well-populated organisation row (all 3 structured locations, GEMS_ID, a single LEI
+ * blank), one well-populated organisation row (all 3 structured locations, KYC_ID, a single LEI
  * identifier pair, incorporation date, every business-relationship field populated), and one {@code
  * Trust (Corp & Ind)} row with a populated {@code TRADE_AS_NAME} alias - chosen to exercise every
  * field rule at least once, the same coverage reasoning {@link WorldCheckFixtures#SAMPLE_TSV}
@@ -51,7 +51,7 @@ public final class TestCustomerMasterFixtures {
   private TestCustomerMasterFixtures() {}
 
   private static final String HEADER =
-      "ENTITYS_UNIQUE_ID|BUSINESS_ENTITY_RECORD_ID|GEMS_ID|ENTITYS_FULL_NAME|ENTITY_PREFIX|"
+      "ENTITYS_UNIQUE_ID|BUSINESS_ENTITY_RECORD_ID|KYC_ID|ENTITYS_FULL_NAME|ENTITY_PREFIX|"
           + "ENTITY_FIRST_NAME|ENTITY_MIDDLE_NAME|ENTITY_LAST_NAME|ENTITY_SUFFIX|TRADE_AS_NAME|"
           + "FORMER_NAME|ENTITY_LOCATION_1_ADDRESS_LINE_1|ENTITY_LOCATION_1_ADDRESS_LINE_2|"
           + "ENTITY_LOCATION_1_CITY|ENTITY_LOCATION_1_STATE_PROVINCE|ENTITY_LOCATION_1_COUNTRY|"
@@ -67,7 +67,7 @@ public final class TestCustomerMasterFixtures {
           + "ENTITY_CLASSIFICATION|PLACE_OF_BIRTH|ENTITYS_FULL_NAME|ENTITY_LOCATION_1_COUNTRY|"
           + "ENTITY_LOCATION_1_CITY|ENTITY_LOCATION_1_STATE_PROVINCE";
 
-  /** Individual, ss-1: SSN, DOB, location1 (address/city/state/country), job title populated. */
+  /** Individual, cm-1: SSN, DOB, location1 (address/city/state/country), job title populated. */
   private static final String ROW_INDIVIDUAL_WELL_POPULATED =
       "KYC85310AML|f1321672-c82e-4595-93be-be072caf2481||Steven DOSHAY||Steven||DOSHAY||||3521"
           + " Malaga Ct||CA|California|United States (the)|||||||||||||19531231||Senior"
@@ -76,7 +76,7 @@ public final class TestCustomerMasterFixtures {
           + " and Trust Company:United States (the);||||Associated Third Party||Steven"
           + " DOSHAY|United States (the)|CA|California";
 
-  /** Individual, ss-2: almost every optional field blank - tests optional-field robustness. */
+  /** Individual, cm-2: almost every optional field blank - tests optional-field robustness. */
   private static final String ROW_INDIVIDUAL_MINIMAL =
       "KYC1955299c-71f6-40ad-9a2c-9e949fb4f8cdAML|1955299c-71f6-40ad-9a2c-9e949fb4f8cd||"
           + "Chui-Lung Chang||Chui-Lung||Chang|||||||||||||||||||||18000101||Director|2025-12-18|"
@@ -89,7 +89,7 @@ public final class TestCustomerMasterFixtures {
           + "Customer Master Global Markets, LLC:United States (the);||||Associated Third Party||"
           + "Chui-Lung Chang|||";
 
-  /** Organisation (Mutual Fund), ss-3: all 3 locations, GEMS_ID, a single LEI identifier pair. */
+  /** Organisation (Mutual Fund), cm-3: all 3 locations, KYC_ID, a single LEI identifier pair. */
   private static final String ROW_ORGANIZATION_ALL_LOCATIONS =
       "KYC22438AML|0134e358-9af0-4150-a210-90761b91143e|202238556|iShares V Public Limited Company"
           + " - iShares J.P. Morgan $ EM Corp Bond UCITS ETF||||||||J.P. Morgan, 200 Capital"
@@ -126,7 +126,7 @@ public final class TestCustomerMasterFixtures {
           + " (Contracting Party)||iShares V Public Limited Company - iShares J.P. Morgan $ EM Corp"
           + " Bond UCITS ETF|Ireland|Dublin 2|Dublin";
 
-  /** Trust, ss-4: TRADE_AS_NAME alias populated, a TIN identifier, partial location1. */
+  /** Trust, cm-4: TRADE_AS_NAME alias populated, a TIN identifier, partial location1. */
   private static final String ROW_TRUST_WITH_ALIAS =
       "KYC232217AML|40b65e7d-e3f9-4075-9d4c-1da1e4c3647c|333614640|"
           + "DOROTHY C. BECKMANN CHARITABLE REMAINDER UNITRUST||||||"
@@ -142,8 +142,8 @@ public final class TestCustomerMasterFixtures {
 
   /**
    * Real Customer Master customer-master shape: header + 4 real, unmodified rows sliced from the
-   * real POV files (see this class's own javadoc for which rows and why). ss-1/ss-2: individuals.
-   * ss-3: organisation (Mutual Fund) with all 3 structured locations. ss-4: trust with an alias
+   * real POV files (see this class's own javadoc for which rows and why). cm-1/cm-2: individuals.
+   * cm-3: organisation (Mutual Fund) with all 3 structured locations. cm-4: trust with an alias
    * name.
    *
    * <p>The real source file's own trailing pipe (an empty, undocumented, never-mapped 46th column)
@@ -179,12 +179,12 @@ public final class TestCustomerMasterFixtures {
 
   /**
    * {@link #SAMPLE_CSV} plus one additional, real-shaped row engineered to score a genuine match
-   * against {@code screen_against_worldcheck_reference}'s own bundled reference population (see
-   * that transform's javadoc, in {@code forwardmeasure-data-streaming-transforms}) - name, country,
-   * and date of birth all agree with reference entity {@code wc-1}. None of {@link #SAMPLE_CSV}'s
-   * own 4 real rows are engineered to match anything (real customers overwhelmingly don't), so a
-   * test proving the screening path actually produces a non-empty {@code screening_hits} result
-   * needs a row that deliberately does.
+   * against {@code test_screen_against_reference}'s own bundled reference population (see that
+   * transform's javadoc, in {@code forwardmeasure-data-streaming-transforms}) - name, country, and
+   * date of birth all agree with reference entity {@code wc-1}. None of {@link #SAMPLE_CSV}'s own 4
+   * real rows are engineered to match anything (real customers overwhelmingly don't), so a test
+   * proving the screening path actually produces a non-empty {@code screening_hits} result needs a
+   * row that deliberately does.
    *
    * <p>Built via {@link #buildRow}, not a hand-typed pipe-delimited literal - this fixture's real
    * column count (46, including the source system's own trailing positional-duplicate columns) is
@@ -261,7 +261,7 @@ public final class TestCustomerMasterFixtures {
   /**
    * The one real {@code HEAVY}-transform spec in this fixture set: {@link #boundedFileSpec}'s
    * identical mapping plus one added {@code screening_hits} field rule ({@code
-   * screen_against_worldcheck_reference}) - the only spec in this whole test-fixtures module whose
+   * test_screen_against_reference}) - the only spec in this whole test-fixtures module whose
    * compiled {@link com.forwardmeasure.datastreaming.api.ExecutionPlan} carries a real {@code
    * sparkStage}, since every other registered transform is {@code LIGHT}. Deliberately a separate
    * spec/index/index-settings from {@link #boundedFileSpec} - see that YAML's own comment for why

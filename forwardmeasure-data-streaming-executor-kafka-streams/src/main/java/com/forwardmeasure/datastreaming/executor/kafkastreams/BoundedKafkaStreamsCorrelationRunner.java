@@ -87,6 +87,18 @@ final class BoundedKafkaStreamsCorrelationRunner {
       ErrorPolicy errors,
       FieldMappingEngine mapper,
       MergePolicy policy) {
+    return run(sources, blockingField, sink, errors, mapper, policy, null);
+  }
+
+  /** As above, running the records through {@code graph} when the spec declares one. */
+  static Result run(
+      List<SourcePlan> sources,
+      String blockingField,
+      SinkSpec sink,
+      ErrorPolicy errors,
+      FieldMappingEngine mapper,
+      MergePolicy policy,
+      com.forwardmeasure.datastreaming.api.TransformGraph graph) {
     if (sources.size() <= 1) {
       throw new IllegalArgumentException(
           "BoundedKafkaStreamsCorrelationRunner: expected more than one source, got "
@@ -104,13 +116,32 @@ final class BoundedKafkaStreamsCorrelationRunner {
     for (CorrelationRecord record : allRecords) {
       grouped.computeIfAbsent(record.blockingKey(), key -> new ArrayList<>()).add(record);
     }
+    List<Map<String, Object>> outputs = new ArrayList<>();
+    if (graph == null || !graph.joins()) {
+      for (List<CorrelationRecord> group : grouped.values()) {
+        outputs.add(mergeGroup(group, policy));
+      }
+    }
+    if (graph != null) {
+      outputs =
+          com.forwardmeasure.datastreaming.core.stateful.GraphRecords.boundedCorrelated(
+              graph,
+              blockingField,
+              allRecords.stream()
+                  .map(
+                      record ->
+                          new com.forwardmeasure.datastreaming.core.stateful.GraphRecords.Sourced(
+                              record.sourceKey(), record.mappedFields()))
+                  .toList(),
+              outputs,
+              malformedRecordPolicy);
+    }
 
     long groupCount = 0;
     try (SinkRowWriter sinkRowWriter = new OpenSearchSinkRowWriter(sink)) {
-      for (List<CorrelationRecord> group : grouped.values()) {
+      for (Map<String, Object> output : outputs) {
         IngestionPipeline.withSinkFailureHandlingBlocking(
-            IngestionPipeline.SinkFailurePolicy.from(errors),
-            () -> sinkRowWriter.write(mergeGroup(group, policy)));
+            IngestionPipeline.SinkFailurePolicy.from(errors), () -> sinkRowWriter.write(output));
         groupCount++;
       }
     }

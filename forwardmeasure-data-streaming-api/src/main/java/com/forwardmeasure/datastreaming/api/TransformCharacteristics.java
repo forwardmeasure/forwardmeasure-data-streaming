@@ -22,15 +22,21 @@ import java.util.Objects;
  * What a named transform declares about itself, so the planner can resolve {@link
  * DeliveryEngineKind} and whether a {@link SparkStagePlan} is needed automatically - the author
  * names a transform, never an engine (see the repo's own gap-bridging plan, "the planner" section).
- * No engine-selection table is implemented against this yet; this type exists so one can be built
- * without changing the declarative surface later.
+ * Every {@code NamedTransform} declares its own; {@link #PURE_ROW_FUNCTION} is the default.
  */
 public record TransformCharacteristics(
     Cardinality cardinality,
     StateRequirement state,
     ExecutionCost cost,
     boolean orderSensitive,
-    boolean deterministic) {
+    boolean deterministic)
+    // A transform carries its characteristics, and a Spark stage ships transforms to executors.
+    implements java.io.Serializable {
+
+  /** One row in, one value out, no state, cheap and deterministic. */
+  public static final TransformCharacteristics PURE_ROW_FUNCTION =
+      new TransformCharacteristics(
+          Cardinality.ONE, StateRequirement.STATELESS, ExecutionCost.LIGHT, false, true);
 
   public TransformCharacteristics {
     Objects.requireNonNull(cardinality, "cardinality");
@@ -45,9 +51,7 @@ public record TransformCharacteristics(
     CORRELATED
   }
 
-  /**
-   * Stateless transforms never force {@link DeliveryEngineKind#KAFKA_STREAMS}; stateful ones do.
-   */
+  /** Whether a transform keeps state across rows. Either delivery engine runs both. */
   public enum StateRequirement {
     STATELESS,
     STATEFUL

@@ -20,12 +20,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forwardmeasure.authzen.ActiveOrganization;
 import com.forwardmeasure.authzen.AuthorizationRequest;
 import com.forwardmeasure.authzen.AuthorizationService;
-import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
 import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.ExecutionPlan;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
-import com.forwardmeasure.datastreaming.core.ExecutionPlanCompiler;
-import com.forwardmeasure.datastreaming.core.SparkHandoffSpecs;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobLifecycle;
 import com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobObservation;
 import io.fabric8.kubernetes.api.model.ConfigMap;
@@ -52,36 +49,19 @@ import java.util.Optional;
  * <p><b>Collapsed 2026-09-21</b> from two classes ({@code DirectIngestionLauncher}, {@code
  * DirectCorrelationLauncher}) into one: the unified {@link IngestionSpec} already expresses both
  * single-source and correlated runs via {@code sources.size()} - there is no longer a real spec-
- * shape difference to justify two launcher classes, and which engine runs a spec is resolved
- * automatically by {@link ExecutionPlanCompiler} (see the repo's own gap-bridging plan, "the
- * planner" section), not read off a raw {@code engine} string the author never writes anymore.
+ * shape difference to justify two launcher classes. Which engine runs a spec is never resolved per
+ * spec: it is the installation's one engine, {@link RunnerImages#engine()}.
  *
- * <p><b>Two-Job Spark-then-delivery pipeline (added 2026-09-25)</b>: a plan whose {@code
- * sparkStage} is present dispatches as two real, sequential Kubernetes Jobs - Spark first (writing
- * every mapped row to {@code plan.sparkStage().get().handoffTopic()}, per {@code
- * SparkIngestionRunner}/{@code SparkCorrelationRunner}'s own contract), then a delivery-engine Job
- * (Pekko or Kafka Streams, whichever {@link SparkHandoffSpecs#deliveryStageSpec} resolves to) that
- * reads that topic and finishes the write to {@code plan.destination()}. The two Jobs are chained
- * by lazy reconciliation inside {@link #observe} - {@link #launch} only ever creates the Spark Job
- * and returns immediately, exactly like a non-staged run; {@link #observe} advances the pipeline
- * each time a caller polls it: once the Spark Job reaches {@code SUCCEEDED}, the next {@link
- * #observe} call creates the delivery Job (idempotently, via the same deterministic-naming
- * guarantee every Job this class launches already has) if it doesn't exist yet. No background
- * thread/watcher is involved - this launcher stays exactly as stateless as it already was; the only
- * new durable state is one small {@link ConfigMap} (created alongside the Spark Job, deleted once
- * the delivery Job succeeds) carrying the complete delivery request (image, command, policy,
- * resources and deadline), so a later {@link #observe} call - however long after {@link #launch},
- * even across a launcher-process restart - can re-derive exactly what the delivery Job needs
- * without this class ever persisting anything itself. A caller that only ever launches non-staged
- * plans is completely unaffected - {@link #launch}/{@link #observe}/{@link #cancel}'s own
- * single-Job behavior for those plans is byte-for-byte unchanged from before this feature existed.
- *
- * <p>Requires the {@link #DirectIngestionLauncher(IngestionJobPolicy, AuthorizationService, String,
- * String, String, String, List, Map, String, String, String) fullest constructor} (real {@code
- * sparkRunnerImage}/{@code sparkRunnerCommand}/{@code kafkaBootstrapServers}) to actually dispatch
- * a Spark-staged plan - {@link #launch} throws a clear {@link IllegalStateException} (not {@link
- * UnsupportedOperationException} - the capability exists, this specific instance just wasn't
- * configured for it) if a Spark-staged plan reaches an instance constructed without them.
+ * <p><b>Staged runs.</b> Two kinds of plan dispatch as two sequential Kubernetes Jobs: a plan with
+ * a {@code sparkStage} (the Spark Job writes every mapped row to its handoff topic), and, on a
+ * Kafka Streams installation, a bounded plan reading non-Kafka sources (the loader Job writes each
+ * source's rows to a per-run topic, see {@code LoaderHandoffSpecs}). The delivery-engine Job then
+ * reads those topics and finishes the write to {@code plan.destination()}. The two Jobs are chained
+ * by lazy reconciliation inside {@link #observe}: {@link #launch} creates only the first Job and a
+ * small handoff {@link ConfigMap} holding the complete delivery request; once the first Job reaches
+ * {@code SUCCEEDED}, the next {@link #observe} call creates the delivery Job (idempotently, by
+ * deterministic name), and the ConfigMap is deleted when delivery succeeds. No background thread is
+ * involved, and the launcher persists nothing itself, so this survives a launcher restart.
  *
  * <p>Only {@link ExecutionMode#BOUNDED} specs are dispatched here - {@code CONTINUOUS} specs
  * resolve to a Kubernetes {@code Deployment} via fowf's own {@code kubernetes-deployment} protocol
@@ -91,9 +71,8 @@ import java.util.Optional;
 public final class DirectIngestionLauncher {
 
   private static final String JOB_NAME_PREFIX = "fds-";
-  private static final String KAFKA_BOOTSTRAP_SERVERS_ENV_VAR = "KAFKA_BOOTSTRAP_SERVERS";
-  private static final String SPARK_HANDOFF_TOPIC_ENV_VAR = "SPARK_HANDOFF_TOPIC";
   private static final String SPARK_STAGE_SUFFIX = ":spark";
+  private static final String LOAD_STAGE_SUFFIX = ":load";
   private static final String DELIVERY_STAGE_SUFFIX = ":delivery";
   private static final String HANDOFF_CONFIGMAP_PREFIX = "fds-handoff-";
   private static final String HANDOFF_REQUEST_KEY = "delivery-job.json";
@@ -105,174 +84,28 @@ public final class DirectIngestionLauncher {
   private final EnvConfiguredJobLauncher delegate;
   private final IngestionLaunchPlanner planner;
   private final AuthorizationService authorization;
-  private final String pekkoRunnerImage;
-  private final String pekkoRunnerCommand;
-  private final String kafkaStreamsRunnerImage;
-  private final String kafkaStreamsRunnerCommand;
+  private final RunnerImages runners;
   private final List<String> imagePullSecretNames;
-  private final String sparkRunnerImage;
-  private final String sparkRunnerCommand;
-  private final String kafkaBootstrapServers;
 
-  /**
-   * @param pekkoRunnerCommand / {@code kafkaStreamsRunnerCommand} the shell command that actually
-   *     runs the reconstructed spec on that engine (e.g. {@code "java -jar runner.jar"} in a real
-   *     deployment) - the spec's own file path is appended as its final argument. Configurable
-   *     (rather than hardcoded) so this class's own real Job-launch mechanics are independently
-   *     testable with a stand-in verification command, without needing a real, packaged runner
-   *     image to exist first.
-   */
   public DirectIngestionLauncher(
       IngestionJobPolicy policy,
       AuthorizationService authorization,
-      String pekkoRunnerImage,
-      String pekkoRunnerCommand,
-      String kafkaStreamsRunnerImage,
-      String kafkaStreamsRunnerCommand) {
-    this(
-        policy,
-        authorization,
-        pekkoRunnerImage,
-        pekkoRunnerCommand,
-        kafkaStreamsRunnerImage,
-        kafkaStreamsRunnerCommand,
-        List.of());
-  }
-
-  /**
-   * @param imagePullSecretNames names of existing {@code kubernetes.io/dockerconfigjson} Secrets in
-   *     the target namespace - see {@link
-   *     com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobSpec}'s own javadoc for why
-   *     this type never carries credentials itself.
-   * @param authorization real, fail-closed caller authorization (see
-   *     docs/fds-authorization-remediation-guide.md) - checked at the top of {@link #launch}/{@link
-   *     #observe}/{@link #cancel}, before {@link IngestionJobPolicy} ever runs: policy is a
-   *     request-payload allowlist (is this namespace/image approved at all), not a substitute for
-   *     "is this caller allowed to act."
-   */
-  public DirectIngestionLauncher(
-      IngestionJobPolicy policy,
-      AuthorizationService authorization,
-      String pekkoRunnerImage,
-      String pekkoRunnerCommand,
-      String kafkaStreamsRunnerImage,
-      String kafkaStreamsRunnerCommand,
-      List<String> imagePullSecretNames) {
-    this(
-        policy,
-        authorization,
-        pekkoRunnerImage,
-        pekkoRunnerCommand,
-        kafkaStreamsRunnerImage,
-        kafkaStreamsRunnerCommand,
-        imagePullSecretNames,
-        Map.of());
-  }
-
-  /**
-   * @param hostAliases written into every dispatched Job as real {@code pod.spec.hostAliases}
-   *     entries (see {@link com.forwardmeasure.openworkflow.kubernetes.job.KubernetesJobSpec}'s own
-   *     javadoc) - empty in every real deployment; only a test environment whose dispatch target (a
-   *     Testcontainers-managed K3s node) can't resolve a sibling Testcontainers-managed service
-   *     (OpenSearch, Kafka) through cluster DNS needs this at all.
-   *     <p>Leaves this instance unable to dispatch a Spark-staged plan (see this class's own
-   *     javadoc) - use the {@linkplain #DirectIngestionLauncher(IngestionJobPolicy,
-   *     AuthorizationService, String, String, String, String, List, Map, String, String, String)
-   *     fullest constructor} for that.
-   */
-  public DirectIngestionLauncher(
-      IngestionJobPolicy policy,
-      AuthorizationService authorization,
-      String pekkoRunnerImage,
-      String pekkoRunnerCommand,
-      String kafkaStreamsRunnerImage,
-      String kafkaStreamsRunnerCommand,
+      RunnerImages runners,
       List<String> imagePullSecretNames,
       Map<String, String> hostAliases) {
-    this(
-        policy,
-        authorization,
-        pekkoRunnerImage,
-        pekkoRunnerCommand,
-        kafkaStreamsRunnerImage,
-        kafkaStreamsRunnerCommand,
-        imagePullSecretNames,
-        hostAliases,
-        null,
-        null,
-        null);
-  }
-
-  /**
-   * @param sparkRunnerImage / {@code sparkRunnerCommand} the Spark stage's own runner image/command
-   *     (mirrors {@code pekkoRunnerCommand}'s own shape exactly - {@code SparkIngestionRunner}/
-   *     {@code SparkCorrelationRunner}'s real {@code main()} reads the reconstructed spec's file
-   *     path from {@code args[0]}, appended the same way for every runner). Required (along with
-   *     {@code kafkaBootstrapServers}) to dispatch a Spark-staged plan at all - {@code null} is
-   *     accepted here (every shorter constructor passes it) for a caller that never needs to.
-   * @param kafkaBootstrapServers the real Kafka cluster's own bootstrap servers - passed to the
-   *     Spark Job as {@code KAFKA_BOOTSTRAP_SERVERS} (matching {@code
-   *     SparkIngestionRunner#kafkaBootstrapServersFromEnv}'s own required env var) and to {@link
-   *     SparkHandoffSpecs#deliveryStageSpec} when building the delivery Job's own kafka-sourced
-   *     spec - deliberately a runtime address supplied here, not carried by any compiled {@link
-   *     ExecutionPlan} (see that class's own javadoc for why).
-   */
-  public DirectIngestionLauncher(
-      IngestionJobPolicy policy,
-      AuthorizationService authorization,
-      String pekkoRunnerImage,
-      String pekkoRunnerCommand,
-      String kafkaStreamsRunnerImage,
-      String kafkaStreamsRunnerCommand,
-      List<String> imagePullSecretNames,
-      Map<String, String> hostAliases,
-      String sparkRunnerImage,
-      String sparkRunnerCommand,
-      String kafkaBootstrapServers) {
     this.policy = Objects.requireNonNull(policy, "policy");
     this.delegate =
         new EnvConfiguredJobLauncher(
-            Objects.requireNonNull(policy, "policy"), JOB_NAME_PREFIX, hostAliases);
+            Objects.requireNonNull(policy, "policy"),
+            JOB_NAME_PREFIX,
+            hostAliases == null ? Map.of() : hostAliases);
     this.authorization = Objects.requireNonNull(authorization, "authorization");
-    this.pekkoRunnerImage = Objects.requireNonNull(pekkoRunnerImage, "pekkoRunnerImage");
-    this.pekkoRunnerCommand = Objects.requireNonNull(pekkoRunnerCommand, "pekkoRunnerCommand");
-    this.kafkaStreamsRunnerImage =
-        Objects.requireNonNull(kafkaStreamsRunnerImage, "kafkaStreamsRunnerImage");
-    this.kafkaStreamsRunnerCommand =
-        Objects.requireNonNull(kafkaStreamsRunnerCommand, "kafkaStreamsRunnerCommand");
+    this.runners = Objects.requireNonNull(runners, "runners");
     this.imagePullSecretNames =
         imagePullSecretNames == null ? List.of() : List.copyOf(imagePullSecretNames);
-    this.sparkRunnerImage = sparkRunnerImage;
-    this.sparkRunnerCommand = sparkRunnerCommand;
-    this.kafkaBootstrapServers = kafkaBootstrapServers;
-    this.planner =
-        new IngestionLaunchPlanner(
-            policy,
-            pekkoRunnerImage,
-            pekkoRunnerCommand,
-            kafkaStreamsRunnerImage,
-            kafkaStreamsRunnerCommand,
-            sparkRunnerImage,
-            sparkRunnerCommand,
-            kafkaBootstrapServers,
-            this.imagePullSecretNames);
+    this.planner = new IngestionLaunchPlanner(policy, runners, this.imagePullSecretNames);
   }
 
-  /**
-   * Compiles {@code request.ingestionSpec()} via {@link ExecutionPlanCompiler}. A non-staged plan
-   * launches its one delivery Job exactly as before. A Spark-staged plan launches only the Spark
-   * Job (see this class's own javadoc for why the delivery Job comes later, via {@link #observe})
-   * plus a small handoff {@link ConfigMap} the later delivery-Job creation reads. Returns the
-   * deterministic Job name a caller uses with {@link #observe}/{@link #cancel} - the Spark Job's
-   * own name for a staged plan (the one actually running immediately after this call returns).
-   *
-   * @throws UnsupportedOperationException if the spec's {@code executionMode} isn't {@code BOUNDED}
-   *     (a real CONTINUOUS spec dispatches via a completely different path, not something this
-   *     instance could ever be configured to support)
-   * @throws IllegalStateException if the compiled plan carries a {@code sparkStage} and this
-   *     instance wasn't constructed with real Spark runner settings (a configuration gap this
-   *     instance genuinely could be given, unlike the {@code executionMode} case above)
-   */
   public IngestionLaunchPlanner planner() {
     return planner;
   }
@@ -305,24 +138,27 @@ public final class DirectIngestionLauncher {
     }
     policy.authorizeNamespace(request.namespace());
     ExecutionPlan plan = planner.compile(spec, request.correlationId());
-    if (plan.sparkStage().isPresent()) {
-      return launchSparkStage(client, request, plan);
+    IngestionLaunchPlanner.Stage first = IngestionLaunchPlanner.firstStage(plan);
+    if (first != IngestionLaunchPlanner.Stage.DELIVERY) {
+      return launchFirstStage(client, request, plan, first);
     }
     return launchDeliveryJob(
         client, request.correlationId(), request.namespace(), spec, plan, request);
   }
 
-  private String launchSparkStage(
-      KubernetesClient client, DirectLaunchRequest request, ExecutionPlan plan) {
-    if (sparkRunnerImage == null || kafkaBootstrapServers == null) {
-      throw new IllegalStateException(
-          "DirectIngestionLauncher: this spec's compiled plan requires a Spark compute stage, but"
-              + " this instance was constructed without real sparkRunnerImage/"
-              + "kafkaBootstrapServers settings - use the fullest constructor (see this class's"
-              + " own javadoc)");
-    }
-    IngestionSpec deliverySpec = SparkHandoffSpecs.deliveryStageSpec(plan, kafkaBootstrapServers);
-    ExecutionPlan deliveryPlan = ExecutionPlanCompiler.compile(deliverySpec);
+  /**
+   * Launches a staged run's first Job - the Spark stage or the Kafka Streams loader - and leaves
+   * its planned delivery Job in a handoff {@link ConfigMap}; {@link #observe} creates that Job once
+   * the first stage succeeds.
+   */
+  private String launchFirstStage(
+      KubernetesClient client,
+      DirectLaunchRequest request,
+      ExecutionPlan plan,
+      IngestionLaunchPlanner.Stage stage) {
+    IngestionSpec deliverySpec =
+        planner.deliveryStageSpec(plan, request.correlationId()).orElseThrow();
+    ExecutionPlan deliveryPlan = planner.deliveryPlan(deliverySpec, plan, request.correlationId());
     EnvLaunchRequest deliveryRequest =
         deliveryRequest(
             request.correlationId() + DELIVERY_STAGE_SUFFIX,
@@ -330,30 +166,35 @@ public final class DirectIngestionLauncher {
             deliverySpec,
             deliveryPlan,
             request);
+    RunnerImages.Runner runner = planner.runner(stage);
     policy.authorizeNamespace(request.namespace());
-    policy.authorizeImage(sparkRunnerImage);
+    policy.authorizeImage(runner.image());
     policy.authorizeImage(deliveryRequest.image());
     createHandoffConfigMap(client, request, deliveryRequest);
 
-    IngestionSpec originalSpec = request.ingestionSpec();
     Map<String, String> env =
-        new java.util.LinkedHashMap<>(IngestionLaunchPlanner.environment(originalSpec, plan));
-    env.put("FDS_EXECUTION_ID", request.correlationId());
-    env.put(KAFKA_BOOTSTRAP_SERVERS_ENV_VAR, kafkaBootstrapServers);
-    env.put(SPARK_HANDOFF_TOPIC_ENV_VAR, plan.sparkStage().orElseThrow().handoffTopic());
+        planner.stageEnvironment(request.ingestionSpec(), plan, request.correlationId(), stage);
     EnvLaunchRequest envRequest =
         new EnvLaunchRequest(
-            request.correlationId() + SPARK_STAGE_SUFFIX,
+            request.correlationId() + stageSuffix(stage),
             request.namespace(),
-            sparkRunnerImage,
+            runner.image(),
             List.of("sh", "-c"),
-            List.of(IngestionLaunchPlanner.command(sparkRunnerCommand)),
+            List.of(IngestionLaunchPlanner.command(runner.command())),
             env,
             request.resourceRequests(),
             request.resourceLimits(),
             request.activeDeadlineSeconds(),
             imagePullSecretNames);
     return delegate.launch(client, envRequest);
+  }
+
+  private static String stageSuffix(IngestionLaunchPlanner.Stage stage) {
+    return switch (stage) {
+      case SPARK -> SPARK_STAGE_SUFFIX;
+      case LOAD -> LOAD_STAGE_SUFFIX;
+      case DELIVERY -> DELIVERY_STAGE_SUFFIX;
+    };
   }
 
   private String launchDeliveryJob(
@@ -372,24 +213,15 @@ public final class DirectIngestionLauncher {
       IngestionSpec spec,
       ExecutionPlan plan,
       DirectLaunchRequest request) {
-    String image;
-    String command;
-    if (plan.profile().deliveryEngine() == DeliveryEngineKind.KAFKA_STREAMS) {
-      image = kafkaStreamsRunnerImage;
-      command = kafkaStreamsRunnerCommand;
-    } else {
-      image = pekkoRunnerImage;
-      command = pekkoRunnerCommand;
-    }
+    RunnerImages.Runner runner = runners.delivery();
     Map<String, String> env =
-        new java.util.LinkedHashMap<>(IngestionLaunchPlanner.environment(spec, plan));
-    env.put("FDS_EXECUTION_ID", correlationId);
+        planner.stageEnvironment(spec, plan, correlationId, IngestionLaunchPlanner.Stage.DELIVERY);
     return new EnvLaunchRequest(
         correlationId,
         namespace,
-        image,
+        runner.image(),
         List.of("sh", "-c"),
-        List.of(IngestionLaunchPlanner.command(command)),
+        List.of(IngestionLaunchPlanner.command(runner.command())),
         env,
         request.resourceRequests(),
         request.resourceLimits(),
@@ -421,16 +253,19 @@ public final class DirectIngestionLauncher {
             Map.of()));
 
     correlationId = scopedCorrelation(actor, correlationId);
-    Optional<KubernetesJobObservation> sparkObservation =
+    Optional<KubernetesJobObservation> firstObservation =
         delegate.observe(client, namespace, correlationId + SPARK_STAGE_SUFFIX);
-    if (sparkObservation.isEmpty()) {
-      // Not a Spark-staged run at all (or the Spark Job was already cleaned up) - the plain,
-      // non-staged single-Job path, unchanged.
+    if (firstObservation.isEmpty()) {
+      firstObservation = delegate.observe(client, namespace, correlationId + LOAD_STAGE_SUFFIX);
+    }
+    if (firstObservation.isEmpty()) {
+      // Not a staged run at all (or its first Job was already cleaned up) - the plain,
+      // single-Job path.
       return delegate.observe(client, namespace, correlationId);
     }
-    KubernetesJobObservation spark = sparkObservation.get();
-    if (spark.phase() != KubernetesJobObservation.Phase.SUCCEEDED) {
-      return Optional.of(spark);
+    KubernetesJobObservation first = firstObservation.get();
+    if (first.phase() != KubernetesJobObservation.Phase.SUCCEEDED) {
+      return Optional.of(first);
     }
 
     Optional<KubernetesJobObservation> deliveryObservation =
@@ -473,6 +308,7 @@ public final class DirectIngestionLauncher {
     correlationId = scopedCorrelation(actor, correlationId);
     delegate.cancel(client, namespace, correlationId);
     delegate.cancel(client, namespace, correlationId + SPARK_STAGE_SUFFIX);
+    delegate.cancel(client, namespace, correlationId + LOAD_STAGE_SUFFIX);
     delegate.cancel(client, namespace, correlationId + DELIVERY_STAGE_SUFFIX);
     deleteHandoffConfigMap(client, namespace, correlationId);
   }

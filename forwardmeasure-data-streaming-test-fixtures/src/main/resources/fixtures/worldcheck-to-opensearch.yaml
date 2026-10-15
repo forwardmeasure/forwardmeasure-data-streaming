@@ -54,10 +54,10 @@
 # `"dynamic": "strict"` means every target field below must be one it actually declares.
 #
 # categories/locations (added 2026-09-14): NamedTransformRegistry now carries
-# classify_party_categories/parse_tilde_delimited_locations (renamed+incorporated from fei's own
+# test_classify_party_categories/test_parse_tilde_delimited_locations (renamed+incorporated from fei's own
 # map_worldcheck_categories/parse_worldcheck_locations, user-directed, once the fully spec-driven
 # path - no custom Java at all - became the preferred way to run this pipeline rather than just a
-# proof of feasibility). parse_tilde_delimited_locations' own output keys are snake_case
+# proof of feasibility). test_parse_tilde_delimited_locations' own output keys are snake_case
 # (country_code/country_name/state_or_province/location_type), not the origin's camelCase - see
 # that function's own javadoc for why: this path has no typed-model coercion step to fix up casing
 # before writing to a `"dynamic": "strict"` index, unlike fei's own worker.
@@ -104,7 +104,7 @@ sources:
           inputs:
             value: CATEGORY
             entity_indicator: "E/I"
-          transform: classify_party_kind
+          transform: test_classify_party_kind
         - target: date_of_birth
           source: DOB
           transform: parse_partial_date_ymd
@@ -150,11 +150,11 @@ sources:
           optional: true
         - target: categories
           source: "SPECIAL INTEREST CATEGORIES"
-          transform: classify_party_categories
+          transform: test_classify_party_categories
           optional: true
         - target: locations
           source: LOCATIONS
-          transform: parse_tilde_delimited_locations
+          transform: test_parse_tilde_delimited_locations
           optional: true
 
 sink:

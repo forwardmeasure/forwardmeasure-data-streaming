@@ -71,20 +71,40 @@ datastreaming:
       images: ""
       image-pull-secrets: ""
       host-aliases: ""
+    # The installation's one delivery engine: the platform engine setting
+    # (kafka-streams | pekko-postgresql | pekko-cassandra). Required, no default - the launcher
+    # never picks an engine. Only that engine's runner below is used.
+    # engine: <set by the deployment>
     pekko:
       image: ""
       command: "java -jar /deployments/application.jar"
     kafka-streams:
       image: ""
       command: "java -jar /deployments/application.jar"
-    # The Spark compute-stage Job dispatched ahead of a delivery Job when a plan's ExecutionPlan
-    # carries a sparkStage (see DirectIngestionLauncher's own javadoc) - empty (no Spark stage ever
-    # dispatchable) unless a real HEAVY transform exists that needs one.
+    # Kafka Streams installations only: the bounded-load first stage that writes file, text and
+    # SQL source rows to a per-run topic for the Kafka Streams delivery Job.
+    loader:
+      image: ""
+      command: "java -jar /deployments/application.jar"
+    # The Spark compute-stage Job dispatched ahead of a delivery Job when a plan carries a
+    # sparkStage (a HEAVY transform). Required on every installation, like kafka.bootstrap-servers.
     spark:
       image: ""
       command: "java -jar /deployments/application.jar"
     kafka:
       bootstrap-servers: ""
+    # Pekko installations: where continuous workers keep their state (the installation's
+    # journal) - plain settings as NAME=value;... and Secret-sourced ones as NAME=secret/key;...
+    journal:
+      env: ""
+      secret-env: ""
+      # GCP: a Cloud SQL Auth Proxy sidecar beside each continuous worker (image, the
+      # instance-name Secret as name/key, and the ServiceAccount whose Workload Identity
+      # authorizes it); empty elsewhere.
+      database-proxy:
+        image: ""
+        instance-secret: ""
+        service-account: ""
     fowf:
       base-url: "http://localhost:8080"
       keycloak:

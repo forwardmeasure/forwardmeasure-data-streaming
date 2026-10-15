@@ -20,22 +20,16 @@
   <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-parent</artifactId><version>${revision}</version></parent>
   <artifactId>forwardmeasure-data-streaming-transforms</artifactId>
   <name>ForwardMeasure Data Streaming Transforms</name>
-  <description>The GENERIC named-transform function pool only (date/string/number formatting,
-    country-code resolution, and similarly domain-agnostic utilities) - deliberately not a home for
-    any one consumer's domain-specific transforms (e.g. WorldCheck- or Customer-Master-specific parsing
-    stays downstream, in whichever service onboards that source). Plain static methods, registered
-    into a flat runtime NamedTransformRegistry (fei's own NamedTransform/NamedTransformRegistry design,
-    reused as-is) and dispatched by name from a mapper.fields[] spec - not MapStruct-qualified, and not
-    a compile-time mapper concern. See D3 in the design plan (corrected 2026-09-12): an earlier draft
-    proposed MapStruct @Named qualification here, which was a misapplication of MapStruct's real role
-    in this org (JPA entity-to-model conversion, see forwardmeasure-data-streaming-connector-jdbc) onto
-    the source/target payload mapping this module actually serves.</description>
+  <description>FDS's generic named transforms (country, date, identifier, list and URL parsing) and
+    the catalog that products register their own transforms into. No product or data-provider
+    vocabulary belongs here.</description>
   <properties>
     <!-- Has real public classes to document (unlike this repo's still-scaffolded modules) - see
          the parent pom's default. -->
     <maven.javadoc.skip>false</maven.javadoc.skip>
   </properties>
   <dependencies>
+    <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
     <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId></dependency>
     <!-- NamedTransformFunctions.java (LocaleDisplayNames/ULocale), ported from fei's own class of
          the same name, which depends on this same artifact. Version managed centrally in
@@ -43,14 +37,6 @@
          when this was found still hardcoding it directly, contrary to this org's own version-
          management discipline. -->
     <dependency><groupId>com.ibm.icu</groupId><artifactId>icu4j</artifactId></dependency>
-    <!-- screen_against_worldcheck_reference's real entity-scoring engine - the same
-         production-validated matcher entity-intelligence-resolution uses for recall/matching, not a
-         hand-rolled comparison. Version managed centrally in forwardmeasure-platform's own
-         dependencyManagement (forwardmeasure-entity-matching.version). -->
-    <dependency>
-      <groupId>com.forwardmeasure.entitymatching</groupId>
-      <artifactId>forwardmeasure-entity-matching-core</artifactId>
-    </dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
   </dependencies>
 </project>

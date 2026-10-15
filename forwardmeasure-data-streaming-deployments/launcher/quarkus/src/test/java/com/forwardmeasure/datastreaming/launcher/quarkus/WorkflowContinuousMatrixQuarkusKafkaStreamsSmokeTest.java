@@ -217,6 +217,12 @@ class WorkflowContinuousMatrixQuarkusKafkaStreamsSmokeTest {
           Map.entry("datastreaming.launcher.k8s.namespaces", NAMESPACE),
           Map.entry("datastreaming.launcher.k8s.images", IMAGE),
           // Leave optional pull secrets, host aliases and Spark settings at production defaults.
+          Map.entry("datastreaming.launcher.engine", "kafka-streams"),
+          Map.entry("datastreaming.launcher.loader.image", "unused-loader"),
+          Map.entry("datastreaming.launcher.loader.command", "false"),
+          Map.entry("datastreaming.launcher.spark.image", "unused-spark"),
+          Map.entry("datastreaming.launcher.spark.command", "false"),
+          Map.entry("datastreaming.launcher.kafka.bootstrap-servers", "unused:9092"),
           Map.entry("datastreaming.launcher.pekko.image", IMAGE),
           Map.entry("datastreaming.launcher.pekko.command", "false"),
           Map.entry("datastreaming.launcher.kafka-streams.image", IMAGE),

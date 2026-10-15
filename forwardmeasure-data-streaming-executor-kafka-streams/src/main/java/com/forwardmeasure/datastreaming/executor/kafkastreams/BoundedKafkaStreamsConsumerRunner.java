@@ -80,6 +80,20 @@ final class BoundedKafkaStreamsConsumerRunner {
 
   static Result run(
       SourcePlan source, SinkSpec sink, ErrorPolicy errors, FieldMappingEngine mapper) {
+    return run(source, sink, errors, mapper, null);
+  }
+
+  /** As above, running each mapped record through {@code graph} when the spec declares one. */
+  static Result run(
+      SourcePlan source,
+      SinkSpec sink,
+      ErrorPolicy errors,
+      FieldMappingEngine mapper,
+      com.forwardmeasure.datastreaming.api.TransformGraph graph) {
+    com.forwardmeasure.datastreaming.core.stateful.StatefulGraph stateful =
+        graph == null
+            ? null
+            : com.forwardmeasure.datastreaming.core.stateful.GraphRecords.bounded(graph, null);
     KafkaConnectorUri sourceUri = KafkaConnectorUri.parse(source.source().uri());
     MalformedRecordPolicy malformedRecordPolicy = MalformedRecordPolicy.from(errors);
     SinkFailurePolicy sinkFailurePolicy = SinkFailurePolicy.from(errors);
@@ -126,9 +140,16 @@ final class BoundedKafkaStreamsConsumerRunner {
             Map<String, Object> mapped =
                 mapOrHandle(record.value(), source.mapper(), mapper, malformedRecordPolicy);
             if (mapped != null) {
-              IngestionPipeline.withSinkFailureHandlingBlocking(
-                  sinkFailurePolicy, () -> sinkRowWriter.write(mapped));
-              recordsWritten++;
+              List<Map<String, Object>> outputs =
+                  stateful == null
+                      ? List.of(mapped)
+                      : com.forwardmeasure.datastreaming.core.stateful.GraphRecords.process(
+                          stateful, source.sourceKey(), mapped, malformedRecordPolicy);
+              for (Map<String, Object> output : outputs) {
+                IngestionPipeline.withSinkFailureHandlingBlocking(
+                    sinkFailurePolicy, () -> sinkRowWriter.write(output));
+                recordsWritten++;
+              }
             }
             consumer.commitSync(Map.of(partition, new OffsetAndMetadata(record.offset() + 1)));
           }
@@ -136,6 +157,16 @@ final class BoundedKafkaStreamsConsumerRunner {
         // Poll also advances over aborted transactions and control records that are never returned.
         for (TopicPartition partition : partitions) {
           positions.put(partition, consumer.position(partition));
+        }
+      }
+      if (stateful != null) {
+        // The input ended: every window still open closes now.
+        for (Map<String, Object> output :
+            com.forwardmeasure.datastreaming.core.stateful.GraphRecords.finish(
+                stateful, malformedRecordPolicy)) {
+          IngestionPipeline.withSinkFailureHandlingBlocking(
+              sinkFailurePolicy, () -> sinkRowWriter.write(output));
+          recordsWritten++;
         }
       }
     }
@@ -156,8 +187,8 @@ final class BoundedKafkaStreamsConsumerRunner {
    * Spark-staged plan's delivery-stage identity mapper - see {@code
    * SparkHandoffSpecs#identityFieldRules}) fell back to {@code get}'s lossy {@code
    * String.valueOf(...)}. Confirmed live: a real document written through this path had {@code
-   * names}/{@code locations}/{@code screening_hits} all arrive as Java {@code toString()} text
-   * ({@code "[{reference_uid=wc-1, ...}]"}) instead of real nested JSON. {@link MapSourceRow}
+   * names}/{@code locations} and other nested fields all arrive as Java {@code toString()} text
+   * ({@code "[{value=..., name_type=...}]"}) instead of real nested JSON. {@link MapSourceRow}
    * already correctly overrides {@code getRaw} (see its own javadoc) - using it here instead of the
    * ad-hoc lambda is the fix, not a new capability.
    */

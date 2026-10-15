@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture;
 import com.forwardmeasure.datastreaming.launcher.application.AuthorizationAction;
 import com.forwardmeasure.datastreaming.launcher.application.fowf.RealFowfWorkflowFixture;
+import com.forwardmeasure.datastreaming.testfixtures.TestTransformImages;
 import com.forwardmeasure.datastreaming.testfixtures.WorldCheckFixtures;
 import com.forwardmeasure.openworkflow.definition.management.api.model.CreateWorkflowDefinitionRequest;
 import com.forwardmeasure.openworkflow.definition.management.api.model.CreateWorkflowRequest;
@@ -107,7 +108,10 @@ class WorkflowBoundedMatrixSpringPekkoSmokeTest {
               new NamespaceBuilder().withNewMetadata().withName(NAMESPACE).endMetadata().build())
           .create();
     }
-    pekkoImage = fixture.kubernetes().loadImageAndPinDigest(PEKKO_LOCAL_IMAGE);
+    pekkoImage =
+        fixture
+            .kubernetes()
+            .loadImageAndPinDigest(TestTransformImages.withTestTransforms(PEKKO_LOCAL_IMAGE));
 
     opensearch = new com.forwardmeasure.testcontainers.opensearch.OpenSearchTestContainer().start();
     String openSearchUrlForPod =
@@ -217,6 +221,10 @@ class WorkflowBoundedMatrixSpringPekkoSmokeTest {
             throw new IllegalStateException(e);
           }
         });
+    registry.add("datastreaming.launcher.engine", () -> "pekko-postgresql");
+    registry.add("datastreaming.launcher.spark.image", () -> "unused-spark");
+    registry.add("datastreaming.launcher.spark.command", () -> "false");
+    registry.add("datastreaming.launcher.kafka.bootstrap-servers", () -> "unused:9092");
     registry.add("datastreaming.launcher.pekko.image", () -> pekkoImage);
     registry.add("datastreaming.launcher.pekko.command", () -> "true #");
     registry.add("datastreaming.launcher.kafka-streams.image", () -> pekkoImage);

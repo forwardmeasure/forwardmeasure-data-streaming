@@ -36,6 +36,9 @@
       <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-opensearch</artifactId><version>${project.version}</version></dependency>
       <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-jdbc</artifactId><version>${project.version}</version></dependency>
       <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-connector-object-storage</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-source-readers</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-loader</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-migrations</artifactId><version>${project.version}</version></dependency>
       <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-executor-pekko</artifactId><version>${project.version}</version></dependency>
       <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-executor-spark</artifactId><version>${project.version}</version></dependency>
     </dependencies>

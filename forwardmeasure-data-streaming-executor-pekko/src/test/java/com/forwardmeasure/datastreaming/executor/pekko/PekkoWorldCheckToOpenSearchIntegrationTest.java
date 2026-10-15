@@ -183,8 +183,9 @@ class PekkoWorldCheckToOpenSearchIntegrationTest {
     assertEquals(1, wc1Ids.size());
     assertEquals("123-45-6789", wc1Ids.get(0).path("value").asText());
     assertEquals("SSN", wc1Ids.get(0).path("scheme").asText());
-    // categories/locations (added 2026-09-14): classify_party_categories/
-    // parse_tilde_delimited_locations, now in NamedTransformRegistry - see the checked-in spec's
+    // categories/locations (added 2026-09-14): test_classify_party_categories/
+    // test_parse_tilde_delimited_locations, now in NamedTransformRegistry - see the checked-in
+    // spec's
     // own comment for why these two moved from "deliberately not ported" to "populated".
     assertEquals(List.of("sanctions", "pep"), toStringList(wc1.path("_source").path("categories")));
     JsonNode wc1Locations = wc1.path("_source").path("locations");

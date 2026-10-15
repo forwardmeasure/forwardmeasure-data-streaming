@@ -29,8 +29,10 @@ import com.forwardmeasure.authzen.AuthorizationService;
 import com.forwardmeasure.authzen.KeycloakOrganizationClaims;
 import com.forwardmeasure.authzen.client.AuthzenAuthorizationFactory;
 import com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture;
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -125,10 +127,14 @@ class DirectIngestionLauncherKeycloakIntegrationTest {
         new DirectIngestionLauncher(
             IngestionJobPolicy.rejecting(),
             authorization,
-            "unused-image",
-            "unused-command",
-            "unused-image",
-            "unused-command");
+            new RunnerImages(
+                DeliveryEngineKind.PEKKO_STREAMS,
+                new RunnerImages.Runner("unused-image", "unused-command"),
+                null,
+                new RunnerImages.Runner("unused-image", "unused-command"),
+                "unused:9092"),
+            List.of(),
+            Map.of());
     // GRANTED_ROLE only ever received the INGESTION_RUN_LAUNCH scope (see @BeforeAll) - never
     // INGESTION_RUN_CANCEL - so this is a real, never-granted permission, denied by the real PDP
     // exactly as fail-closed requires. Deliberately not "a different correlationId than the

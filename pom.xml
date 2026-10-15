@@ -89,6 +89,9 @@
     <module>forwardmeasure-data-streaming-connector-camel</module>
     <module>forwardmeasure-data-streaming-connector-jdbc</module>
     <module>forwardmeasure-data-streaming-connector-object-storage</module>
+    <module>forwardmeasure-data-streaming-source-readers</module>
+    <module>forwardmeasure-data-streaming-loader</module>
+    <module>forwardmeasure-data-streaming-migrations</module>
     <module>forwardmeasure-data-streaming-executor-pekko</module>
     <module>forwardmeasure-data-streaming-executor-spark</module>
     <module>forwardmeasure-data-streaming-executor-streaming-api</module>
@@ -142,6 +145,21 @@
       <dependency>
         <groupId>${project.groupId}</groupId>
         <artifactId>forwardmeasure-data-streaming-connector-camel</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-source-readers</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-loader</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-migrations</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
@@ -242,6 +260,35 @@
         <executions>
           <execution><id>prepare-agent</id><goals><goal>prepare-agent</goal></goals></execution>
           <execution><id>report</id><phase>verify</phase><goals><goal>report</goal></goals></execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <!-- FDS is a generic, Apache-licensed engine. Test fixtures and test-only transforms
+                 never reach a main classpath (so no production catalog can discover them), and
+                 nothing proprietary is used in any scope. -->
+            <id>enforce-fds-boundaries</id>
+            <goals><goal>enforce</goal></goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <message>forwardmeasure-data-streaming-test-fixtures is test-scope only, and FDS must not depend on entity-matching or platform data-contracts in any scope.</message>
+                  <searchTransitive>true</searchTransitive>
+                  <excludes>
+                    <exclude>com.forwardmeasure.datastreaming:forwardmeasure-data-streaming-test-fixtures:*:*:compile</exclude>
+                    <exclude>com.forwardmeasure.datastreaming:forwardmeasure-data-streaming-test-fixtures:*:*:runtime</exclude>
+                    <exclude>com.forwardmeasure.datastreaming:forwardmeasure-data-streaming-test-fixtures:*:*:provided</exclude>
+                    <exclude>com.forwardmeasure.datastreaming:forwardmeasure-data-streaming-test-fixtures:*:*:system</exclude>
+                    <exclude>com.forwardmeasure.entitymatching</exclude>
+                    <exclude>com.forwardmeasure.platform:forwardmeasure-platform-data-contracts</exclude>
+                  </excludes>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
         </executions>
       </plugin>
       <plugin>

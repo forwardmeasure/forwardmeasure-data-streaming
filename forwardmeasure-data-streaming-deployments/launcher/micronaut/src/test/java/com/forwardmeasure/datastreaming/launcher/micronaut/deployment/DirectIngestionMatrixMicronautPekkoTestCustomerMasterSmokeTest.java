@@ -23,6 +23,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forwardmeasure.authzen.testkit.AuthzenKeycloakFixture;
 import com.forwardmeasure.datastreaming.launcher.application.AuthorizationAction;
 import com.forwardmeasure.datastreaming.testfixtures.TestCustomerMasterFixtures;
+import com.forwardmeasure.datastreaming.testfixtures.TestTransformImages;
 import com.forwardmeasure.testcontainers.kubernetes.KubernetesTestContainer;
 import com.forwardmeasure.testcontainers.opensearch.OpenSearchTestContainer;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
@@ -98,7 +99,8 @@ class DirectIngestionMatrixMicronautPekkoTestCustomerMasterSmokeTest
             AuthorizationAction.INGESTION_RUN_READ.scope()));
 
     kubernetes = new KubernetesTestContainer().start();
-    PEKKO_IMAGE = kubernetes.loadImageAndPinDigest(executorImage);
+    PEKKO_IMAGE =
+        kubernetes.loadImageAndPinDigest(TestTransformImages.withTestTransforms(executorImage));
     CurrentKubernetesTestContainer.set(kubernetes);
     try (KubernetesClient client = kubernetes.createClient()) {
       client
@@ -135,6 +137,10 @@ class DirectIngestionMatrixMicronautPekkoTestCustomerMasterSmokeTest
         Map.entry("datastreaming.launcher.k8s.host-aliases", "host.docker.internal=" + gatewayIp),
         Map.entry("datastreaming.launcher.fowf.keycloak.client-id", "unused"),
         Map.entry("datastreaming.launcher.fowf.keycloak.client-secret", "unused"),
+        Map.entry("datastreaming.launcher.engine", "pekko-postgresql"),
+        Map.entry("datastreaming.launcher.spark.image", "unused-spark"),
+        Map.entry("datastreaming.launcher.spark.command", "false"),
+        Map.entry("datastreaming.launcher.kafka.bootstrap-servers", "unused:9092"),
         Map.entry("datastreaming.launcher.pekko.image", pekkoImage),
         Map.entry("datastreaming.launcher.pekko.command", pekkoCommand),
         Map.entry("datastreaming.launcher.kafka-streams.image", "unused"),
@@ -242,7 +248,7 @@ class DirectIngestionMatrixMicronautPekkoTestCustomerMasterSmokeTest
   }
 
   /**
-   * Real Customer Master org row (ss-3) from {@link TestCustomerMasterFixtures#SAMPLE_CSV},
+   * Real Customer Master org row (cm-3) from {@link TestCustomerMasterFixtures#SAMPLE_CSV},
    * base64-transported.
    */
   private static String realRowSeedAndRunCommand() {

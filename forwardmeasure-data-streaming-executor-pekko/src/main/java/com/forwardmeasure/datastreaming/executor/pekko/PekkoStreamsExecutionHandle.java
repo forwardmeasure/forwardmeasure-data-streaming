@@ -39,12 +39,20 @@ final class PekkoStreamsExecutionHandle implements ExecutionHandle {
   private final String id;
   private final Consumer.DrainingControl<Done> control;
   private final CamelBridge bridge;
+  private final AutoCloseable state;
 
   PekkoStreamsExecutionHandle(
       String id, Consumer.DrainingControl<Done> control, CamelBridge bridge) {
+    this(id, control, bridge, () -> {});
+  }
+
+  /** {@code state} - the run's graph state, if any - closes after the stream has drained. */
+  PekkoStreamsExecutionHandle(
+      String id, Consumer.DrainingControl<Done> control, CamelBridge bridge, AutoCloseable state) {
     this.id = Objects.requireNonNull(id, "id");
     this.control = Objects.requireNonNull(control, "control");
     this.bridge = Objects.requireNonNull(bridge, "bridge");
+    this.state = Objects.requireNonNull(state, "state");
   }
 
   @Override
@@ -75,6 +83,11 @@ final class PekkoStreamsExecutionHandle implements ExecutionHandle {
     } catch (Exception ignored) {
       // Best-effort shutdown, mirroring the now-retired PekkoStreamingStageHandle#close.
     } finally {
+      try {
+        state.close();
+      } catch (Exception ignored) {
+        // Best-effort close - committed state is already on the journal.
+      }
       try {
         bridge.close();
       } catch (Exception ignored) {

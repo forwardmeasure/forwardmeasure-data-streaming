@@ -31,6 +31,7 @@ import com.forwardmeasure.datastreaming.api.SourceSpec;
 import com.forwardmeasure.datastreaming.api.SparkStagePlan;
 import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.core.IngestionPipeline;
+import com.forwardmeasure.datastreaming.transforms.NamedTransformCatalog;
 import com.forwardmeasure.testcontainers.junit.kafka.WithKafkaContainer;
 import com.forwardmeasure.testcontainers.kafka.KafkaTestContainer;
 import java.nio.charset.StandardCharsets;
@@ -139,7 +140,7 @@ class SparkKafkaConnectorIntegrationTest {
                 List.of(
                     new TransformSpec.FieldRule("uid", "uid", null, null, null, null, null),
                     new TransformSpec.FieldRule("name", "name", null, null, null, null, null))),
-            Map.of(),
+            NamedTransformCatalog.installed(),
             IngestionPipeline.MalformedRecordPolicy.SKIP);
     List<Map<String, Object>> rows = mapped.collect();
 

@@ -32,6 +32,7 @@ import com.forwardmeasure.datastreaming.api.TransformSpec;
 import com.forwardmeasure.datastreaming.launcher.application.DirectIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.DirectLaunchRequest;
 import com.forwardmeasure.datastreaming.launcher.application.IngestionJobPolicy;
+import com.forwardmeasure.datastreaming.launcher.application.RunnerImages;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowLaunchRequest;
 import com.forwardmeasure.datastreaming.launcher.application.auth.TenantWorkflowExecutions;
@@ -90,8 +91,7 @@ import java.util.stream.Collectors;
  * <p>{@code @SerdeImport} on the outer request types alone did not cascade to {@link IngestionSpec}
  * (referenced by {@link DirectLaunchRequest}) or its own nested record graph - each reachable type
  * needs its own explicit entry; confirmed live by iterating one {@code IntrospectionException} at a
- * time until every type {@code WorldCheckFixtures}' own real spec fixtures actually construct was
- * covered.
+ * time until every type the real spec fixtures actually construct was covered.
  */
 @Factory
 @Introspected(
@@ -108,6 +108,9 @@ import java.util.stream.Collectors;
       TransformGraph.class,
       TransformGraph.TransformNode.class,
       TransformGraph.TransformEdge.class,
+      TransformGraph.Aggregation.class,
+      TransformGraph.AggregationOp.class,
+      TransformGraph.NodeKind.class,
       SinkSpec.class,
       SinkSpec.BatchingSpec.class,
       DeliverySemantics.class,
@@ -139,6 +142,9 @@ import java.util.stream.Collectors;
 @SerdeImport(TransformGraph.class)
 @SerdeImport(TransformGraph.TransformNode.class)
 @SerdeImport(TransformGraph.TransformEdge.class)
+@SerdeImport(TransformGraph.Aggregation.class)
+@SerdeImport(TransformGraph.AggregationOp.class)
+@SerdeImport(TransformGraph.NodeKind.class)
 @SerdeImport(SinkSpec.class)
 @SerdeImport(SinkSpec.BatchingSpec.class)
 @SerdeImport(DeliverySemantics.class)
@@ -236,27 +242,46 @@ public class LauncherMicronautBinding {
   DirectIngestionLauncher directIngestionLauncher(
       IngestionJobPolicy policy,
       AuthorizationService authorization,
-      @Value("${datastreaming.launcher.pekko.image}") String pekkoImage,
-      @Value("${datastreaming.launcher.pekko.command}") String pekkoCommand,
-      @Value("${datastreaming.launcher.kafka-streams.image}") String kafkaStreamsImage,
-      @Value("${datastreaming.launcher.kafka-streams.command}") String kafkaStreamsCommand,
+      @Value("${datastreaming.launcher.engine}") String engine,
+      @Value("${datastreaming.launcher.pekko.image:}") String pekkoImage,
+      @Value("${datastreaming.launcher.pekko.command:}") String pekkoCommand,
+      @Value("${datastreaming.launcher.kafka-streams.image:}") String kafkaStreamsImage,
+      @Value("${datastreaming.launcher.kafka-streams.command:}") String kafkaStreamsCommand,
+      @Value("${datastreaming.launcher.loader.image:}") String loaderImage,
+      @Value("${datastreaming.launcher.loader.command:}") String loaderCommand,
       @Value("${datastreaming.launcher.k8s.image-pull-secrets}") String pullSecrets,
       @Value("${datastreaming.launcher.k8s.host-aliases}") String hostAliases,
       @Value("${datastreaming.launcher.spark.image:}") String sparkImage,
       @Value("${datastreaming.launcher.spark.command:}") String sparkCommand,
-      @Value("${datastreaming.launcher.kafka.bootstrap-servers:}") String kafkaBootstrapServers) {
+      @Value("${datastreaming.launcher.kafka.bootstrap-servers:}") String kafkaBootstrapServers,
+      @Value("${datastreaming.launcher.journal.env:}") String journalEnv,
+      @Value("${datastreaming.launcher.journal.secret-env:}") String journalSecretEnv,
+      @Value("${datastreaming.launcher.journal.database-proxy.image:}") String databaseProxyImage,
+      @Value("${datastreaming.launcher.journal.database-proxy.instance-secret:}")
+          String databaseProxyInstanceSecret,
+      @Value("${datastreaming.launcher.journal.database-proxy.service-account:}")
+          String databaseProxyServiceAccount) {
     return new DirectIngestionLauncher(
         policy,
         authorization,
-        pekkoImage,
-        pekkoCommand,
-        kafkaStreamsImage,
-        kafkaStreamsCommand,
+        RunnerImages.configured(
+            engine,
+            pekkoImage,
+            pekkoCommand,
+            kafkaStreamsImage,
+            kafkaStreamsCommand,
+            loaderImage,
+            loaderCommand,
+            sparkImage,
+            sparkCommand,
+            kafkaBootstrapServers,
+            journalEnv,
+            journalSecretEnv,
+            databaseProxyImage,
+            databaseProxyInstanceSecret,
+            databaseProxyServiceAccount),
         commaSeparatedList(pullSecrets),
-        commaSeparatedMap(hostAliases),
-        blankToNull(sparkImage),
-        blankToNull(sparkCommand),
-        blankToNull(kafkaBootstrapServers));
+        commaSeparatedMap(hostAliases));
   }
 
   @Singleton

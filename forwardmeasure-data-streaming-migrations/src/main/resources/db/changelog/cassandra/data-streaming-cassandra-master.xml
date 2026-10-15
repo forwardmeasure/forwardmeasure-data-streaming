@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Licensed to the Apache Software Foundation (ASF) under one or more
+    contributor license agreements. See the NOTICE file distributed with
+    this work for additional information regarding copyright ownership.
+    The ASF licenses this file to You under the Apache License, Version 2.0
+    (the "License"); you may not use this file except in compliance with
+    the License. You may obtain a copy of the License at
+
+        https://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+-->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+    <!-- pekko-cassandra installations: FDS's own journal and snapshot keyspaces, with the same
+         table shapes pekko-persistence-cassandra and fowf's keyspaces use. -->
+    <changeSet id="data-streaming-cassandra-010-journal-keyspace" author="forwardmeasure" dbms="cassandra">
+        <sql splitStatements="false">CREATE KEYSPACE IF NOT EXISTS datastreaming_journal WITH REPLICATION = {'class': 'NetworkTopologyStrategy', '${replicationDatacenter}': ${replicationFactor}}</sql>
+    </changeSet>
+    <changeSet id="data-streaming-cassandra-011-snapshot-keyspace" author="forwardmeasure" dbms="cassandra">
+        <sql splitStatements="false">CREATE KEYSPACE IF NOT EXISTS datastreaming_snapshot WITH REPLICATION = {'class': 'NetworkTopologyStrategy', '${replicationDatacenter}': ${replicationFactor}}</sql>
+    </changeSet>
+    <changeSet id="data-streaming-cassandra-020-journal-messages" author="forwardmeasure" dbms="cassandra">
+        <sql splitStatements="false">CREATE TABLE IF NOT EXISTS datastreaming_journal.messages (persistence_id text, partition_nr bigint, sequence_nr bigint, timestamp timeuuid, timebucket text, writer_uuid text, ser_id int, ser_manifest text, event_manifest text, event blob, meta_ser_id int, meta_ser_manifest text, meta blob, tags set&lt;text&gt;, PRIMARY KEY ((persistence_id, partition_nr), sequence_nr, timestamp)) WITH gc_grace_seconds = 864000 AND compaction = {'class': 'SizeTieredCompactionStrategy'}</sql>
+    </changeSet>
+    <changeSet id="data-streaming-cassandra-021-journal-tag-views" author="forwardmeasure" dbms="cassandra">
+        <sql splitStatements="false">CREATE TABLE IF NOT EXISTS datastreaming_journal.tag_views (tag_name text, persistence_id text, sequence_nr bigint, timebucket bigint, timestamp timeuuid, tag_pid_sequence_nr bigint, writer_uuid text, ser_id int, ser_manifest text, event_manifest text, event blob, meta_ser_id int, meta_ser_manifest text, meta blob, PRIMARY KEY ((tag_name, timebucket), timestamp, persistence_id, tag_pid_sequence_nr)) WITH gc_grace_seconds = 864000 AND compaction = {'class': 'SizeTieredCompactionStrategy'}</sql>
+    </changeSet>
+    <changeSet id="data-streaming-cassandra-022-journal-tag-write-progress" author="forwardmeasure" dbms="cassandra">
+        <sql splitStatements="false">CREATE TABLE IF NOT EXISTS datastreaming_journal.tag_write_progress (persistence_id text, tag text, sequence_nr bigint, tag_pid_sequence_nr bigint, offset timeuuid, PRIMARY KEY (persistence_id, tag))</sql>
+    </changeSet>
+    <changeSet id="data-streaming-cassandra-023-journal-tag-scanning" author="forwardmeasure" dbms="cassandra">
+        <sql splitStatements="false">CREATE TABLE IF NOT EXISTS datastreaming_journal.tag_scanning (persistence_id text, sequence_nr bigint, PRIMARY KEY (persistence_id))</sql>
+    </changeSet>
+    <changeSet id="data-streaming-cassandra-024-journal-metadata" author="forwardmeasure" dbms="cassandra">
+        <sql splitStatements="false">CREATE TABLE IF NOT EXISTS datastreaming_journal.metadata (persistence_id text PRIMARY KEY, deleted_to bigint, properties map&lt;text,text&gt;)</sql>
+    </changeSet>
+    <changeSet id="data-streaming-cassandra-025-journal-persistence-ids" author="forwardmeasure" dbms="cassandra">
+        <sql splitStatements="false">CREATE TABLE IF NOT EXISTS datastreaming_journal.all_persistence_ids (persistence_id text PRIMARY KEY)</sql>
+    </changeSet>
+    <changeSet id="data-streaming-cassandra-030-snapshots" author="forwardmeasure" dbms="cassandra">
+        <sql splitStatements="false">CREATE TABLE IF NOT EXISTS datastreaming_snapshot.snapshots (persistence_id text, sequence_nr bigint, timestamp bigint, ser_id int, ser_manifest text, snapshot_data blob, snapshot blob, meta_ser_id int, meta_ser_manifest text, meta blob, PRIMARY KEY (persistence_id, sequence_nr)) WITH CLUSTERING ORDER BY (sequence_nr DESC) AND gc_grace_seconds = 864000 AND compaction = {'class': 'SizeTieredCompactionStrategy'}</sql>
+    </changeSet>
+</databaseChangeLog>

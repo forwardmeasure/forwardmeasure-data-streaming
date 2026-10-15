@@ -112,6 +112,17 @@ final class ContinuousKafkaStreamsConsumerRunner {
                         IngestionPipeline.MalformedRecordPolicy.from(plan.errors()),
                         null))
             .filter((key, record) -> record != null);
+    if (plan.transforms() != null) {
+      mapped =
+          KafkaStreamsGraph.attach(
+              builder,
+              mapped,
+              plan.transforms(),
+              plan.blockingField(),
+              plan.sources().get(0).sourceKey(),
+              IngestionPipeline.MalformedRecordPolicy.from(plan.errors()),
+              "fds-graph");
+    }
 
     // One SinkRowWriter per stream-thread partition group, not per record - KafkaStreams#foreach
     // runs on the processing thread, so a single shared writer (real HTTP client, real per-call

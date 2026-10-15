@@ -27,8 +27,13 @@ import java.util.Objects;
  * Kafka topic (see the repo's own gap-bridging plan, "Spark: an optional distributed compute
  * stage") - {@code SparkSinks#writeKafka} is the only sink-write path a Spark stage ever uses; it
  * never writes to {@link ExecutionPlan#destination()} directly.
+ *
+ * <p>{@code graphSteps} is how many of the plan's transform-graph steps, from the entry step, run
+ * in the Spark stage: through the last step that uses a {@code HEAVY} transform, so every such step
+ * runs at Spark scale; zero when only the sources' mappers need Spark. The delivery engine runs the
+ * steps after them.
  */
-public record SparkStagePlan(List<String> transformNames, String handoffTopic) {
+public record SparkStagePlan(List<String> transformNames, String handoffTopic, int graphSteps) {
 
   public SparkStagePlan {
     transformNames = transformNames == null ? List.of() : List.copyOf(transformNames);
@@ -39,5 +44,18 @@ public record SparkStagePlan(List<String> transformNames, String handoffTopic) {
     if (handoffTopic.isBlank()) {
       throw new IllegalArgumentException("handoffTopic must not be blank");
     }
+    if (graphSteps < 0) {
+      throw new IllegalArgumentException("graphSteps must not be negative");
+    }
+  }
+
+  /** A Spark stage that runs only the sources' mappers. */
+  public SparkStagePlan(List<String> transformNames, String handoffTopic) {
+    this(transformNames, handoffTopic, 0);
+  }
+
+  /** The same stage, handing off to {@code topic}. */
+  public SparkStagePlan withHandoffTopic(String topic) {
+    return new SparkStagePlan(transformNames, topic, graphSteps);
   }
 }

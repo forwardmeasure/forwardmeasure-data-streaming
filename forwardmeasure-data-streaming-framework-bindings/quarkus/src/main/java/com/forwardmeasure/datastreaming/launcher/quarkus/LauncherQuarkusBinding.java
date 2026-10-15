@@ -22,6 +22,7 @@ import com.forwardmeasure.authzen.AuthorizationService;
 import com.forwardmeasure.authzen.client.AuthzenAuthorizationFactory;
 import com.forwardmeasure.datastreaming.launcher.application.DirectIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.IngestionJobPolicy;
+import com.forwardmeasure.datastreaming.launcher.application.RunnerImages;
 import com.forwardmeasure.datastreaming.launcher.application.WorkflowIngestionLauncher;
 import com.forwardmeasure.datastreaming.launcher.application.auth.TenantWorkflowExecutions;
 import com.forwardmeasure.datastreaming.launcher.jaxrs.IngestionRunResource;
@@ -137,11 +138,16 @@ public class LauncherQuarkusBinding {
   DirectIngestionLauncher directIngestionLauncher(
       IngestionJobPolicy policy,
       AuthorizationService authorization,
-      @ConfigProperty(name = "datastreaming.launcher.pekko.image") String pekkoImage,
-      @ConfigProperty(name = "datastreaming.launcher.pekko.command") String pekkoCommand,
-      @ConfigProperty(name = "datastreaming.launcher.kafka-streams.image") String kafkaStreamsImage,
+      @ConfigProperty(name = "datastreaming.launcher.engine") String engine,
+      @ConfigProperty(name = "datastreaming.launcher.pekko.image") Optional<String> pekkoImage,
+      @ConfigProperty(name = "datastreaming.launcher.pekko.command") Optional<String> pekkoCommand,
+      @ConfigProperty(name = "datastreaming.launcher.kafka-streams.image")
+          Optional<String> kafkaStreamsImage,
       @ConfigProperty(name = "datastreaming.launcher.kafka-streams.command")
-          String kafkaStreamsCommand,
+          Optional<String> kafkaStreamsCommand,
+      @ConfigProperty(name = "datastreaming.launcher.loader.image") Optional<String> loaderImage,
+      @ConfigProperty(name = "datastreaming.launcher.loader.command")
+          Optional<String> loaderCommand,
       @ConfigProperty(name = "datastreaming.launcher.k8s.image-pull-secrets")
           Optional<String> pullSecrets,
       @ConfigProperty(name = "datastreaming.launcher.k8s.host-aliases")
@@ -149,19 +155,37 @@ public class LauncherQuarkusBinding {
       @ConfigProperty(name = "datastreaming.launcher.spark.image") Optional<String> sparkImage,
       @ConfigProperty(name = "datastreaming.launcher.spark.command") Optional<String> sparkCommand,
       @ConfigProperty(name = "datastreaming.launcher.kafka.bootstrap-servers")
-          Optional<String> kafkaBootstrapServers) {
+          Optional<String> kafkaBootstrapServers,
+      @ConfigProperty(name = "datastreaming.launcher.journal.env") Optional<String> journalEnv,
+      @ConfigProperty(name = "datastreaming.launcher.journal.secret-env")
+          Optional<String> journalSecretEnv,
+      @ConfigProperty(name = "datastreaming.launcher.journal.database-proxy.image")
+          Optional<String> databaseProxyImage,
+      @ConfigProperty(name = "datastreaming.launcher.journal.database-proxy.instance-secret")
+          Optional<String> databaseProxyInstanceSecret,
+      @ConfigProperty(name = "datastreaming.launcher.journal.database-proxy.service-account")
+          Optional<String> databaseProxyServiceAccount) {
     return new DirectIngestionLauncher(
         policy,
         authorization,
-        pekkoImage,
-        pekkoCommand,
-        kafkaStreamsImage,
-        kafkaStreamsCommand,
+        RunnerImages.configured(
+            engine,
+            pekkoImage.orElse(null),
+            pekkoCommand.orElse(null),
+            kafkaStreamsImage.orElse(null),
+            kafkaStreamsCommand.orElse(null),
+            loaderImage.orElse(null),
+            loaderCommand.orElse(null),
+            sparkImage.orElse(null),
+            sparkCommand.orElse(null),
+            kafkaBootstrapServers.orElse(null),
+            journalEnv.orElse(null),
+            journalSecretEnv.orElse(null),
+            databaseProxyImage.orElse(null),
+            databaseProxyInstanceSecret.orElse(null),
+            databaseProxyServiceAccount.orElse(null)),
         commaSeparatedList(pullSecrets.orElse("")),
-        commaSeparatedMap(hostAliases.orElse("")),
-        blankToNull(sparkImage.orElse(null)),
-        blankToNull(sparkCommand.orElse(null)),
-        blankToNull(kafkaBootstrapServers.orElse(null)));
+        commaSeparatedMap(hostAliases.orElse("")));
   }
 
   @Produces

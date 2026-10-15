@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.forwardmeasure.datastreaming.api.DeliveryEngineKind;
 import com.forwardmeasure.datastreaming.api.ExecutionMode;
 import com.forwardmeasure.datastreaming.api.ExecutionPlan;
 import com.forwardmeasure.datastreaming.api.IngestionSpec;
@@ -127,7 +128,7 @@ class PekkoEntrypointContractTest {
   void dispatcherRejectsUndeliveredSparkStagesAndWrongCardinalityBeforeAnySourceRead(
       @TempDir Path directory) throws Exception {
     var spec = spec(directory, false, false);
-    var original = ExecutionPlanCompiler.compile(spec);
+    var original = ExecutionPlanCompiler.compile(spec, DeliveryEngineKind.PEKKO_STREAMS);
     var system = ActorSystem.create("dispatch-contract");
     try {
       var engine = new PekkoStreamsDeliveryEngine(system);
@@ -136,8 +137,7 @@ class PekkoEntrypointContractTest {
               original.profile(),
               original.sources(),
               null,
-              Optional.of(
-                  new SparkStagePlan(List.of("screen_against_worldcheck_reference"), "handoff")),
+              Optional.of(new SparkStagePlan(List.of("test_screen_against_reference"), "handoff")),
               null,
               original.destination(),
               null,

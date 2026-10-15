@@ -29,7 +29,7 @@ import java.util.Map;
  * (ingestion-service-application's {@code mapping} package) - the shape is unchanged, not
  * redesigned, per D3 (corrected 2026-09-12) in the design plan: that engine already generalizes
  * data-fabric's {@code MappingConfig} into one target-schema-agnostic rule list, dispatched through
- * a flat {@code NamedTransformRegistry} with no arity-based branching. Reusing it here means a new
+ * a flat catalog of named transforms with no arity-based branching. Reusing it here means a new
  * source is onboarded by writing a new YAML spec, never by generating or compiling new Java code -
  * the entire point of keeping this off MapStruct.
  *
@@ -54,20 +54,20 @@ public record TransformSpec(
    *       placeholders (e.g. {@code "{LAST NAME}, {FIRST NAME}"}), resolved before any transform
    *       runs.
    *   <li>{@code inputs} - the general multi-input case for a named transform that reads more than
-   *       one source column (e.g. {@code classify_party_kind}'s {@code value}/{@code
-   *       entity_indicator} pair).
+   *       one source column (e.g. {@code normalise_identifier}'s {@code scheme}/{@code value}
+   *       pair).
    * </ul>
    *
    * <p>When {@code repeated} is true, every rule sharing the same {@code target} contributes one
    * element to an array at that target; otherwise a rule sets its target directly. When {@code
-   * repeated} is true AND {@code metadata} is non-empty (added 2026-09-14, a real gap found trying
-   * to port {@code entity-intelligence-specifications}' own real WorldCheck mapping - its {@code
-   * names}/{@code identifiers} fields need each repeated element to carry its own fixed per-rule
-   * tag, e.g. {@code name_type: PRIMARY} or {@code scheme: SSN}, alongside the resolved value; a
-   * bare accumulated value had no way to express that), each contributed list element is a {@code
-   * Map<String,Object>} - {@code metadata}'s own entries plus {@code "value"} set to the rule's
-   * resolved value - instead of the bare resolved value. {@code metadata} absent/empty preserves
-   * the original bare-value behavior exactly, so no existing spec's output shape changes.
+   * repeated} is true AND {@code metadata} is non-empty (added 2026-09-14, a real gap found porting
+   * a real provider mapping - its {@code names}/{@code identifiers} fields need each repeated
+   * element to carry its own fixed per-rule tag, e.g. {@code name_type: PRIMARY} or {@code scheme:
+   * SSN}, alongside the resolved value; a bare accumulated value had no way to express that), each
+   * contributed list element is a {@code Map<String,Object>} - {@code metadata}'s own entries plus
+   * {@code "value"} set to the rule's resolved value - instead of the bare resolved value. {@code
+   * metadata} absent/empty preserves the original bare-value behavior exactly, so no existing
+   * spec's output shape changes.
    *
    * <p>{@code raw} (added 2026-09-25): when {@code true}, {@code source} is read via {@code
    * SourceRow#getRaw} (forwardmeasure-data-streaming-mappers - not linked here to avoid a circular

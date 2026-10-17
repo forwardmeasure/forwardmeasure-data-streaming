@@ -5,6 +5,12 @@ why, and what to check. The design and the user's decisions are in
 `fds-generic-engine-plan-2026-10-14.md` in this directory. Read its "Decisions" and
 "Implementation record" sections first.
 
+**Current FEI coordination, 2026-10-15:** lifecycle/deletion, customer-master identity and the
+directory are owned by the
+[consolidated FEI implementation plan](../../forwardmeasure-entity-intelligence/docs/fei-lifecycle-identity-and-entity-directory-implementation-plan-2026-10-15.md).
+This review handover retains the historical engine-change scope. Its statements about another
+agent handling GEMS work do not supersede that current FEI ownership.
+
 Nothing is committed. Every repo is on its working branch with uncommitted changes. Some of those
 changes belong to other work in progress; section 9 says which parts are **not** this change set.
 

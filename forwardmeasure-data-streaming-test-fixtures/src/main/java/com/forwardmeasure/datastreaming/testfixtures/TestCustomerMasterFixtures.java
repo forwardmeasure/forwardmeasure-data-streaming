@@ -33,7 +33,7 @@ import java.util.Map;
  * an invented shape. {@link #SAMPLE_CSV}'s 4 rows are real, unmodified rows sliced directly out of
  * a real customer-master POV dataset (~175k + ~45k rows total, path likewise withheld) - two {@code
  * Individual} rows (one with SSN/DOB/location populated, one with almost every optional field
- * blank), one well-populated organisation row (all 3 structured locations, KYC_ID, a single LEI
+ * blank), one well-populated organisation row (all 3 structured locations, GEMS_ID, a single LEI
  * identifier pair, incorporation date, every business-relationship field populated), and one {@code
  * Trust (Corp & Ind)} row with a populated {@code TRADE_AS_NAME} alias - chosen to exercise every
  * field rule at least once, the same coverage reasoning {@link WorldCheckFixtures#SAMPLE_TSV}
@@ -51,7 +51,7 @@ public final class TestCustomerMasterFixtures {
   private TestCustomerMasterFixtures() {}
 
   private static final String HEADER =
-      "ENTITYS_UNIQUE_ID|BUSINESS_ENTITY_RECORD_ID|KYC_ID|ENTITYS_FULL_NAME|ENTITY_PREFIX|"
+      "ENTITYS_UNIQUE_ID|BUSINESS_ENTITY_RECORD_ID|GEMS_ID|ENTITYS_FULL_NAME|ENTITY_PREFIX|"
           + "ENTITY_FIRST_NAME|ENTITY_MIDDLE_NAME|ENTITY_LAST_NAME|ENTITY_SUFFIX|TRADE_AS_NAME|"
           + "FORMER_NAME|ENTITY_LOCATION_1_ADDRESS_LINE_1|ENTITY_LOCATION_1_ADDRESS_LINE_2|"
           + "ENTITY_LOCATION_1_CITY|ENTITY_LOCATION_1_STATE_PROVINCE|ENTITY_LOCATION_1_COUNTRY|"
@@ -89,7 +89,7 @@ public final class TestCustomerMasterFixtures {
           + "Customer Master Global Markets, LLC:United States (the);||||Associated Third Party||"
           + "Chui-Lung Chang|||";
 
-  /** Organisation (Mutual Fund), cm-3: all 3 locations, KYC_ID, a single LEI identifier pair. */
+  /** Organisation (Mutual Fund), cm-3: all 3 locations, GEMS_ID, a single LEI identifier pair. */
   private static final String ROW_ORGANIZATION_ALL_LOCATIONS =
       "KYC22438AML|0134e358-9af0-4150-a210-90761b91143e|202238556|iShares V Public Limited Company"
           + " - iShares J.P. Morgan $ EM Corp Bond UCITS ETF||||||||J.P. Morgan, 200 Capital"

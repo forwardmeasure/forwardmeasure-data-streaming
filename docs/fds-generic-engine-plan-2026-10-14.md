@@ -3,9 +3,12 @@
 **For:** the agent implementing this across `forwardmeasure-platform`, `forwardmeasure-entity-matching`,
 `forwardmeasure-data-streaming` (FDS) and `forwardmeasure-entity-intelligence` (FEI).
 
-**Customer-master identity addendum:**
+**Customer-master identity coordination, updated 2026-10-15:**
 [`customer-master-entity-identifier-handover-2026-10-14.md`](../../forwardmeasure-entity-intelligence/docs/customer-master-entity-identifier-handover-2026-10-14.md)
-belongs in this change set. Codex reviewed M5 and §6 on 2026-10-14: declared entity identifiers
+has its implementation coordinated through the
+[combined FEI lifecycle identity and entity directory plan](../../forwardmeasure-entity-intelligence/docs/fei-lifecycle-identity-and-entity-directory-implementation-plan-2026-10-15.md),
+at the owner's direction. This changes coordination, not the accepted identity behavior or this
+plan's generic-engine scope. Codex reviewed M5 and §6 on 2026-10-14: declared entity identifiers
 match across the tenant by their qualified key, and qualified DID aliases enforce ownership,
 with explicit retries of losing batch transactions. Rows sharing `GEMS_ID`, or sharing a
 `BUSINESS_ENTITY_RECORD_ID` when GEMS is absent, resolve to one entity while retaining per-row

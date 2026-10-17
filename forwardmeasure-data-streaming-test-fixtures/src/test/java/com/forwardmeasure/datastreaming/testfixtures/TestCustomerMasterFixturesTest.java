@@ -73,7 +73,7 @@ class TestCustomerMasterFixturesTest {
   void sampleCsvHasTheRealFiveRowShape() {
     String[] lines = TestCustomerMasterFixtures.SAMPLE_CSV.split("\n");
     assertEquals(5, lines.length, "header + 4 real rows");
-    assertTrue(lines[0].startsWith("ENTITYS_UNIQUE_ID|BUSINESS_ENTITY_RECORD_ID|KYC_ID"));
+    assertTrue(lines[0].startsWith("ENTITYS_UNIQUE_ID|BUSINESS_ENTITY_RECORD_ID|GEMS_ID"));
   }
 
   @Test

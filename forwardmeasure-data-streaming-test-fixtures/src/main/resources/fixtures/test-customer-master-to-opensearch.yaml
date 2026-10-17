@@ -85,7 +85,7 @@ sources:
         - target: identifiers
           inputs:
             business_entity_record_id: BUSINESS_ENTITY_RECORD_ID
-            kyc_id: KYC_ID
+            raw_domain_unique_id: GEMS_ID
             entity_public_identifier: ENTITY_PUBLIC_IDENTIFIER
           transform: test_build_customer_master_identifiers
           optional: true

@@ -206,7 +206,7 @@ class TestTransformsTest {
             Map.of(
                 "business_entity_record_id",
                 "0134e358-9af0-4150-a210-90761b91143e",
-                "kyc_id",
+                "raw_domain_unique_id",
                 "202238556",
                 "entity_public_identifier",
                 "{LEI}549300Y4ZFSCU6XVGF08"));
@@ -215,7 +215,7 @@ class TestTransformsTest {
     assertEquals(
         "TEST_CUSTOMER_MASTER_BUSINESS_ENTITY_RECORD_ID", identifiers.get(0).get("scheme"));
     assertEquals("0134e358-9af0-4150-a210-90761b91143e", identifiers.get(0).get("value"));
-    assertEquals("TEST_CUSTOMER_MASTER_KYC_ID", identifiers.get(1).get("scheme"));
+    assertEquals("TEST_CUSTOMER_MASTER_GEMS_ID", identifiers.get(1).get("scheme"));
     assertEquals("202238556", identifiers.get(1).get("value"));
     assertEquals("LEI", identifiers.get(2).get("scheme"));
     assertEquals("549300Y4ZFSCU6XVGF08", identifiers.get(2).get("value"));

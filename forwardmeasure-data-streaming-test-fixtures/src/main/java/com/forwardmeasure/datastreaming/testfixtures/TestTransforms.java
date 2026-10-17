@@ -254,9 +254,9 @@ public final class TestTransforms {
           customerMasterIdentifier(
               "TEST_CUSTOMER_MASTER_BUSINESS_ENTITY_RECORD_ID", businessEntityRecordId, null));
     }
-    String kycId = inputs.get("kyc_id");
+    String kycId = inputs.get("raw_domain_unique_id");
     if (!isBlank(kycId)) {
-      result.add(customerMasterIdentifier("TEST_CUSTOMER_MASTER_KYC_ID", kycId, null));
+      result.add(customerMasterIdentifier("TEST_CUSTOMER_MASTER_GEMS_ID", kycId, null));
     }
     for (NamedTransformFunctions.ParsedIdentifier parsed :
         NamedTransformFunctions.parse_identifier_pairs(inputs.get("entity_public_identifier"))) {

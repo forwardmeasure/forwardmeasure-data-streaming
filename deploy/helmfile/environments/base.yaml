@@ -43,7 +43,7 @@ imageVersions:
       micronaut: forwardmeasure/data-streaming-launcher-micronaut
     tag: "1.1.0"
     digests:
-      quarkus: "sha256:6c011051ada25cb695fe317386ca1b29639d303b44e655575c517b2d5f327081"
+      quarkus: "sha256:48b761077aa34721239f846fdbfa6ed8a095dfddcde38da059231a013569145d"
       spring: ""
       micronaut: ""
   pekko:

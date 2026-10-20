@@ -94,6 +94,7 @@
     <module>forwardmeasure-data-streaming-migrations</module>
     <module>forwardmeasure-data-streaming-executor-pekko</module>
     <module>forwardmeasure-data-streaming-executor-spark</module>
+    <module>forwardmeasure-data-streaming-spark-runtime</module>
     <module>forwardmeasure-data-streaming-executor-streaming-api</module>
     <module>forwardmeasure-data-streaming-executor-kafka-streams</module>
     <module>forwardmeasure-data-streaming-launcher-application</module>
@@ -106,6 +107,11 @@
 
   <dependencyManagement>
     <dependencies>
+      <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>forwardmeasure-data-streaming-spark-runtime</artifactId>
+        <version>${project.version}</version>
+      </dependency>
       <!-- This org's own libraries this module deliberately reuses rather than reimplements
            (see the manifesto, Principles 2/3/9, and the plan's D5/D6/D9 decisions). -->
 

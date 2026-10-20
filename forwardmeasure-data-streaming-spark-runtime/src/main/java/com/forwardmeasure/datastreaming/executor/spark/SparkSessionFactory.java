@@ -44,8 +44,18 @@ public final class SparkSessionFactory {
   private SparkSessionFactory() {}
 
   public static SparkSession create(String appName, SparkExecutorConfig config) {
+    return create(appName, config, Map.of());
+  }
+
+  /**
+   * Applies trusted deployment settings before session creation; the explicit runtime policy wins.
+   */
+  public static SparkSession create(
+      String appName, SparkExecutorConfig config, Map<String, String> extraConfiguration) {
     SparkSession.Builder builder = SparkSession.builder().appName(appName).master(config.master());
+    extraConfiguration.forEach(builder::config);
     sparkConfigProperties(config).forEach(builder::config);
+    builder.appName(appName).master(config.master());
     return builder.getOrCreate();
   }
 

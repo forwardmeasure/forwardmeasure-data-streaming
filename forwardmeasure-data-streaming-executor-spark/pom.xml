@@ -149,6 +149,8 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-jar-plugin</artifactId>
         <configuration>
+          <!-- Dependency-only changes must refresh the manifest as well as dependency/. -->
+          <forceCreation>true</forceCreation>
           <archive>
             <manifest>
               <mainClass>com.forwardmeasure.datastreaming.executor.spark.SparkStageRunner</mainClass>

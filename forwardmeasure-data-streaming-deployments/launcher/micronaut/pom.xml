@@ -21,9 +21,9 @@
   <modelVersion>4.0.0</modelVersion>
   <parent>
     <groupId>com.forwardmeasure.datastreaming</groupId>
-    <artifactId>forwardmeasure-data-streaming-deployments</artifactId>
+    <artifactId>forwardmeasure-data-streaming-deployments-micronaut-parent</artifactId>
     <version>${revision}</version>
-    <relativePath>../../pom.xml</relativePath>
+    <relativePath>../../parents/micronaut/pom.xml</relativePath>
   </parent>
   <artifactId>forwardmeasure-data-streaming-launcher-micronaut-service</artifactId>
   <name>ForwardMeasure Data Streaming :: Deployments :: Launcher :: Micronaut</name>
@@ -34,17 +34,6 @@
   <properties>
     <container-image.name>data-streaming-launcher-micronaut</container-image.name>
   </properties>
-  <dependencyManagement>
-    <dependencies>
-      <dependency>
-        <groupId>com.forwardmeasure.platform</groupId>
-        <artifactId>forwardmeasure-platform-micronaut-bom</artifactId>
-        <version>${forwardmeasure.platform.version}</version>
-        <type>pom</type>
-        <scope>import</scope>
-      </dependency>
-    </dependencies>
-  </dependencyManagement>
   <dependencies>
     <dependency>
       <groupId>${project.groupId}</groupId>
@@ -271,12 +260,12 @@
           <archive>
             <manifest>
               <mainClass>com.forwardmeasure.datastreaming.launcher.micronaut.deployment.LauncherMicronautApplication</mainClass>
-              <addClasspath>true</addClasspath>
-              <classpathPrefix>dependency/</classpathPrefix>
             </manifest>
           </archive>
         </configuration>
-      </plugin>
+        <!-- The manifest Class-Path lives only on the runnable jar the image runs; the main jar is what other modules depend on, and a Class-Path there would pull every runtime dependency into their classpaths. -->
+        <executions><execution><id>runnable-jar</id><phase>package</phase><goals><goal>jar</goal></goals><configuration><classifier>runnable</classifier><archive><manifest><mainClass>com.forwardmeasure.datastreaming.launcher.micronaut.deployment.LauncherMicronautApplication</mainClass><addClasspath>true</addClasspath><classpathPrefix>dependency/</classpathPrefix></manifest></archive></configuration></execution></executions>
+    </plugin>
     </plugins>
   </build>
   <profiles>
@@ -295,7 +284,7 @@
                     <contextDir>${project.basedir}</contextDir>
                     <dockerFile>src/main/docker/Dockerfile.jvm</dockerFile>
                     <args>
-                      <APPLICATION_JAR>target/${project.build.finalName}.jar</APPLICATION_JAR>
+                      <APPLICATION_JAR>target/${project.build.finalName}-runnable.jar</APPLICATION_JAR>
                       <DEPENDENCY_DIR>target/dependency</DEPENDENCY_DIR>
                       <BASE_IMAGE>${container-image.base-jre}</BASE_IMAGE>
                     </args>

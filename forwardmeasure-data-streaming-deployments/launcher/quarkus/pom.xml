@@ -21,9 +21,9 @@
   <modelVersion>4.0.0</modelVersion>
   <parent>
     <groupId>com.forwardmeasure.datastreaming</groupId>
-    <artifactId>forwardmeasure-data-streaming-deployments</artifactId>
+    <artifactId>forwardmeasure-data-streaming-deployments-quarkus-parent</artifactId>
     <version>${revision}</version>
-    <relativePath>../../pom.xml</relativePath>
+    <relativePath>../../parents/quarkus/pom.xml</relativePath>
   </parent>
   <artifactId>forwardmeasure-data-streaming-launcher-quarkus-service</artifactId>
   <name>ForwardMeasure Data Streaming :: Deployments :: Launcher :: Quarkus</name>
@@ -34,17 +34,6 @@
   <properties>
     <container-image.name>data-streaming-launcher-quarkus</container-image.name>
   </properties>
-  <dependencyManagement>
-    <dependencies>
-      <dependency>
-        <groupId>com.forwardmeasure.platform</groupId>
-        <artifactId>forwardmeasure-platform-quarkus-bom</artifactId>
-        <version>${forwardmeasure.platform.version}</version>
-        <type>pom</type>
-        <scope>import</scope>
-      </dependency>
-    </dependencies>
-  </dependencyManagement>
   <dependencies>
     <dependency>
       <groupId>${project.groupId}</groupId>

@@ -80,6 +80,11 @@
   </properties>
 
   <modules>
+    <module>parents/micronaut</module>
+    <module>parents/spring</module>
+    <module>parents/quarkus</module>
+    <module>parents/spark</module>
+    <module>parents/neutral</module>
     <module>forwardmeasure-data-streaming-bom</module>
     <module>forwardmeasure-data-streaming-api</module>
     <module>forwardmeasure-data-streaming-transforms</module>
@@ -118,103 +123,103 @@
 
 
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-api</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-transforms</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-mappers</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-test-fixtures</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-core</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-connector-camel</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-source-readers</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-loader</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-migrations</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-connector-jdbc</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-connector-object-storage</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-executor-pekko</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-executor-spark</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-executor-streaming-api</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-executor-kafka-streams</artifactId>
         <version>${project.version}</version>
       </dependency>
 
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-launcher-application</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-launcher-jaxrs</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-launcher-quarkus-bindings</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-launcher-spring-bindings</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-launcher-micronaut-bindings</artifactId>
         <version>${project.version}</version>
       </dependency>

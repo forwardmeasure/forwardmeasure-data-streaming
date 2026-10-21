@@ -37,6 +37,9 @@
     deployable split. If that ever changes (see the design plan's D4 note on a possible future
     continuous/always-on execution mode), their own deployment leaves would belong here too.</description>
   <modules>
+    <module>parents/micronaut</module>
+    <module>parents/spring</module>
+    <module>parents/quarkus</module>
     <module>launcher/quarkus</module>
     <module>launcher/spring</module>
     <module>launcher/micronaut</module>

@@ -113,7 +113,7 @@
   <dependencyManagement>
     <dependencies>
       <dependency>
-        <groupId>${project.groupId}</groupId>
+        <groupId>com.forwardmeasure.datastreaming</groupId>
         <artifactId>forwardmeasure-data-streaming-spark-runtime</artifactId>
         <version>${project.version}</version>
       </dependency>

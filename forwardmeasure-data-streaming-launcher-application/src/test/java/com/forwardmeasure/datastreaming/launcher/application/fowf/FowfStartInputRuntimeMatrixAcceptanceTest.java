@@ -84,6 +84,8 @@ class FowfStartInputRuntimeMatrixAcceptanceTest {
       String api = endpoint(execution);
       String token = caller(runtime, runtime.organizationId(), "start-a");
       String otherToken = caller(runtime, otherOrganization, "start-b");
+      // New Organization members act only once the tenant-access Job has provisioned them.
+      runtime.reconcileTenantAccess();
       UUID revision = publish(definition, token, workflow(false));
 
       for (int bytes : new int[] {32767, 32768, 32769, 65536}) {

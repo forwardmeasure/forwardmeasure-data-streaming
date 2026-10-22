@@ -227,6 +227,15 @@
       <exclusions><exclusion><groupId>*</groupId><artifactId>*</artifactId></exclusion></exclusions>
     </dependency>
     <dependency>
+      <!-- The tenant-access reconciliation Job image: provisions the fixture's callers as actors. -->
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-tenant-provisioning</artifactId>
+      <version>${forwardmeasure.openworkflow.version}</version>
+      <type>pom</type>
+      <scope>test</scope>
+      <exclusions><exclusion><groupId>*</groupId><artifactId>*</artifactId></exclusion></exclusions>
+    </dependency>
+    <dependency>
       <groupId>com.forwardmeasure.openworkflow</groupId>
       <artifactId>openworkflow-execution-management-quarkus-service</artifactId>
       <version>${forwardmeasure.openworkflow.version}</version>

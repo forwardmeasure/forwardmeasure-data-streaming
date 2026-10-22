@@ -17,7 +17,12 @@
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0">
   <modelVersion>4.0.0</modelVersion>
-  <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-parent</artifactId><version>${revision}</version></parent>
+  <parent>
+    <groupId>com.forwardmeasure.datastreaming</groupId>
+    <artifactId>forwardmeasure-data-streaming-spark-parent</artifactId>
+    <version>${revision}</version>
+    <relativePath>../parents/spark/pom.xml</relativePath>
+  </parent>
   <artifactId>forwardmeasure-data-streaming-executor-spark</artifactId>
   <name>ForwardMeasure Data Streaming Spark Executor</name>
   <description>Distributed/correlation executor - generalizes what
@@ -154,15 +159,15 @@
           <archive>
             <manifest>
               <mainClass>com.forwardmeasure.datastreaming.executor.spark.SparkStageRunner</mainClass>
-              <addClasspath>true</addClasspath>
-              <classpathPrefix>dependency/</classpathPrefix>
             </manifest>
             <!-- extensions/ lets a product (or a test image) add classes such as its own
                  NamedTransformProvider without rebuilding this image. -->
             <manifestEntries><Class-Path>extensions/</Class-Path></manifestEntries>
           </archive>
         </configuration>
-      </plugin>
+        <!-- The manifest Class-Path lives only on the runnable jar the image runs; the main jar is what other modules depend on, and a Class-Path there would pull every runtime dependency into their classpaths. -->
+        <executions><execution><id>runnable-jar</id><phase>package</phase><goals><goal>jar</goal></goals><configuration><classifier>runnable</classifier><archive><manifest><mainClass>com.forwardmeasure.datastreaming.executor.spark.SparkStageRunner</mainClass><addClasspath>true</addClasspath><classpathPrefix>dependency/</classpathPrefix></manifest></archive></configuration></execution></executions>
+    </plugin>
     </plugins>
   </build>
 
@@ -182,7 +187,7 @@
                     <contextDir>${project.basedir}</contextDir>
                     <dockerFile>src/main/docker/Dockerfile.jvm</dockerFile>
                     <args>
-                      <APPLICATION_JAR>target/${project.build.finalName}.jar</APPLICATION_JAR>
+                      <APPLICATION_JAR>target/${project.build.finalName}-runnable.jar</APPLICATION_JAR>
                       <DEPENDENCY_DIR>target/dependency</DEPENDENCY_DIR>
                       <BASE_IMAGE>${container-image.base-jre}</BASE_IMAGE>
                     </args>

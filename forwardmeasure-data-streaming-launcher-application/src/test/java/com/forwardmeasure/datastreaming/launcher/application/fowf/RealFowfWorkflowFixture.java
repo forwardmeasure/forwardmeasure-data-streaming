@@ -90,6 +90,10 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
           System.getProperty("openworkflow.image.tag"), "openworkflow.image.tag");
   private static final String MIGRATIONS_IMAGE =
       "forwardmeasure/openworkflow-migrations:" + FOWF_IMAGE_TAG;
+  // FOWF's tenant reconciliation Job image; its tenant-access scope is how Organization members
+  // become actors (FOWF never creates an actor on first sight - an unknown caller gets 403).
+  private static final String TENANT_PROVISIONING_IMAGE =
+      "forwardmeasure/openworkflow-tenant-provisioning:" + FOWF_IMAGE_TAG;
   static final String EXECUTION_MANAGEMENT_IMAGE =
       "forwardmeasure/openworkflow-execution-management-quarkus:" + FOWF_IMAGE_TAG;
   static final String ENGINE_KAFKA_STREAMS_IMAGE =
@@ -136,6 +140,16 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
   private static final String KUBECONFIG_CONTAINER_PATH = "/deployments/kubeconfig.yaml";
   private static final String RUNTIME_DATABASE_USERNAME = "openworkflow_runtime";
   private static final String RUNTIME_DATABASE_PASSWORD = "openworkflow-runtime-test-only";
+  // The tenant-access role: a role of its own (the migrations Job refuses one equal to the admin
+  // or runtime role). The migrations Job creates it and grants it actor provisioning; the
+  // tenant-access Job connects as it.
+  private static final String TENANT_ACCESS_DATABASE_USERNAME = "openworkflow_tenant_access";
+  private static final String TENANT_ACCESS_DATABASE_PASSWORD =
+      "openworkflow-tenant-access-test-only";
+  // KeycloakTestContainer's bootstrap administrator (KC_BOOTSTRAP_ADMIN_*), what the deployed
+  // tenant-access Job reads from the identity credentials secret.
+  private static final String KEYCLOAK_ADMIN_USERNAME = "admin";
+  private static final String KEYCLOAK_ADMIN_PASSWORD = "admin-integration-only";
 
   /**
    * The domain every tenant onboarded by this fixture shares - a per-cluster value, not real DNS.
@@ -301,6 +315,9 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
           new RealFowfWorkflowFixture(network, postgres, kafka, keycloak, tenantId, organizationId);
       fixture.tenantAlias = tenantAlias;
       fixture.networkIdentity = networkIdentity;
+      // The Organization's members (the fixture user and the launcher's machine identity) get
+      // their actors the way a deployment gives them: the tenant-access Job, after migrations.
+      fixture.reconcileTenantAccess();
       return fixture;
     } catch (RuntimeException | Error failure) {
       for (AutoCloseable resource : started.reversed()) {
@@ -424,7 +441,55 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
     String organization =
         keycloak.provisionTenant(alias, new Did("did:web:" + alias + "." + TENANT_DOMAIN), role);
     grantRuntimePermissions(keycloak, organization, role);
+    // Every registered tenant needs its Organization before the Job runs (it refuses a tenant
+    // without one), so reconcile only after the Organization and its members exist.
+    reconcileTenantAccess();
     return organization;
+  }
+
+  /**
+   * Runs FOWF's real tenant-access reconciliation Job - the {@code
+   * openworkflow-tenant-provisioning} image with {@code
+   * OPENWORKFLOW_RECONCILIATION_SCOPE=tenant-access}, configured as the deployment's {@code
+   * tenant-access} stage configures it and connecting as the tenant-access database role: every
+   * member of each registered tenant's Keycloak Organization becomes an enabled actor in that
+   * tenant's {@code identity.actor}, and a former member's actor is disabled. FOWF refuses (403)
+   * any caller without an enabled actor and never creates one on first sight, so a test that adds
+   * Organization members after {@link #start} calls this before those members call FOWF.
+   */
+  public void reconcileTenantAccess() {
+    String issuer = hostDockerInternalIssuer();
+    String realmPath = "/realms/" + AuthzenKeycloakFixture.REALM;
+    if (!issuer.endsWith(realmPath)) {
+      throw new IllegalStateException("Unexpected Keycloak issuer shape: " + issuer);
+    }
+    String keycloakUrl = issuer.substring(0, issuer.length() - realmPath.length());
+    LOGGER.info("RealFowfWorkflowFixture: running the tenant-access reconciliation Job");
+    try (GenericContainer<?> tenantAccess =
+        new GenericContainer<>(DockerImageName.parse(TENANT_PROVISIONING_IMAGE))
+            .withNetwork(existingNetwork(network.getId()))
+            .withExtraHost("host.docker.internal", "host-gateway")
+            .withEnv("OPENWORKFLOW_RECONCILIATION_SCOPE", "tenant-access")
+            .withEnv("KEYCLOAK_URL", keycloakUrl)
+            .withEnv("KEYCLOAK_REALM", AuthzenKeycloakFixture.REALM)
+            .withEnv("KEYCLOAK_ADMIN_USERNAME", KEYCLOAK_ADMIN_USERNAME)
+            .withEnv("KEYCLOAK_ADMIN_PASSWORD", KEYCLOAK_ADMIN_PASSWORD)
+            // The AuthZEN resource server and the client whose roles FOWF reads from tokens - the
+            // same pair execution/definition management are configured with above.
+            .withEnv("KEYCLOAK_SHARED_CLIENT_ID", AuthzenKeycloakFixture.AUTHZEN_CLIENT_ID)
+            .withEnv("KEYCLOAK_ORGANIZATION_CLIENT_ID", AuthzenKeycloakFixture.CLIENT_ID)
+            .withEnv("OPENWORKFLOW_CONTROL_PLANE_DATABASE_URL", postgres.networkJdbcUrl())
+            .withEnv(
+                "OPENWORKFLOW_TENANT_ACCESS_DATABASE_USERNAME", TENANT_ACCESS_DATABASE_USERNAME)
+            .withEnv(
+                "OPENWORKFLOW_TENANT_ACCESS_DATABASE_PASSWORD", TENANT_ACCESS_DATABASE_PASSWORD)
+            .withLogConsumer(new Slf4jLogConsumer(LOGGER).withPrefix("openworkflow-tenant-access"))
+            .withStartupCheckStrategy(
+                new OneShotStartupCheckStrategy().withTimeout(Duration.ofMinutes(2)))) {
+      tenantAccess.withImagePullPolicy(image -> false);
+      tenantAccess.start();
+      awaitExit(tenantAccess, "openworkflow-tenant-access");
+    }
   }
 
   private static void grantRuntimePermissions(
@@ -1165,6 +1230,10 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             .withEnv("OPENWORKFLOW_ADMIN_DATABASE_PASSWORD", postgres.password())
             .withEnv("OPENWORKFLOW_RUNTIME_DATABASE_USERNAME", RUNTIME_DATABASE_USERNAME)
             .withEnv("OPENWORKFLOW_RUNTIME_DATABASE_PASSWORD", RUNTIME_DATABASE_PASSWORD)
+            .withEnv(
+                "OPENWORKFLOW_TENANT_ACCESS_DATABASE_USERNAME", TENANT_ACCESS_DATABASE_USERNAME)
+            .withEnv(
+                "OPENWORKFLOW_TENANT_ACCESS_DATABASE_PASSWORD", TENANT_ACCESS_DATABASE_PASSWORD)
             .withEnv("OPENWORKFLOW_TENANT_DOMAIN", TENANT_DOMAIN)
             .withEnv("OPENWORKFLOW_TENANTS", tenantAlias + ":FDS Phase D Test Tenant")
             .withLogConsumer(new Slf4jLogConsumer(LOGGER).withPrefix("openworkflow-migrations"))

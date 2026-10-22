@@ -43,19 +43,19 @@ imageVersions:
       micronaut: forwardmeasure/data-streaming-launcher-micronaut
     tag: "1.1.0"
     digests:
-      quarkus: "sha256:48b761077aa34721239f846fdbfa6ed8a095dfddcde38da059231a013569145d"
+      quarkus: "sha256:11670f2d84708c9097d8444394ff3a3b9376d21654b31516ed6abad09fca1838"
       spring: ""
       micronaut: ""
   pekko:
     repository: docker.io/forwardmeasure/data-streaming-executor-pekko
     tag: "1.1.0"
-    digest: "sha256:a960f6a1cf5d56dbb0f4a8f5f85452281f5f31e1d1eb637c787051896764f810"
+    digest: "sha256:ce239f9aeae1bc18406bdb591468cf68e39f1c2ce7b14ddac463931f2d360b31"
   # Kafka Streams installations only: the bounded-load first stage (forwardmeasure-data-streaming-loader).
   loader:
     repository: docker.io/forwardmeasure/data-streaming-loader
     tag: "1.1.0"
-    digest: "sha256:34ae9117d7d6d3cd84b8126ec3cfceb32869e2000c99986b15703811bd0f9f90"
+    digest: "sha256:1a7b3597726342fae919f8c9bbf32b394a45fe1c9c2f0b61e788993126128320"
   spark:
     repository: docker.io/forwardmeasure/data-streaming-executor-spark
     tag: "1.1.0"
-    digest: "sha256:4d6764c4d62a5808fb2f1631352336caaa6cd5c5330225b16c3ef3516c08911c"
+    digest: "sha256:4c12fd575ab1d381ec91fe51bfa065d5f03bb453b878d120b1d13dfde5ed93b3"

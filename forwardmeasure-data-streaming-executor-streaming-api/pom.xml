@@ -17,7 +17,12 @@
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0">
   <modelVersion>4.0.0</modelVersion>
-  <parent><groupId>com.forwardmeasure.datastreaming</groupId><artifactId>forwardmeasure-data-streaming-parent</artifactId><version>${revision}</version></parent>
+  <parent>
+    <groupId>com.forwardmeasure.datastreaming</groupId>
+    <artifactId>forwardmeasure-data-streaming-neutral-parent</artifactId>
+    <version>${revision}</version>
+    <relativePath>../parents/neutral/pom.xml</relativePath>
+  </parent>
   <artifactId>forwardmeasure-data-streaming-executor-streaming-api</artifactId>
   <name>ForwardMeasure Data Streaming Continuous Stage SPI</name>
   <description>Engine-agnostic boundary for running one StreamingStageSpec continuously - mirrors

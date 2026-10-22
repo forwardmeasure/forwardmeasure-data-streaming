@@ -125,6 +125,8 @@ class FowfRuntimeMatrixAcceptanceTest {
       if (pekko) runtime.awaitPekkoClusterReady(engine, adapter);
       String tokenA = caller(kc, runtime.organizationId(), "matrix-a");
       String tokenB = caller(kc, organizationB, "matrix-b");
+      // New Organization members act only once the tenant-access Job has provisioned them.
+      runtime.reconcileTenantAccess();
       String endpoint = endpoint(execution);
       String effect = "http://host.docker.internal:" + receiver.getAddress().getPort() + "/effect";
       UUID revision = publish(definition, tokenA, workflow(effect));
@@ -144,6 +146,8 @@ class FowfRuntimeMatrixAcceptanceTest {
       kc.addServiceAccountToOrganization(
           runtime.organizationId(), "matrix-denied", "matrix-no-permission");
       kc.grantTokenAudience("matrix-denied", AuthzenKeycloakFixture.CLIENT_ID);
+      // A provisioned member, so the 403 below is the missing permission, not a missing actor.
+      runtime.reconcileTenantAccess();
       request(
           endpoint,
           "/v1/workflow-executions",

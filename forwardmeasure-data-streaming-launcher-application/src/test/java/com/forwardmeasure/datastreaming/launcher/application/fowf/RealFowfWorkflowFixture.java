@@ -809,6 +809,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
             // leg riding the same eventing infrastructure. This workflow genuinely emits a real
             // publish:emit: CloudEvent, so the fix is a real receiver (see startCloudEventsStub(),
             // called at the top of this method), not removing this config.
+            .withEnv("OPENWORKFLOW_CLOUD_EVENTS_TRANSPORT", "http")
             .withEnv(
                 "OPENWORKFLOW_CLOUD_EVENTS_PUBLISH_URL",
                 "http://" + CLOUD_EVENTS_STUB_ALIAS + ":8080/")

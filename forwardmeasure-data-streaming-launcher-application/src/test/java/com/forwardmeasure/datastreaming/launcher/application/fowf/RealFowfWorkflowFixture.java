@@ -174,8 +174,14 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
   private Framework framework = Framework.QUARKUS;
   private boolean networkIdentity;
   private java.util.Map<String, String> overflowEnvironment = java.util.Map.of();
+  private com.forwardmeasure.openworkflow.overflow.testkit.OverflowTestStore.NetworkStore
+      overflowStore;
 
-  /** Configures the production storage client before any runtime service has started. */
+  /**
+   * Configures the production storage client before any runtime service has started. FOWF requires
+   * one: without this call every service gets a store of the fixture's own (S3-compatible, on its
+   * network).
+   */
   public void configureOverflow(String endpoint, String bucket, long threshold, long maximum) {
     if (!services.isEmpty())
       throw new IllegalStateException("Configure overflow before runtime startup");
@@ -643,6 +649,14 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
 
   private void startFrameworkService(GenericContainer<?> service, boolean waitForHealth) {
     configureFramework(service, framework);
+    if (overflowEnvironment.isEmpty()) {
+      overflowStore =
+          com.forwardmeasure.openworkflow.overflow.testkit.OverflowTestStore.onNetwork(
+              network, "fowf-overflow");
+      overflowEnvironment =
+          com.forwardmeasure.openworkflow.overflow.testkit.OverflowTestStore.environment(
+              overflowStore.network());
+    }
     service.withEnv(overflowEnvironment);
     // Pekko engine/adapter bootstrap requires both members, so do not wait for cluster readiness
     // before the other member starts. The caller must still awaitPekkoClusterReady before dispatch.
@@ -1379,6 +1393,7 @@ public final class RealFowfWorkflowFixture implements AutoCloseable {
       kubernetes.close();
     }
     if (cassandra != null) cassandra.close();
+    if (overflowStore != null) overflowStore.close();
     keycloak.close();
     kafka.close();
     postgres.close();

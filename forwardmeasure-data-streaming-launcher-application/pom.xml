@@ -68,6 +68,12 @@
       <artifactId>openworkflow-kafka-streams-testkit</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <!-- RealFowfWorkflowFixture gives every FOWF service the overflow store it requires. -->
+      <groupId>com.forwardmeasure.openworkflow</groupId>
+      <artifactId>openworkflow-protocol-overflow-testkit</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency><groupId>${project.groupId}</groupId><artifactId>forwardmeasure-data-streaming-api</artifactId></dependency>
     <dependency>
       <!-- ExecutionPlanCompiler - the planner DirectIngestionLauncher calls to resolve which
